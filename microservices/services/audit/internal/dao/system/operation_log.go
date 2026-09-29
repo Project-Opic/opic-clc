@@ -1,0 +1,215 @@
+package system
+
+import (
+	"context"
+	"time"
+
+	"gorm.io/gorm"
+
+	localmodel "github.com/sharptoolbox/opic-techbase/services/audit/internal/model"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/authz"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/pagination"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/tenant"
+)
+
+type OperationLogDAO struct {
+	db *gorm.DB
+}
+
+func NewOperationLogDAO(db *gorm.DB) *OperationLogDAO {
+	return &OperationLogDAO{db: db}
+}
+
+func (d *OperationLogDAO) dbWithContext(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return d.db.WithContext(ctx)
+}
+
+func (d *OperationLogDAO) CreateLogContext(ctx context.Context, log *localmodel.OperationLog) error {
+	if log != nil {
+		log.TenantID = tenant.EnsureID(ctx, log.TenantID)
+	}
+	return d.dbWithContext(ctx).Create(log).Error
+}
+
+func (d *OperationLogDAO) GetLogByIDContext(ctx context.Context, id uint) (*localmodel.OperationLog, error) {
+	var log localmodel.OperationLog
+	query := tenant.ApplyFilter(d.dbWithContext(authz.DisableDataScope(ctx)).Model(&localmodel.OperationLog{}), ctx)
+	result := query.Where("id = ?", id).First(&log)
+	return &log, result.Error
+}
+
+func (d *OperationLogDAO) GetLogByIDInScopeContext(ctx context.Context, id uint, dataScope authz.UserDataScope) (*localmodel.OperationLog, error) {
+	var log localmodel.OperationLog
+	query := tenant.ApplyFilter(d.dbWithContext(authz.EnableDataScope(ctx, dataScope)).Model(&localmodel.OperationLog{}), ctx)
+	result := query.Where("id = ?", id).First(&log)
+	return &log, result.Error
+}
+
+func (d *OperationLogDAO) GetLogListContext(
+	ctx context.Context,
+	req pagination.PageRequest,
+	userID *uint,
+	username, actorType, actorID, requestID, method, path, module, action string,
+	status *int,
+	startTime, endTime *time.Time,
+	dataScope authz.UserDataScope,
+) ([]localmodel.OperationLog, int64, error) {
+	var logs []localmodel.OperationLog
+	var total int64
+
+	query := tenant.ApplyFilter(d.dbWithContext(authz.EnableDataScope(ctx, dataScope)).Model(&localmodel.OperationLog{}), ctx)
+	query = applyOperationLogFilters(query, userID, username, actorType, actorID, requestID, method, path, module, action, status, startTime, endTime)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 列表页不展示请求/响应正文（详情另走按 id 接口），这两个 text 列
+	// 单条上限各 4KB，page_size=100 时一页能背 ~800KB——列表裁掉。
+	result := query.
+		Omit("request_body", "response_body").
+		Scopes(pagination.Paginate(req)).
+		Order("created_at DESC").
+		Find(&logs)
+
+	return logs, total, result.Error
+}
+
+func applyOperationLogFilters(
+	query *gorm.DB,
+	userID *uint,
+	username, actorType, actorID, requestID, method, path, module, action string,
+	status *int,
+	startTime, endTime *time.Time,
+) *gorm.DB {
+	if userID != nil {
+		query = query.Where("user_id = ?", *userID)
+	}
+	if username != "" {
+		query = query.Where("username LIKE ?", "%"+username+"%")
+	}
+	if actorType != "" {
+		query = query.Where("actor_type = ?", actorType)
+	}
+	if actorID != "" {
+		query = query.Where("actor_id LIKE ?", "%"+actorID+"%")
+	}
+	if requestID != "" {
+		query = query.Where("request_id = ?", requestID)
+	}
+	if method != "" {
+		query = query.Where("method = ?", method)
+	}
+	if path != "" {
+		query = query.Where("path LIKE ?", "%"+path+"%")
+	}
+	if module != "" {
+		query = query.Where("module = ?", module)
+	}
+	if action != "" {
+		query = query.Where("action LIKE ?", "%"+action+"%")
+	}
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+	return applyTimeRange(query, startTime, endTime)
+}
+
+func (d *OperationLogDAO) DeleteLogsBeforeContext(ctx context.Context, before time.Time) (int64, error) {
+	query := tenant.ApplyFilter(d.dbWithContext(ctx).Model(&localmodel.OperationLog{}), ctx)
+	result := query.Where("created_at < ?", before).Delete(&localmodel.OperationLog{})
+	return result.RowsAffected, result.Error
+}
+
+// DeleteLogsAllTenantsBeforeContext 删除**所有租户**在 before 之前的操作日志。
+// 保留策略后台任务专用：后台协程没有租户上下文，走 ApplyFilter 会回落默认
+// 租户、漏删其余租户。请求链路一律用带租户过滤的 DeleteLogsBeforeContext。
+// tenant.DisableScope 显式声明跨租户语义，防 GORM 租户兜底插件在带租户
+// ctx 的调用方处静默降级为单租户删除。
+func (d *OperationLogDAO) DeleteLogsAllTenantsBeforeContext(ctx context.Context, before time.Time) (int64, error) {
+	result := d.dbWithContext(tenant.DisableScope(ctx)).Where("created_at < ?", before).Delete(&localmodel.OperationLog{})
+	return result.RowsAffected, result.Error
+}
+
+func (d *OperationLogDAO) DeleteLogsBeforeInScopeContext(ctx context.Context, before time.Time, dataScope authz.UserDataScope) (int64, error) {
+	query := tenant.ApplyFilter(d.dbWithContext(ctx).Model(&localmodel.OperationLog{}), ctx).Where("created_at < ?", before)
+	query = authz.ApplyOwnerScope(query, dataScope, "user_id")
+	result := query.Delete(&localmodel.OperationLog{})
+	return result.RowsAffected, result.Error
+}
+
+func (d *OperationLogDAO) GetLogStatsContext(ctx context.Context, startTime, endTime *time.Time) (*LogStats, error) {
+	return d.getLogStatsContext(authz.DisableDataScope(ctx), startTime, endTime)
+}
+
+func (d *OperationLogDAO) GetLogStatsInScopeContext(ctx context.Context, startTime, endTime *time.Time, dataScope authz.UserDataScope) (*LogStats, error) {
+	return d.getLogStatsContext(authz.EnableDataScope(ctx, dataScope), startTime, endTime)
+}
+
+func (d *OperationLogDAO) getLogStatsContext(ctx context.Context, startTime, endTime *time.Time) (*LogStats, error) {
+	stats := &LogStats{ByModule: map[string]int64{}, ByMethod: map[string]int64{}}
+	base := func() *gorm.DB {
+		return tenant.ApplyFilter(d.dbWithContext(ctx).Model(&localmodel.OperationLog{}), ctx)
+	}
+
+	query := applyTimeRange(base(), startTime, endTime)
+	if err := query.Count(&stats.Total).Error; err != nil {
+		return nil, err
+	}
+
+	var moduleStats []struct {
+		Module string `json:"module"`
+		Count  int64  `json:"count"`
+	}
+	if err := applyTimeRange(base(), startTime, endTime).
+		Select("module, count(*) as count").
+		Group("module").
+		Find(&moduleStats).Error; err != nil {
+		return nil, err
+	}
+	for _, s := range moduleStats {
+		stats.ByModule[s.Module] = s.Count
+	}
+
+	var methodStats []struct {
+		Method string `json:"method"`
+		Count  int64  `json:"count"`
+	}
+	if err := applyTimeRange(base(), startTime, endTime).
+		Select("method, count(*) as count").
+		Group("method").
+		Find(&methodStats).Error; err != nil {
+		return nil, err
+	}
+	for _, s := range methodStats {
+		stats.ByMethod[s.Method] = s.Count
+	}
+
+	if err := applyTimeRange(base(), startTime, endTime).
+		Where("status >= 400").
+		Count(&stats.ErrorCount).Error; err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
+func applyTimeRange(query *gorm.DB, startTime, endTime *time.Time) *gorm.DB {
+	if startTime != nil {
+		query = query.Where("created_at >= ?", *startTime)
+	}
+	if endTime != nil {
+		query = query.Where("created_at <= ?", *endTime)
+	}
+	return query
+}
+
+type LogStats struct {
+	Total      int64            `json:"total"`
+	ByModule   map[string]int64 `json:"by_module"`
+	ByMethod   map[string]int64 `json:"by_method"`
+	ErrorCount int64            `json:"error_count"`
+}

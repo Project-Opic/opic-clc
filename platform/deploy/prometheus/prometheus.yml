@@ -1,0 +1,51 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# 告警闭环：规则 → Alertmanager → notify webhook 站内信（rules/alerts.yml）。
+# 脚手架未含 notify-service 时 Alertmanager 投递失败仅记日志，规则评估不受影响。
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["opic-techbase-alertmanager:9093"]
+
+scrape_configs:
+  # 主机指标（磁盘/内存/CPU，node_exporter 挂 / 只读）
+  - job_name: node
+    static_configs:
+      - targets:
+          - opic-techbase-node-exporter:9100
+
+  # Traefik 网关指标（entrypoint/router 级请求量与延迟直方图）。/metrics 随
+  # api.insecure 在容器网络 :8080 暴露，不经网关路由。
+  - job_name: traefik
+    static_configs:
+      - targets:
+          - opic-techbase-gateway:8080
+
+  - job_name: opic-techbase-backend
+    metrics_path: /api/v1/metrics
+    static_configs:
+      - targets:
+          - opic-techbase-monitor:8081  # monitor 服务承载 /api/v1/metrics（原 backend 命名已不存在）
+
+  # 全部业务服务的 HTTP/runtime/DB 池指标（shared/pkg/metrics 统一中间件，
+  # 端点 /metrics 只在容器网络内可达，网关不路由）。service 标签用于看板聚合。
+  - job_name: opic-techbase-services
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["opic-techbase-auth:8082"]
+        labels: { service: auth }
+      - targets: ["opic-techbase-identity:8083"]
+        labels: { service: identity }
+      - targets: ["opic-techbase-system:8084"]
+        labels: { service: system }
+      - targets: ["opic-techbase-audit:8085"]
+        labels: { service: audit }
+      - targets: ["opic-techbase-file:8086"]
+        labels: { service: file }
+      - targets: ["opic-techbase-bpm:8096"]
+        labels: { service: bpm }

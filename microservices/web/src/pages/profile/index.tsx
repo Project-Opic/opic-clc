@@ -1,0 +1,540 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import {
+  Card, Row, Col, Form, Input, Button,
+  Modal, Steps, Space, Avatar, Table, Upload,
+} from 'antd'
+import type { UploadProps } from 'antd'
+import { message } from '@/utils/feedback'
+import { copyToClipboard } from '@/utils/clipboard'
+import {
+  UserOutlined, MailOutlined, PhoneOutlined, HistoryOutlined, SafetyCertificateOutlined,
+  CameraOutlined,
+} from '@ant-design/icons'
+import StatusPill from '@/components/common/StatusPill'
+import GlassEmpty from '@/components/common/GlassEmpty'
+import type { ColumnsType } from 'antd/es/table'
+import { useAppSelector } from '@/hooks/store'
+import {
+  updateProfile, changePassword,
+  generateTotpSetup, enableTotp, disableTotp, regenerateTotpRecoveryCodes,
+} from '@/api/auth'
+import { useAppDispatch } from '@/hooks/store'
+import { fetchCurrentUser } from '@/store/slices/authSlice'
+import { getMyLoginLogs } from '@/api/system/log'
+import type { LoginLog } from '@/types'
+import { formatDateTime } from '@/utils/format'
+import { cleanupOldAvatars, uploadAvatar } from '@/api/system/file'
+
+export default function ProfilePage() {
+  const dispatch = useAppDispatch()
+  const userInfo = useAppSelector((s) => s.auth.userInfo)
+  const { t } = useTranslation()
+
+  const loginLogColumns: ColumnsType<LoginLog> = [
+    { title: t('时间'), dataIndex: 'created_at', width: 140, className: 'cell-time', render: formatDateTime },
+    {
+      title: 'IP',
+      dataIndex: 'ip',
+      width: 110,
+      render: (v: string) => (v ? <span className="cell-mono">{v}</span> : <span className="cell-muted">—</span>),
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      width: 80,
+      render: (v: number) =>
+        v === 1 ? (
+          <StatusPill tone="success" label="成功" pulse={false} />
+        ) : (
+          <StatusPill tone="danger" label="失败" />
+        ),
+    },
+    { title: t('浏览器'), dataIndex: 'browser', ellipsis: true, responsive: ['md'] },
+    { title: t('系统'), dataIndex: 'os', width: 140, responsive: ['lg'] },
+  ]
+
+  const [profileForm] = Form.useForm()
+  const [pwdForm] = Form.useForm()
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [avatarLoading, setAvatarLoading] = useState(false)
+  const [pwdLoading, setPwdLoading] = useState(false)
+
+  const [enableTotpOpen, setEnableTotpOpen] = useState(false)
+  const [enableStep, setEnableStep] = useState(0)
+  const [setupPassword, setSetupPassword] = useState('')
+  const [qrCode, setQrCode] = useState('')
+  const [enableLoading, setEnableLoading] = useState(false)
+  const [enableForm] = Form.useForm()
+  const [enableCodeForm] = Form.useForm()
+
+  const [disableTotpOpen, setDisableTotpOpen] = useState(false)
+  const [disableForm] = Form.useForm()
+  const [disableLoading, setDisableLoading] = useState(false)
+
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenForm] = Form.useForm()
+  const [regenLoading, setRegenLoading] = useState(false)
+
+  const [myLogs, setMyLogs] = useState<LoginLog[]>([])
+  const [logsLoading, setLogsLoading] = useState(true)
+
+  useEffect(() => {
+    getMyLoginLogs({ page: 1, page_size: 5 })
+      .then((res) => setMyLogs(res.list ?? []))
+      .catch(() => setMyLogs([]))
+      .finally(() => setLogsLoading(false))
+  }, [])
+
+  const handleAvatarUpload: UploadProps['beforeUpload'] = async (file) => {
+    const allowedType = file.type === 'image/jpeg' || file.type === 'image/png'
+    if (!allowedType) {
+      message.error(t('仅支持 JPG 或 PNG 图片'))
+      return Upload.LIST_IGNORE
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      message.error(t('头像图片不能超过 2 MB'))
+      return Upload.LIST_IGNORE
+    }
+
+    setAvatarLoading(true)
+    try {
+      const { url } = await uploadAvatar(file)
+      await updateProfile({ avatar: url })
+      await dispatch(fetchCurrentUser()).unwrap()
+      const token = url.split('/').pop()
+      if (token) void cleanupOldAvatars([token]).catch(() => undefined)
+      message.success(t('头像更新成功'))
+    } catch {
+      message.error(t('头像更新失败'))
+    } finally {
+      setAvatarLoading(false)
+    }
+    return false
+  }
+
+  const handleSaveProfile = async () => {
+    const values = await profileForm.validateFields().catch(() => null)
+    if (!values) return
+    setProfileLoading(true)
+    try {
+      await updateProfile(values)
+      message.success(t('保存成功'))
+      dispatch(fetchCurrentUser())
+    } catch {
+      message.error(t('保存失败'))
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  const handleChangePassword = async () => {
+    const values = await pwdForm.validateFields().catch(() => null)
+    if (!values) return
+    setPwdLoading(true)
+    try {
+      await changePassword({ old_password: values.old_password, new_password: values.new_password })
+      message.success(t('密码修改成功'))
+      pwdForm.resetFields()
+    } catch {
+      message.error(t('密码修改失败'))
+    } finally {
+      setPwdLoading(false)
+    }
+  }
+
+  const openEnableTotp = () => {
+    setEnableStep(0)
+    setQrCode('')
+    setSetupPassword('')
+    enableForm.resetFields()
+    enableCodeForm.resetFields()
+    setEnableTotpOpen(true)
+  }
+
+  const handleEnableNext = async () => {
+    const values = await enableForm.validateFields().catch(() => null)
+    if (!values) return
+    setEnableLoading(true)
+    try {
+      const res = await generateTotpSetup({ current_password: values.current_password }) as unknown as Record<string, unknown>
+      setQrCode(String(res.qr_code ?? ''))
+      setSetupPassword(values.current_password)
+      setEnableStep(1)
+    } catch {
+      message.error(t('获取二维码失败'))
+    } finally {
+      setEnableLoading(false)
+    }
+  }
+
+  const handleEnableConfirm = async () => {
+    const values = await enableCodeForm.validateFields().catch(() => null)
+    if (!values) return
+    setEnableLoading(true)
+    try {
+      const res = await enableTotp({ code: values.code, current_password: setupPassword }) as unknown as { recovery_codes?: string[] } | null
+      message.success(t('TOTP 已启用'))
+      setEnableTotpOpen(false)
+      // 恢复码只在此刻返回一次，必须立即展示给用户保存
+      if (res?.recovery_codes?.length) {
+        setRecoveryCodes(res.recovery_codes)
+      }
+      dispatch(fetchCurrentUser())
+    } catch {
+      message.error(t('验证失败'))
+    } finally {
+      setEnableLoading(false)
+    }
+  }
+
+  const handleRegenCodes = async () => {
+    const values = await regenForm.validateFields().catch(() => null)
+    if (!values) return
+    setRegenLoading(true)
+    try {
+      const res = await regenerateTotpRecoveryCodes(values) as unknown as { recovery_codes?: string[] } | null
+      setRegenOpen(false)
+      if (res?.recovery_codes?.length) {
+        setRecoveryCodes(res.recovery_codes)
+      } else {
+        message.success(t('恢复码已重新生成'))
+      }
+    } catch {
+      message.error(t('操作失败，请检查验证码和密码'))
+    } finally {
+      setRegenLoading(false)
+    }
+  }
+
+  const copyRecoveryCodes = async () => {
+    if (!recoveryCodes) return
+    // HTTP 内网环境 clipboard API 不可用，走降级（utils/clipboard）
+    const ok = await copyToClipboard(recoveryCodes.join('\n'))
+    if (ok) message.success(t('已复制到剪贴板'))
+    else message.error(t('复制失败，请手动选择复制'))
+  }
+
+  const handleDisableTotp = async () => {
+    const values = await disableForm.validateFields().catch(() => null)
+    if (!values) return
+    setDisableLoading(true)
+    try {
+      await disableTotp(values)
+      message.success(t('TOTP 已禁用'))
+      setDisableTotpOpen(false)
+      dispatch(fetchCurrentUser())
+    } catch {
+      message.error(t('操作失败'))
+    } finally {
+      setDisableLoading(false)
+    }
+  }
+
+  return (
+    <div className="page-list profile-page">
+      <div className="profile-hero">
+        <Upload accept="image/jpeg,image/png" beforeUpload={handleAvatarUpload} showUploadList={false} disabled={avatarLoading}>
+          <button type="button" className="profile-avatar-upload" aria-label={t('更换头像')} disabled={avatarLoading}>
+            <div className="profile-hero-avatar-ring">
+              <Avatar size={72} src={userInfo?.avatar || undefined} icon={<UserOutlined />} className="profile-hero-avatar" />
+            </div>
+            <span className="profile-avatar-upload-mask">
+              <CameraOutlined spin={avatarLoading} />
+              <span>{avatarLoading ? t('上传中') : t('更换头像')}</span>
+            </span>
+          </button>
+        </Upload>
+        <div className="profile-hero-info">
+          <div className="profile-hero-name">
+            {userInfo?.nickname || userInfo?.username}
+            {userInfo?.totp_enabled && <span className="profile-hero-2fa">{t('2FA 已开启')}</span>}
+          </div>
+          <Space size={20} wrap className="profile-hero-meta">
+            <span><UserOutlined /> {userInfo?.username}</span>
+            {userInfo?.email && <span><MailOutlined /> {userInfo.email}</span>}
+            {userInfo?.phone && <span><PhoneOutlined /> {userInfo.phone}</span>}
+          </Space>
+        </div>
+      </div>
+
+      <Row gutter={[16, 14]}>
+        <Col xs={24} lg={12}>
+          <Card
+            title={t('个人信息')}
+            className="glass-rise"
+            style={{ height: '100%', '--i': 0 } as React.CSSProperties}
+          >
+            <Form
+              form={profileForm}
+              layout="vertical"
+              initialValues={{
+                nickname: userInfo?.nickname,
+                email: userInfo?.email,
+                phone: userInfo?.phone,
+              }}
+            >
+              <Form.Item name="nickname" label={t('昵称')}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="email" label={t('邮箱')}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="phone" label={t('手机号')}>
+                <Input />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" onClick={handleSaveProfile} loading={profileLoading}>
+                  {t('保存')}
+                </Button>
+              </Form.Item>
+            </Form>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <Card
+            title={t('修改密码')}
+            className="glass-rise"
+            style={{ height: '100%', '--i': 1 } as React.CSSProperties}
+          >
+            <Form form={pwdForm} layout="vertical">
+              <Form.Item name="old_password" label={t('当前密码')} rules={[{ required: true, message: t('请输入当前密码') }]}>
+                <Input.Password />
+              </Form.Item>
+              <Form.Item name="new_password" label={t('新密码')} rules={[{ required: true, message: t('请输入新密码') }]}>
+                <Input.Password />
+              </Form.Item>
+              <Form.Item
+                name="confirm_password"
+                label={t('确认密码')}
+                dependencies={['new_password']}
+                rules={[
+                  { required: true, message: t('请确认新密码') },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('new_password') === value) {
+                        return Promise.resolve()
+                      }
+                      return Promise.reject(new Error(t('两次输入的密码不一致')))
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" onClick={handleChangePassword} loading={pwdLoading}>
+                  {t('保存')}
+                </Button>
+              </Form.Item>
+            </Form>
+          </Card>
+        </Col>
+      </Row>
+
+      <Card
+        title={<span><HistoryOutlined className="card-title-icon" />{t('最近登录记录')}</span>}
+        className="glass-rise"
+        style={{ '--i': 2 } as React.CSSProperties}
+      >
+        <Table
+          rowKey="id"
+          size="small"
+          className="list-table"
+          columns={loginLogColumns}
+          dataSource={myLogs}
+          loading={logsLoading}
+          locale={{ emptyText: <GlassEmpty text="暂无登录记录" compact /> }}
+          pagination={false}
+        />
+      </Card>
+
+      <Card
+        title={<span><SafetyCertificateOutlined className="card-title-icon" />{t('两步验证 (TOTP)')}</span>}
+        className="glass-rise"
+        style={{ '--i': 3 } as React.CSSProperties}
+      >
+        <div className={`totp-panel ${userInfo?.totp_enabled ? 'totp-panel-on' : ''}`}>
+          <div className={`totp-shield ${userInfo?.totp_enabled ? 'totp-shield-on' : ''}`}>
+            <SafetyCertificateOutlined />
+          </div>
+          <div className="totp-panel-info">
+            <div className="totp-panel-state">
+              {userInfo?.totp_enabled ? t('已启用') : t('未启用')}
+            </div>
+            <div className="totp-panel-desc">
+              {userInfo?.totp_enabled
+                ? t('登录时需要输入 Authenticator 动态验证码，账号受两步验证保护。')
+                : t('启用后，登录除密码外还需验证器动态验证码，可有效防止密码泄露带来的风险。')}
+            </div>
+          </div>
+          <div className="totp-panel-actions">
+            {userInfo?.totp_enabled ? (
+              <Space>
+                <Button danger onClick={() => { disableForm.resetFields(); setDisableTotpOpen(true) }}>
+                  {t('禁用 TOTP')}
+                </Button>
+                <Button onClick={() => { regenForm.resetFields(); setRegenOpen(true) }}>
+                  {t('重新生成恢复码')}
+                </Button>
+              </Space>
+            ) : (
+              <Button type="primary" onClick={openEnableTotp}>
+                {t('启用 TOTP')}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <Modal
+        title={t('启用 TOTP')}
+        open={enableTotpOpen}
+        onCancel={() => setEnableTotpOpen(false)}
+        footer={null}
+        destroyOnHidden
+        width={480}
+      >
+        <Steps
+          current={enableStep}
+          items={[{ title: t('验证身份') }, { title: t('扫描二维码') }]}
+          style={{ marginBottom: 24 }}
+        />
+        {enableStep === 0 && (
+          <Form form={enableForm} layout="vertical">
+            <Form.Item
+              name="current_password"
+              label={t('当前密码')}
+              rules={[{ required: true, message: t('请输入当前密码') }]}
+            >
+              <Input.Password />
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" onClick={handleEnableNext} loading={enableLoading}>
+                {t('下一步')}
+              </Button>
+            </Form.Item>
+          </Form>
+        )}
+        {enableStep === 1 && (
+          <div>
+            {qrCode && (
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                {/* 二维码需保持白底，暗色弹窗里包一层白色圆角容器 */}
+                <div className="qr-white-box">
+                  <img src={qrCode} alt="TOTP QR Code" style={{ width: 200, height: 200, display: 'block' }} />
+                </div>
+              </div>
+            )}
+            <Form form={enableCodeForm} layout="vertical">
+              <Form.Item
+                name="code"
+                label={t('验证码')}
+                rules={[{ required: true, message: t('请输入 6 位验证码') }]}
+              >
+                <Input maxLength={6} inputMode="numeric" placeholder={t('请输入 Authenticator 中的 6 位验证码')} />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button onClick={() => setEnableStep(0)}>{t('上一步')}</Button>
+                  <Button type="primary" onClick={handleEnableConfirm} loading={enableLoading}>
+                    {t('确认启用')}
+                  </Button>
+                </Space>
+              </Form.Item>
+            </Form>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={t('禁用 TOTP')}
+        open={disableTotpOpen}
+        onOk={handleDisableTotp}
+        onCancel={() => setDisableTotpOpen(false)}
+        confirmLoading={disableLoading}
+        destroyOnHidden
+      >
+        <Form form={disableForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="code"
+            label={t('TOTP 验证码')}
+            rules={[{ required: true, message: t('请输入验证码') }]}
+          >
+            <Input maxLength={6} inputMode="numeric" />
+          </Form.Item>
+          <Form.Item
+            name="current_password"
+            label={t('当前密码')}
+            rules={[{ required: true, message: t('请输入当前密码') }]}
+          >
+            <Input.Password />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('重新生成恢复码')}
+        open={regenOpen}
+        onOk={handleRegenCodes}
+        onCancel={() => setRegenOpen(false)}
+        confirmLoading={regenLoading}
+        okText={t('确认生成')}
+        destroyOnHidden
+      >
+        <div className="modal-note modal-note-warn">{t('重新生成后，旧的恢复码将全部失效。')}</div>
+        <Form form={regenForm} layout="vertical">
+          <Form.Item
+            name="code"
+            label={t('TOTP 验证码')}
+            rules={[{ required: true, message: t('请输入验证码') }]}
+          >
+            <Input maxLength={6} inputMode="numeric" />
+          </Form.Item>
+          <Form.Item
+            name="current_password"
+            label={t('当前密码')}
+            rules={[{ required: true, message: t('请输入当前密码') }]}
+          >
+            <Input.Password />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('请保存您的恢复码')}
+        open={!!recoveryCodes}
+        onOk={() => setRecoveryCodes(null)}
+        onCancel={() => setRecoveryCodes(null)}
+        okText={t('我已保存')}
+        cancelButtonProps={{ style: { display: 'none' } }}
+        maskClosable={false}
+        width={440}
+      >
+        <div className="modal-note modal-note-danger">
+          {t('恢复码仅显示这一次。丢失验证器设备时，它是找回账号的唯一途径，请妥善离线保存。')}
+        </div>
+        <div
+          className="cell-mono glass-well"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 8,
+            padding: 16,
+            fontSize: 14,
+            textAlign: 'center',
+          }}
+        >
+          {(recoveryCodes ?? []).map((c) => (
+            <span key={c}>{c}</span>
+          ))}
+        </div>
+        <Button block style={{ marginTop: 12 }} onClick={copyRecoveryCodes}>
+          {t('复制全部')}
+        </Button>
+      </Modal>
+    </div>
+  )
+}

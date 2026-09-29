@@ -1,0 +1,156 @@
+# 有状态服务独立栈（集群化前置）：PG / Redis / NATS / MinIO 与应用栈分离，
+# 应用栈（docker-compose.yml）任意 down/up/rebuild 都不再触碰数据服务。
+#
+# 与应用栈通过外部网络 opic-techbase-net 互通，网络需先创建（deploy 脚本已内置）：
+#   docker network inspect opic-techbase-net >/dev/null 2>&1 || \
+#     docker network create --subnet 172.28.0.0/16 opic-techbase-net
+#
+# 操作必须显式 -p（防止外部 COMPOSE_PROJECT_NAME=opic-techbase 覆盖 name:，
+# 否则两栈同 project 会互判孤儿容器）：
+#   docker compose -p opic-techbase-infra -f docker-compose.infra.yml up -d
+#   docker compose -p opic-techbase-infra -f docker-compose.infra.yml --profile storage up -d  # 含 MinIO
+name: opic-techbase-infra
+
+services:
+  opic-techbase-postgres:
+    image: pgvector/pgvector:0.8.6-pg18
+    container_name: opic-techbase-postgres
+    restart: unless-stopped
+    # 慢 SQL 测量：预载 pg_stat_statements（扩展本体由迁移 000031 创建）。
+    # 预载库只在启动时读取，改此参数需重启 PG 容器才生效。
+    #
+    # 资源参数（出厂默认 shared_buffers=128MB / max_connections=100 太小）：
+    # - max_connections=300：预算口径为 sum(各服务副本×DB_MAX_OPEN_CONNS 默认 10)
+    #   ≈230，留 70 给迁移/psql/监控；各服务池默认值改动要回头核对这里
+    # - shared_buffers/effective_cache_size 按 31GB 共享宿主的保守份额取值
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_DB: ${POSTGRES_DB:-go_admin_kit}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PG18 镜像默认数据目录改 /var/lib/postgresql/18/docker，新 volume 隔离旧数据
+      - go_admin_kit_postgres18_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 5s
+    networks:
+      - opic-techbase-net
+
+  opic-techbase-redis:
+    image: redis:8-alpine
+    container_name: opic-techbase-redis
+    restart: unless-stopped
+    # maxmemory 护栏：无上限时 Redis 可一路吃满宿主内存把混跑邻居挤进 swap。
+    # 驱逐策略用 volatile-lru 而非 allkeys-lru——JWT 黑名单/OAuth state 被驱逐
+    # 等于已吊销令牌复活；本项目缓存键全部带 TTL，volatile-lru 只驱逐这些。
+    # AOF 保留：黑名单不是可再生缓存，崩溃丢失有安全语义。
+    # --save "" 关掉默认 RDB（3600/300/60 规则仍会生效）：AOF 已覆盖持久化，
+    # RDB 只剩 BGSAVE fork 的峰值内存翻倍代价。
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        redis-server --appendonly yes --save "" --maxmemory 512mb --maxmemory-policy volatile-lru --requirepass "$$REDIS_PASSWORD";
+      else
+        redis-server --appendonly yes --save "" --maxmemory 512mb --maxmemory-policy volatile-lru;
+      fi'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - go_admin_kit_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 5s
+    networks:
+      - opic-techbase-net
+
+  opic-techbase-nats:
+    image: nats:2.12-alpine
+    container_name: opic-techbase-nats
+    restart: unless-stopped
+    # JetStream 存储上限走配置文件：2.10 的 CLI 没有 max_file_store /
+    # max_memory_store 开关，当 flag 传会直接启动失败（见 nats.conf 注释）。
+    command:
+      - --config
+      - /etc/nats/nats.conf
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+    volumes:
+      - go_admin_kit_nats_data:/data
+      - ../platform/deploy/nats/nats.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8222/healthz >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 5s
+    networks:
+      - opic-techbase-net
+
+  opic-techbase-minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: opic-techbase-minio
+    restart: unless-stopped
+    profiles:
+      - storage
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - go_admin_kit_minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 5s
+    networks:
+      - opic-techbase-net
+
+networks:
+  opic-techbase-net:
+    external: true
+    name: opic-techbase-net
+
+volumes:
+  # 钉住拆分前单栈（project=opic-techbase）创建的 volume 名：存量数据零迁移直接续用；
+  # 全新环境 compose 会按同名自动创建，不需要任何预处理。
+  go_admin_kit_postgres18_data:
+    name: opic-techbase_go_admin_kit_postgres18_data
+  go_admin_kit_postgres_data:
+    name: opic-techbase_go_admin_kit_postgres_data
+  go_admin_kit_redis_data:
+    name: opic-techbase_go_admin_kit_redis_data
+  go_admin_kit_nats_data:
+    name: opic-techbase_go_admin_kit_nats_data
+  go_admin_kit_minio_data:
+    name: opic-techbase_go_admin_kit_minio_data

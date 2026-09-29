@@ -1,0 +1,57 @@
+// Package api wires the file service HTTP surface. The /api/v1 layout
+// matches the monolith exactly for every extracted route so the gateway can
+// switch traffic over without any client change.
+package api
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/sharptoolbox/opic-techbase/services/file/internal/api/common"
+	"github.com/sharptoolbox/opic-techbase/services/file/internal/api/system"
+	"github.com/sharptoolbox/opic-techbase/services/file/internal/middleware"
+	systemsvc "github.com/sharptoolbox/opic-techbase/services/file/internal/service/system"
+	sharedapi "github.com/sharptoolbox/opic-techbase/services/shared/pkg/sharedapi"
+)
+
+// SetupRoutes mounts the file service API using legacy global fallbacks.
+func SetupRoutes(router *gin.Engine) {
+	SetupRoutesWithDeps(router, sharedapi.Dependencies{})
+}
+
+// SetupRoutesWithDeps mounts the API with injected infrastructure handles.
+func SetupRoutesWithDeps(router *gin.Engine, deps sharedapi.Dependencies) {
+	api := router.Group("/api/v1")
+
+	common.RegisterPublicRoutesWithDeps(api, deps)
+
+	fileAPI := system.NewFileAPI()
+	if deps.DB != nil {
+		fileAPI = system.NewFileAPIWithService(systemsvc.NewFileServiceWithDB(deps.DB))
+	}
+
+	// Avatar bytes are public capability URLs backed by unguessable tokens.
+	api.GET("/files/avatars/:token", fileAPI.ServeAvatar)
+
+	protected := api.Group("/")
+	protected.Use(middleware.AuthMiddleware(), middleware.OperationLogger())
+	{
+		protected.POST("/files/avatar", fileAPI.UploadAvatar)
+		protected.POST("/files/avatar/cleanup", fileAPI.CleanupAvatars)
+		protected.POST("/files/upload", middleware.PermissionMiddleware("system:file:upload"), fileAPI.Upload)
+		protected.POST("/files/upload/multiple", middleware.PermissionMiddleware("system:file:upload"), fileAPI.UploadMultiple)
+		protected.POST("/files/upload/init", middleware.PermissionMiddleware("system:file:upload"), fileAPI.InitChunkedUpload)
+		protected.PUT("/files/upload/:session_id/part/:part", middleware.PermissionMiddleware("system:file:upload"), fileAPI.UploadChunk)
+		protected.POST("/files/upload/:session_id/complete", middleware.PermissionMiddleware("system:file:upload"), fileAPI.CompleteChunkedUpload)
+		protected.DELETE("/files/upload/:session_id", middleware.PermissionMiddleware("system:file:upload"), fileAPI.AbortChunkedUpload)
+		protected.GET("/files", middleware.PermissionMiddleware("system:file:list"), fileAPI.GetFileList)
+		protected.GET("/files/my", fileAPI.GetMyFiles)
+		protected.GET("/files/stats", middleware.PermissionMiddleware("system:file:list"), fileAPI.GetFileStats)
+		protected.GET("/files/hash/check", middleware.PermissionMiddleware("system:file:list"), fileAPI.CheckHash)
+		protected.GET("/files/:id", middleware.PermissionMiddleware("system:file:list"), fileAPI.GetFile)
+		protected.GET("/files/:id/download", middleware.PermissionMiddleware("system:file:list"), fileAPI.Download)
+		protected.GET("/files/:id/preview", middleware.PermissionMiddleware("system:file:list"), fileAPI.Preview)
+		protected.DELETE("/files/:id", middleware.PermissionMiddleware("system:file:delete"), fileAPI.DeleteFile)
+		protected.DELETE("/files/batch", middleware.PermissionMiddleware("system:file:delete"), fileAPI.DeleteFiles)
+	}
+
+	system.ServeStaticFiles(router)
+}

@@ -1,0 +1,142 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Card, Col, Row, Skeleton, Statistic, Table, Tooltip, Typography } from 'antd'
+import { getBpmStats, type BpmStats } from '@/api/bpm'
+
+const { Text } = Typography
+
+const STATUS_CARDS: { key: string; label: string; color?: string }[] = [
+  { key: 'running', label: '审批中', color: 'var(--c-primary)' },
+  { key: 'approved', label: '已通过', color: 'var(--c-success)' },
+  { key: 'rejected', label: '已拒绝', color: 'var(--c-error)' },
+  { key: 'canceled', label: '已撤销' },
+  { key: 'suspended', label: '已挂起', color: 'var(--c-warning)' },
+]
+
+/**
+ * 审批统计面板（收官项，仅平台管理员）：状态分布 / 近 30 天发起趋势 /
+ * 按定义通过率与均时长 / 节点瓶颈。趋势用纯 div 迷你柱状，不引图表库。
+ */
+export default function BpmStatsPanel() {
+  const { t } = useTranslation()
+  const [stats, setStats] = useState<BpmStats | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    getBpmStats()
+      .then((d) => {
+        if (alive) setStats(d)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (loading) return <Skeleton active paragraph={{ rows: 6 }} />
+  if (!stats) return <Text type="secondary">{t('统计数据加载失败')}</Text>
+
+  const maxTrend = Math.max(1, ...stats.trend.map((item) => item.count))
+
+  return (
+    <div>
+      <Row gutter={[16, 16]}>
+        {STATUS_CARDS.map((c) => (
+          // 5 张卡用纯 flex 均分整行（span 制 6 列永远缺一格）；窄屏自动换行
+          <Col key={c.key} flex="1 1 150px">
+            <Card size="small">
+              <Statistic
+                title={t(c.label)}
+                value={stats.status_counts[c.key] ?? 0}
+                valueStyle={c.color ? { color: c.color } : undefined}
+              />
+            </Card>
+          </Col>
+        ))}
+      </Row>
+
+      <Card size="small" title={t('近 30 天发起趋势')} style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 80 }}>
+          {stats.trend.map((item) => (
+            <Tooltip key={item.date} title={t('{{date}}：{{count}} 件', { date: item.date, count: item.count })}>
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 4,
+                  height: `${Math.max(4, (item.count / maxTrend) * 100)}%`,
+                  borderRadius: 2,
+                  background:
+                    item.count > 0 ? 'linear-gradient(180deg, #a78bfa, #7c3aed)' : 'rgba(128,128,128,0.15)',
+                }}
+              />
+            </Tooltip>
+          ))}
+        </div>
+      </Card>
+
+      <Card size="small" title={t('按流程定义')} style={{ marginTop: 16 }}>
+        <Table
+          size="small"
+          rowKey="definition_key"
+          dataSource={stats.definitions}
+          pagination={false}
+          columns={[
+            {
+              title: t('流程'),
+              dataIndex: 'name',
+              render: (v: string | undefined, row) => (
+                <span>
+                  {v || row.definition_key}{' '}
+                  <Text type="secondary" className="cell-mono" style={{ fontSize: 12 }}>
+                    {row.definition_key}
+                  </Text>
+                </span>
+              ),
+            },
+            { title: t('发起'), dataIndex: 'total', width: 70 },
+            { title: t('通过'), dataIndex: 'approved', width: 70 },
+            { title: t('拒绝'), dataIndex: 'rejected', width: 70 },
+            { title: t('在途'), dataIndex: 'running', width: 70 },
+            {
+              title: t('通过率'),
+              width: 90,
+              render: (_, row) => {
+                const done = row.approved + row.rejected
+                return done > 0 ? `${Math.round((row.approved / done) * 100)}%` : '—'
+              },
+            },
+            {
+              title: t('平均耗时'),
+              dataIndex: 'avg_hours',
+              width: 100,
+              render: (v: number) => (v > 0 ? t('{{n}} 小时', { n: v }) : '—'),
+            },
+          ]}
+        />
+      </Card>
+
+      <Card size="small" title={t('节点瓶颈（平均处理时长 Top 10）')} style={{ marginTop: 16 }}>
+        <Table
+          size="small"
+          rowKey="node_name"
+          dataSource={stats.node_bottlenecks}
+          pagination={false}
+          columns={[
+            { title: t('节点'), dataIndex: 'node_name' },
+            { title: t('已处理任务'), dataIndex: 'acted', width: 110 },
+            {
+              title: t('平均处理时长'),
+              dataIndex: 'avg_hours',
+              width: 120,
+              render: (v: number) => t('{{n}} 小时', { n: v }),
+            },
+          ]}
+        />
+      </Card>
+    </div>
+  )
+}

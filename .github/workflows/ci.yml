@@ -1,0 +1,382 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+# Go 版本只在这里维护一处（原先每个 job 各自内联，升一次版本要逐个改，
+# 容易漏改造成版本漂移）。实际编译用的工具链由各模块 go.mod 的 toolchain
+# 指令决定（GOTOOLCHAIN=auto 会自升），这里对齐同一版本只是为了省掉每个
+# job 一次工具链下载。
+env:
+  GO_VERSION: '1.27.0'
+
+jobs:
+  # 公开仓卫生门禁：内部协作文件引用 / 内部路径形态 / 密钥形态 / 业务残留 / 真实 .env。
+  # 禁词只含通用样式；测试假样例与带免责声明的设计文档在白名单里。
+  hygiene:
+    name: Repo Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: redline scan
+        run: |
+          set -euo pipefail
+          ALLOW='iploc.*_test\.go|mask_test\.go|setting_context_test\.go|^\.gitignore|docs/design/bpm-approval-flow\.md|\.github/workflows/ci\.yml|scripts/git-hooks/pre-push'
+          hit=0
+          for p in \
+            'AGENTS\.md|CLAUDE\.md|CODEX_|SYNC_LOG' \
+            '/www/|root@' \
+            'sk-[a-zA-Z0-9]{20}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{20}|gho_[a-zA-Z0-9]{20}|xox[bp]-' \
+            'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----$' \
+            'freeswitch-cc|cc-service|crm-service|im-service|mp-service|pay-service|ticket-service|visibility-service' \
+          ; do
+            out=$(git grep -nE "$p" -- . | grep -vE "$ALLOW" || true)
+            if [ -n "$out" ]; then hit=1; echo "== 命中：$p =="; echo "$out" | head -10; fi
+          done
+          envs=$(git ls-files | grep -E '(^|/)\.env(\.|$)' | grep -v '\.env\.example$' || true)
+          [ -n "$envs" ] && { hit=1; echo "== 跟踪了 .env =="; echo "$envs"; }
+          [ "$hit" = 0 ] && echo "hygiene clean"
+          exit $hit
+
+      - name: Public migration boundary
+        run: |
+          set -euo pipefail
+          forbidden='(ai|cc|crm|im|mp|notify|pay|ticket|vis)_svc'
+          if rg -n "CREATE SCHEMA IF NOT EXISTS ${forbidden}|DROP SCHEMA IF EXISTS ${forbidden}" \
+            microservices/services/monitor/migrations; then
+            echo "公开 micro 迁移不得包含业务域 schema" >&2
+            exit 1
+          fi
+          echo "public migration boundary clean"
+
+  workspace:
+    name: Micro Workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/monitor/go.sum
+
+      - name: Workspace scripts
+        working-directory: microservices
+        run: |
+          npm run api:contract
+          npm run test:contract
+          npm run test:compose:config
+          npm run test:smoke:unit
+
+      - name: Check generated OpenAPI is committed
+        run: git diff --exit-code -- microservices/services/monitor/docs/openapi.json microservices/web/src/api/generated/schema.d.ts
+
+      - name: buf lint (gRPC 契约)
+        if: hashFiles('microservices/services/api/proto/buf.yaml') != ''
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: '1.72.0'
+
+      - name: buf lint
+        if: hashFiles('microservices/services/api/proto/buf.yaml') != ''
+        working-directory: microservices/services/api/proto
+        run: buf lint
+
+      - name: buf breaking (gRPC 契约漂移门禁)
+        if: hashFiles('microservices/services/api/proto/buf.yaml') != ''
+        working-directory: microservices/services/api/proto
+        run: buf breaking --against "https://github.com/SuperiorChuo/gopherforge.git#branch=main,subdir=microservices/services/api/proto"
+
+  # shared 是 8 个服务共用的公共库（metrics/logger/response/jobbeat/mask/iploc），必须单独门禁
+  shared-module:
+    name: Shared Module
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/shared
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/shared/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  monitor-service:
+    name: Monitor Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/monitor
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/monitor/go.sum
+
+      - run: go mod download
+      - run: go test -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Summarize Go coverage
+        run: |
+          go tool cover -func=coverage.out | tee coverage.txt
+          {
+            echo "### Monitor service coverage"
+            echo '```'
+            cat coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - run: go vet ./...
+      - run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1 run --config ../../../.golangci.yml ./...
+
+  auth-service:
+    name: Auth Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/auth
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/auth/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  identity-service:
+    name: Identity Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/identity
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/identity/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  system-service:
+    name: System Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/system
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/system/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  audit-service:
+    name: Audit Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/audit
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/audit/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  file-service:
+    name: File Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/file
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/file/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  bpm-service:
+    name: BPM Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/services/bpm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/bpm/go.sum
+      - run: go mod download
+      - run: go test ./...
+      - run: go vet ./...
+
+  micro-frontend:
+    name: Micro Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: microservices/web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: microservices/web/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run lint:i18n
+      - run: npm run lint
+      - run: npm run build
+
+  integration:
+    name: Micro Integration Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - workspace
+      - monitor-service
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: microservices/services/monitor/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build compose images
+        uses: docker/bake-action@v7
+        with:
+          source: microservices
+          files: docker-compose.yml
+          load: true
+          provenance: false
+          set: |
+            monitor-service.tags=opic-techbase-monitor-service:latest
+            monitor-service.cache-from=type=gha,scope=compose-monitor
+            monitor-service.cache-to=type=gha,scope=compose-monitor,mode=max,ignore-error=true
+            auth-service.tags=opic-techbase-auth-service:latest
+            auth-service.cache-from=type=gha,scope=compose-auth
+            auth-service.cache-to=type=gha,scope=compose-auth,mode=max,ignore-error=true
+            identity-service.tags=opic-techbase-identity-service:latest
+            identity-service.cache-from=type=gha,scope=compose-identity
+            identity-service.cache-to=type=gha,scope=compose-identity,mode=max,ignore-error=true
+            system-service.tags=opic-techbase-system-service:latest
+            system-service.cache-from=type=gha,scope=compose-system
+            system-service.cache-to=type=gha,scope=compose-system,mode=max,ignore-error=true
+            audit-service.tags=opic-techbase-audit-service:latest
+            audit-service.cache-from=type=gha,scope=compose-audit
+            audit-service.cache-to=type=gha,scope=compose-audit,mode=max,ignore-error=true
+            file-service.tags=opic-techbase-file-service:latest
+            file-service.cache-from=type=gha,scope=compose-file
+            file-service.cache-to=type=gha,scope=compose-file,mode=max,ignore-error=true
+            frontend.tags=opic-techbase-frontend:latest
+            frontend.cache-from=type=gha,scope=compose-frontend
+            frontend.cache-to=type=gha,scope=compose-frontend,mode=max,ignore-error=true
+
+      - name: Create shared compose network
+        run: docker network inspect opic-techbase-net >/dev/null 2>&1 || docker network create --subnet 172.28.0.0/16 opic-techbase-net
+
+      - name: Start postgres, redis and NATS
+        working-directory: microservices
+        run: docker compose -p opic-techbase-infra -f docker-compose.infra.yml up -d --wait --wait-timeout 180 opic-techbase-postgres opic-techbase-redis opic-techbase-nats
+
+      - name: Apply migrations and seed data
+        working-directory: microservices/services/monitor
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_USER: postgres
+          DB_PASSWORD: '123456'
+          DB_NAME: go_admin_kit
+          DB_SSLMODE: disable
+        run: |
+          go mod download
+          go run ./cmd/migration-rehearsal -config ./configs/config.yaml -dir ./migrations -database go_admin_kit_ci_migration_rehearsal
+          go run ./cmd/migrate -config ./configs/config.yaml -dir ./migrations up
+
+      - name: Start the full stack behind the Traefik gateway
+        working-directory: microservices
+        run: docker compose -p opic-techbase up -d --wait --wait-timeout 300
+
+      - name: Run API smoke through the gateway
+        working-directory: microservices
+        env:
+          API_BASE_URL: http://127.0.0.1:8000/api/v1
+        run: |
+          npm run test:smoke:unit
+          npm run smoke:api
+
+      - name: Install web deps and Playwright
+        working-directory: microservices/web
+        run: |
+          npm ci
+          npm run test:e2e:install
+
+      - name: Run Playwright E2E through the gateway
+        working-directory: microservices/web
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8000
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: microservices/web/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Dump compose state and logs
+        if: failure()
+        working-directory: microservices
+        run: |
+          docker compose -p opic-techbase ps -a || true
+          docker compose -p opic-techbase logs --tail=500 || true
+          echo '::group::file-service full log (diagnose upload 500)'
+          docker compose -p opic-techbase logs --no-log-prefix --tail=300 file-service || true
+          echo '::endgroup::'
+          echo '::group::gateway (Traefik) log incl. access log'
+          docker compose -p opic-techbase logs --no-log-prefix --tail=300 gateway || true
+          echo '::endgroup::'
+
+      - name: Tear down the stack
+        if: always()
+        working-directory: microservices
+        run: |
+          docker compose -p opic-techbase down -v --remove-orphans || true
+          docker compose -p opic-techbase-infra -f docker-compose.infra.yml down -v --remove-orphans || true
+          docker network rm opic-techbase-net || true

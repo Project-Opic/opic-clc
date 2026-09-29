@@ -1,0 +1,796 @@
+# 应用栈：无状态服务 + 网关 + 前端。
+# 有状态服务（PG/Redis/NATS/MinIO）在独立 infra 栈 docker-compose.infra.yml
+# （project opic-techbase-infra），本栈任意 down/up/rebuild 不触碰数据服务；
+# 两栈经外部网络 opic-techbase-net 互通（创建方式见 infra 文件头部）。
+#
+# 镜像命名（发版用）：每个可构建服务都显式声明
+#   image: ${IMAGE_PREFIX:-opic-techbase}-<服务名>:${IMAGE_TAG:-latest}
+# 两个变量都不设时结果是 opic-techbase-<服务名>:latest —— 与 Compose 从
+# project 名推导出来的旧名字完全一致，本机开发 / CI bake / ops 脚本全部零改动。
+# 之所以要显式声明：不写 image 时 IMAGE_TAG 只影响 build 产物名，
+# 部署侧仍去找推导出来的旧名字，构建与运行会错位。
+# 发版后要跑某个版本（先 pull 再起，不本地构建）：
+#   IMAGE_PREFIX=ghcr.io/<owner>/<repo>/opic-techbase IMAGE_TAG=v0.2.0 \
+#     docker compose -f docker-compose.yml pull
+#   IMAGE_PREFIX=... IMAGE_TAG=v0.2.0 docker compose -f docker-compose.yml up -d --no-build
+# （IMAGE_PREFIX 不带结尾连字符，服务名会以 -<服务名> 追加）
+name: opic-techbase
+
+services:
+  # 一次性迁移 job：复用 monitor 镜像跑 goose up 后退出。
+  # 把迁移从 monitor 常驻进程中剥离，迁移失败不再拖垮监控/健康检查，
+  # 各业务服务通过 depends_on service_completed_successfully 等它完成。
+  # infra 栈独立后无法再对 postgres 做跨栈健康等待，改为有界重试：
+  # PG 未就绪时等待重试，真实迁移错误在重试耗尽后以非零码失败。
+  migrate:
+    build:
+      context: ./services
+      dockerfile: monitor/Dockerfile
+    image: ${IMAGE_PREFIX:-opic-techbase}-monitor-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-migrate
+    restart: "no"
+    command: ["sh", "-c", "n=0; until ./migrate -config ./configs/config.yaml -dir ./migrations up; do n=$$((n+1)); [ $$n -ge 30 ] && exit 1; echo \"[migrate] not ready, retry $$n/30\"; sleep 2; done"]
+    environment:
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      TZ: ${TZ:-Asia/Shanghai}
+    networks:
+      - opic-techbase-net
+
+  monitor-service:
+    build:
+      context: ./services
+      dockerfile: monitor/Dockerfile
+    image: ${IMAGE_PREFIX:-opic-techbase}-monitor-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-monitor
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8081
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      DB_SEARCH_PATH: monitor_svc,public
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      JWT_REFRESH_TOKEN_ROTATION: ${JWT_REFRESH_TOKEN_ROTATION:-true}
+      UPLOAD_STORAGE_TYPE: ${UPLOAD_STORAGE_TYPE:-local}
+      UPLOAD_LOCAL_PATH: ${UPLOAD_LOCAL_PATH:-./uploads}
+      UPLOAD_PUBLIC_BASE_URL: ${UPLOAD_PUBLIC_BASE_URL:-/uploads}
+      UPLOAD_LOCAL_URL_PREFIX: ${UPLOAD_LOCAL_URL_PREFIX:-/uploads}
+      UPLOAD_S3_ENDPOINT: ${UPLOAD_S3_ENDPOINT:-}
+      UPLOAD_S3_BUCKET: ${UPLOAD_S3_BUCKET:-}
+      UPLOAD_S3_REGION: ${UPLOAD_S3_REGION:-}
+      UPLOAD_S3_ACCESS_KEY: ${UPLOAD_S3_ACCESS_KEY:-}
+      UPLOAD_S3_SECRET_KEY: ${UPLOAD_S3_SECRET_KEY:-}
+      UPLOAD_S3_USE_SSL: ${UPLOAD_S3_USE_SSL:-true}
+      UPLOAD_MINIO_ENDPOINT: ${UPLOAD_MINIO_ENDPOINT:-opic-techbase-minio:9000}
+      UPLOAD_MINIO_BUCKET: ${UPLOAD_MINIO_BUCKET:-opic-techbase}
+      UPLOAD_MINIO_REGION: ${UPLOAD_MINIO_REGION:-us-east-1}
+      UPLOAD_MINIO_ACCESS_KEY: ${UPLOAD_MINIO_ACCESS_KEY:-minioadmin}
+      UPLOAD_MINIO_SECRET_KEY: ${UPLOAD_MINIO_SECRET_KEY:-minioadmin}
+      UPLOAD_MINIO_USE_SSL: ${UPLOAD_MINIO_USE_SSL:-false}
+      EMAIL_NOTIFICATION_ENABLED: ${EMAIL_NOTIFICATION_ENABLED:-false}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_SENDER: ${EMAIL_SENDER:-}
+      EMAIL_ALERT_RECEIVER: ${EMAIL_ALERT_RECEIVER:-}
+      EMAIL_ALERT_RECEIVERS: ${EMAIL_ALERT_RECEIVERS:-}
+      EMAIL_SUBJECT_TEMPLATE: ${EMAIL_SUBJECT_TEMPLATE:-}
+      EMAIL_BODY_TEMPLATE: ${EMAIL_BODY_TEMPLATE:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
+      EMAIL_START_TLS: ${EMAIL_START_TLS:-true}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      DEFAULT_ADMIN_WARN_DEFAULT_PASSWORD: ${DEFAULT_ADMIN_WARN_DEFAULT_PASSWORD:-true}
+      DEFAULT_ADMIN_FORCE_CHANGE_PASSWORD: ${DEFAULT_ADMIN_FORCE_CHANGE_PASSWORD:-false}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      TRACING_ENABLED: ${TRACING_ENABLED:-false}
+      TRACING_SERVICE_NAME: ${TRACING_SERVICE_NAME:-opic-techbase-api}
+      TRACING_ENVIRONMENT: ${TRACING_ENVIRONMENT:-development}
+      TRACING_OTLP_ENDPOINT: ${TRACING_OTLP_ENDPOINT:-otel-collector:4317}
+      TRACING_SAMPLE_RATIO: ${TRACING_SAMPLE_RATIO:-1.0}
+      # NATS consumer moved to audit-service; empty disables the monolith's
+      # login-log consumer (same durable name must not be attached twice).
+      NATS_URL: ""
+      # Trust the compose network (see networks.ipam) so X-Forwarded-For from
+      # the Traefik gateway yields the real client IP in logs and rate limits.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      # 服务信任网关注入的 X-Auth-* 头，绝不能被网关以外的来源直连：
+      # 默认只绑 loopback（宿主机上调试用），公网/内网入口一律走 gateway。
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${BACKEND_PORT:-8081}:8081"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.monitor.rule: "PathPrefix(`/api`) || PathPrefix(`/uploads`)"
+      traefik.http.routers.monitor.entrypoints: web,websecure
+      traefik.http.routers.monitor.middlewares: auth-chain
+      traefik.http.services.monitor.loadbalancer.server.port: "8081"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  auth-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE: auth
+    image: ${IMAGE_PREFIX:-opic-techbase}-auth-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-auth
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8082
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      JWT_REFRESH_TOKEN_ROTATION: ${JWT_REFRESH_TOKEN_ROTATION:-true}
+      PASSWORD_MAX_AGE_DAYS: ${PASSWORD_MAX_AGE_DAYS:-90}
+      PASSWORD_HISTORY_COUNT: ${PASSWORD_HISTORY_COUNT:-5}
+      GITHUB_OAUTH_ENABLED: ${GITHUB_OAUTH_ENABLED:-false}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/api/v1/oauth/github/callback}
+      WECHAT_OAUTH_ENABLED: ${WECHAT_OAUTH_ENABLED:-false}
+      WECHAT_CLIENT_ID: ${WECHAT_CLIENT_ID:-}
+      WECHAT_CLIENT_SECRET: ${WECHAT_CLIENT_SECRET:-}
+      WECHAT_REDIRECT_URI: ${WECHAT_REDIRECT_URI:-http://localhost:8000/api/v1/oauth/wechat/callback}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      # Same trusted-proxy range as backend; login events and login-limit
+      # keys must see the real client IP, not the gateway's.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${AUTH_SERVICE_PORT:-8082}:8082"
+    labels:
+      traefik.enable: "true"
+      # PathPrefix is a raw string prefix, not segment-aligned: `/api/v1/login`
+      # would also capture `/api/v1/login-logs` and `/api/v1/user/me` would
+      # capture `/api/v1/user/menus` (both monolith routes). Exact-path routes
+      # use Path(); only true subtrees use PathPrefix() with a trailing slash.
+      traefik.http.routers.auth.rule: "Path(`/api/v1/login`) || PathPrefix(`/api/v1/login/`) || Path(`/api/v1/register`) || Path(`/api/v1/refresh`) || Path(`/api/v1/logout`) || Path(`/api/v1/captcha`) || PathPrefix(`/api/v1/captcha/`) || PathPrefix(`/api/v1/oauth/`) || PathPrefix(`/api/v1/oauth2/`) || PathPrefix(`/api/v1/auth/`) || Path(`/api/v1/console-routes`) || PathPrefix(`/api/v1/console-routes/`) || Path(`/api/v1/user/me`) || Path(`/api/v1/user/profile`) || Path(`/api/v1/user/password`) || PathPrefix(`/api/v1/user/2fa/`)"
+      traefik.http.routers.auth.entrypoints: web,websecure
+      traefik.http.routers.auth.priority: "100"
+      traefik.http.services.auth.loadbalancer.server.port: "8082"
+      traefik.http.middlewares.auth-verify.forwardauth.address: "http://opic-techbase-auth:8082/internal/verify"
+      traefik.http.middlewares.auth-verify.forwardauth.authResponseHeaders: "X-Auth-User-ID,X-Auth-Username,X-Auth-Tenant-ID,X-Auth-Platform-Admin,X-Auth-Permissions"
+      traefik.http.middlewares.auth-sanitize.headers.customRequestHeaders.X-Auth-User-ID: ""
+      traefik.http.middlewares.auth-sanitize.headers.customRequestHeaders.X-Auth-Username: ""
+      traefik.http.middlewares.auth-sanitize.headers.customRequestHeaders.X-Auth-Tenant-ID: ""
+      traefik.http.middlewares.auth-sanitize.headers.customRequestHeaders.X-Auth-Platform-Admin: ""
+      traefik.http.middlewares.auth-sanitize.headers.customRequestHeaders.X-Auth-Permissions: ""
+      traefik.http.middlewares.auth-chain.chain.middlewares: "auth-sanitize,auth-verify"
+      # 网关层全局限流：挂在 entrypoint（web）上，覆盖全部服务一处配置。
+      traefik.http.middlewares.gateway-ratelimit.ratelimit.average: "${GATEWAY_RATE_AVERAGE:-100}"
+      traefik.http.middlewares.gateway-ratelimit.ratelimit.burst: "${GATEWAY_RATE_BURST:-200}"
+      # 网关层响应压缩：API JSON 不再原文传输；前端静态已带 Content-Encoding 自动跳过
+      traefik.http.middlewares.gateway-compress.compress: "true"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  identity-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE: identity
+    image: ${IMAGE_PREFIX:-opic-techbase}-identity-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-identity
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8083
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${IDENTITY_SERVICE_PORT:-8083}:8083"
+    labels:
+      traefik.enable: "true"
+      # Same PathPrefix caveat as the auth router: exact paths use Path(),
+      # subtrees use a trailing-slash PathPrefix(). `/user/...` (singular,
+      # monolith + auth-service) must NOT match `/users`.
+      traefik.http.routers.identity.rule: "Path(`/api/v1/users`) || PathPrefix(`/api/v1/users/`) || Path(`/api/v1/roles`) || PathPrefix(`/api/v1/roles/`) || Path(`/api/v1/permissions`) || PathPrefix(`/api/v1/permissions/`) || Path(`/api/v1/departments`) || PathPrefix(`/api/v1/departments/`) || Path(`/api/v1/tenants`) || PathPrefix(`/api/v1/tenants/`) || Path(`/api/v1/posts`) || PathPrefix(`/api/v1/posts/`) || Path(`/api/v1/tenant-packages`) || PathPrefix(`/api/v1/tenant-packages/`)"
+      traefik.http.routers.identity.entrypoints: web,websecure
+      traefik.http.routers.identity.priority: "100"
+      traefik.http.services.identity.loadbalancer.server.port: "8083"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8083/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  system-service:
+    build:
+      # 上下文提到 microservices 根：代码生成器的仓库快照要拷 web/ 与
+      # monitor/migrations/ 下的接入源文件（见 services/system/Dockerfile）
+      context: .
+      dockerfile: services/system/Dockerfile
+    image: ${IMAGE_PREFIX:-opic-techbase}-system-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-system
+    restart: unless-stopped
+    volumes:
+      # 离线 IP 归属地库（在线用户归属地）；文件缺失时服务优雅降级
+      - ./data:/app/data:ro
+      # 边缘证书与 Traefik 动态配置；system 以固定 uid/gid 原子写入
+      - ${EDGE_CERT_HOST_DIR:-./certs}:/var/lib/opic-techbase/edgecert
+    environment:
+      IP2REGION_XDB: /app/data/ip2region.xdb
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8084
+      SYSTEM_INTERNAL_TOKEN: ${SYSTEM_INTERNAL_TOKEN:-}
+      EDGE_CERT_CURRENT_KEY_ID: ${EDGE_CERT_CURRENT_KEY_ID:-}
+      EDGE_CERT_ENCRYPTION_KEY: ${EDGE_CERT_ENCRYPTION_KEY:-}
+      EDGE_CERT_PREVIOUS_KEY_ID: ${EDGE_CERT_PREVIOUS_KEY_ID:-}
+      EDGE_CERT_PREVIOUS_ENCRYPTION_KEY: ${EDGE_CERT_PREVIOUS_ENCRYPTION_KEY:-}
+      EDGE_CERT_STORAGE_ROOT: /var/lib/opic-techbase/edgecert/edge
+      EDGE_CERT_TRAEFIK_DYNAMIC_DIR: /var/lib/opic-techbase/edgecert/traefik-dynamic
+      EDGE_CERT_GATEWAY_TLS_ADDRESS: opic-techbase-gateway:443
+      EDGE_CERT_WORKER_ENABLED: ${EDGE_CERT_WORKER_ENABLED:-true}
+      EDGE_CERT_RENEW_BEFORE_DAYS: ${EDGE_CERT_RENEW_BEFORE_DAYS:-30}
+      EDGE_CERT_TASK_POLL_SECONDS: ${EDGE_CERT_TASK_POLL_SECONDS:-5}
+      EDGE_CERT_CHALLENGE_TTL_MINUTES: ${EDGE_CERT_CHALLENGE_TTL_MINUTES:-15}
+      EDGE_CERT_CLEAR_LEGACY_SECRETS: ${EDGE_CERT_CLEAR_LEGACY_SECRETS:-false}
+      # 代码生成器：快照在镜像内固化；写入仓库默认关闭（高危能力，需显式开）
+      CODEGEN_REPO_ROOT: ${CODEGEN_REPO_ROOT:-/app/repository-snapshot}
+      CODEGEN_WRITE_ENABLED: ${CODEGEN_WRITE_ENABLED:-false}
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      EMAIL_NOTIFICATION_ENABLED: ${EMAIL_NOTIFICATION_ENABLED:-false}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_SENDER: ${EMAIL_SENDER:-}
+      EMAIL_ALERT_RECEIVERS: ${EMAIL_ALERT_RECEIVERS:-}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${SYSTEM_SERVICE_PORT:-8084}:8084"
+    labels:
+      traefik.enable: "true"
+      # Same PathPrefix caveat as the auth/identity routers: exact paths use
+      # Path(), subtrees use a trailing-slash PathPrefix(). `/user/menus` is
+      # an exact path so it can't collide with auth's /user/me etc.
+      traefik.http.routers.system.rule: "Path(`/api/v1/menus`) || PathPrefix(`/api/v1/menus/`) || Path(`/api/v1/user/menus`) || Path(`/api/v1/dict-types`) || PathPrefix(`/api/v1/dict-types/`) || Path(`/api/v1/dict-items`) || PathPrefix(`/api/v1/dict-items/`) || Path(`/api/v1/dicts`) || PathPrefix(`/api/v1/dicts/`) || Path(`/api/v1/notices`) || PathPrefix(`/api/v1/notices/`) || Path(`/api/v1/system-settings`) || PathPrefix(`/api/v1/system-settings/`) || Path(`/api/v1/online-users`) || PathPrefix(`/api/v1/online-users/`) || Path(`/api/v1/ws/notifications`) || PathPrefix(`/api/v1/ws/notifications/`) || Path(`/api/v1/system/weather`) || PathPrefix(`/api/v1/codegen/`) || PathPrefix(`/api/v1/sms/`) || Path(`/api/v1/error-codes`) || PathPrefix(`/api/v1/error-codes/`) || Path(`/api/v1/edge-certs`) || PathPrefix(`/api/v1/edge-certs/`)"
+      traefik.http.routers.system.entrypoints: web,websecure
+      traefik.http.routers.system.priority: "100"
+      traefik.http.routers.system-acme.rule: "PathPrefix(`/.well-known/acme-challenge`)"
+      traefik.http.routers.system-acme.entrypoints: web
+      traefik.http.routers.system-acme.priority: "1000"
+      traefik.http.routers.system-acme.service: system
+      traefik.http.services.system.loadbalancer.server.port: "8084"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8084/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  audit-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE: audit
+    image: ${IMAGE_PREFIX:-opic-techbase}-audit-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-audit
+    restart: unless-stopped
+    volumes:
+      # 离线 IP 归属地库（登录日志归属地）；文件缺失时回退在线查询
+      - ./data:/app/data:ro
+    environment:
+      IP2REGION_XDB: /app/data/ip2region.xdb
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8085
+      WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-}
+      WEBHOOK_KEY_ID: ${WEBHOOK_KEY_ID:-current}
+      WEBHOOK_ALLOW_HTTP: ${WEBHOOK_ALLOW_HTTP:-false}
+      WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-false}
+      WEBHOOK_SCAN_INTERVAL_SECONDS: ${WEBHOOK_SCAN_INTERVAL_SECONDS:-2}
+      WEBHOOK_BATCH_SIZE: ${WEBHOOK_BATCH_SIZE:-50}
+      WEBHOOK_MAX_ATTEMPTS: ${WEBHOOK_MAX_ATTEMPTS:-5}
+      WEBHOOK_REQUEST_TIMEOUT_SECONDS: ${WEBHOOK_REQUEST_TIMEOUT_SECONDS:-10}
+      # 操作/登录日志保留天数；<=0（默认）关闭自动清理，audit_logs 不在清理范围
+      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-0}
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      DB_SEARCH_PATH: audit_svc,public
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${AUDIT_SERVICE_PORT:-8085}:8085"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.audit.rule: "Path(`/api/v1/login-logs`) || PathPrefix(`/api/v1/login-logs/`) || Path(`/api/v1/operation-logs`) || PathPrefix(`/api/v1/operation-logs/`) || Path(`/api/v1/logs/audit`) || Path(`/api/v1/webhooks`) || PathPrefix(`/api/v1/webhooks/`) || Path(`/api/v1/webhook-deliveries`)"
+      traefik.http.routers.audit.entrypoints: web,websecure
+      traefik.http.routers.audit.priority: "100"
+      traefik.http.services.audit.loadbalancer.server.port: "8085"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  file-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE: file
+    image: ${IMAGE_PREFIX:-opic-techbase}-file-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-file
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8086
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      REDIS_HOST: opic-techbase-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      UPLOAD_STORAGE_TYPE: ${UPLOAD_STORAGE_TYPE:-local}
+      UPLOAD_LOCAL_PATH: ${UPLOAD_LOCAL_PATH:-./uploads}
+      UPLOAD_PUBLIC_BASE_URL: ${UPLOAD_PUBLIC_BASE_URL:-/uploads}
+      UPLOAD_LOCAL_URL_PREFIX: ${UPLOAD_LOCAL_URL_PREFIX:-/uploads}
+      UPLOAD_S3_ENDPOINT: ${UPLOAD_S3_ENDPOINT:-}
+      UPLOAD_S3_BUCKET: ${UPLOAD_S3_BUCKET:-}
+      UPLOAD_S3_REGION: ${UPLOAD_S3_REGION:-}
+      UPLOAD_S3_ACCESS_KEY: ${UPLOAD_S3_ACCESS_KEY:-}
+      UPLOAD_S3_SECRET_KEY: ${UPLOAD_S3_SECRET_KEY:-}
+      UPLOAD_S3_USE_SSL: ${UPLOAD_S3_USE_SSL:-true}
+      UPLOAD_MINIO_ENDPOINT: ${UPLOAD_MINIO_ENDPOINT:-opic-techbase-minio:9000}
+      UPLOAD_MINIO_BUCKET: ${UPLOAD_MINIO_BUCKET:-opic-techbase}
+      UPLOAD_MINIO_REGION: ${UPLOAD_MINIO_REGION:-us-east-1}
+      UPLOAD_MINIO_ACCESS_KEY: ${UPLOAD_MINIO_ACCESS_KEY:-minioadmin}
+      UPLOAD_MINIO_SECRET_KEY: ${UPLOAD_MINIO_SECRET_KEY:-minioadmin}
+      UPLOAD_MINIO_USE_SSL: ${UPLOAD_MINIO_USE_SSL:-false}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.28.0.0/16,172.22.0.1/32}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${FILE_SERVICE_PORT:-8086}:8086"
+    volumes:
+      - go_admin_kit_uploads:/app/uploads
+    labels:
+      traefik.enable: "true"
+      # /uploads static subtree moves here from the monolith together with
+      # the file APIs (priority 100 beats the backend's catch-all /uploads).
+      traefik.http.routers.file.rule: "Path(`/api/v1/files`) || PathPrefix(`/api/v1/files/`) || PathPrefix(`/uploads/`)"
+      traefik.http.routers.file.entrypoints: web,websecure
+      traefik.http.routers.file.priority: "100"
+      traefik.http.services.file.loadbalancer.server.port: "8086"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8086/api/v1/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  # 审批流引擎（bpm-service）：流程定义 / 实例 / 任务 / 流转日志，AutoMigrate 自管表。
+  # 鉴权走 Bearer JWT 自校验（与其它业务路由一致，网关注入的 X-Auth-* 头优先）；
+  # 终态经 HTTP 回调业务方（BPM_CALLBACK_<BIZTYPE> 注册，脚手架默认无回调目标）。
+  bpm-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE: bpm
+    image: ${IMAGE_PREFIX:-opic-techbase}-bpm-service:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-bpm
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: 8096
+      DB_HOST: opic-techbase-postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      DB_NAME: ${POSTGRES_DB:-go_admin_kit}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      DB_SEARCH_PATH: bpm_svc,public
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-change-me-32-chars}
+      # internal 端点共享密钥（业务方 → bpm 发起审批 / by-biz 反查）；空=禁用 /internal 端点
+      BPM_INTERNAL_TOKEN: ${BPM_INTERNAL_TOKEN:-}
+      # 终态回调业务方内部端点时携带的 X-Internal-Token；空=回调不带鉴权头
+      BPM_CALLBACK_TOKEN: ${BPM_CALLBACK_TOKEN:-}
+      # 回调目标按 biz_type 注册：BPM_CALLBACK_<BIZTYPE>=完整 URL（默认无，业务方自行接线）
+      # 站内信通知：另配 NOTIFY_API_BASE + NOTIFY_INTERNAL_TOKEN 后启用，两者留空则静默跳过
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${SERVICES_BIND_IP:-127.0.0.1}:${BPM_SERVICE_PORT:-8096}:8096"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.bpm.rule: "Path(`/api/v1/bpm`) || PathPrefix(`/api/v1/bpm/`)"
+      traefik.http.routers.bpm.entrypoints: web,websecure
+      traefik.http.routers.bpm.priority: "100"
+      traefik.http.services.bpm.loadbalancer.server.port: "8096"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8096/api/v1/bpm/health/live >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - opic-techbase-net
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: ${IMAGE_PREFIX:-opic-techbase}-frontend:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-frontend
+    restart: unless-stopped
+    # 全栈唯一无探针的服务：nginx 配置写坏也能"起来就接流量"，补上探针
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:80/ >/dev/null || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 6
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.frontend.rule: "PathPrefix(`/`)"
+      traefik.http.routers.frontend.entrypoints: web,websecure
+      traefik.http.routers.frontend.priority: "1"
+      traefik.http.services.frontend.loadbalancer.server.port: "80"
+    depends_on:
+      monitor-service:
+        condition: service_started
+    networks:
+      - opic-techbase-net
+
+  gateway:
+    # v3.6+ negotiates the Docker API version; older Traefik pins 1.24, which
+    # current Docker daemons reject ("client version 1.24 is too old").
+    image: traefik:v3.7.10
+    container_name: opic-techbase-gateway
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=opic-techbase-net
+      - --entrypoints.web.address=:80
+      # 自定义 system-acme 是唯一 HTTP-01 owner；允许绕过内建 ACME router
+      - --entrypoints.web.allowACMEByPass=true
+      # 信任转发源（隧道/宿主 loopback/gwbridge/overlay）采用 Caddy 的 X-Forwarded-For 真实 IP
+      - --entrypoints.web.forwardedHeaders.trustedIPs=127.0.0.1,172.22.0.1/32,172.28.0.0/16
+      - --entrypoints.web.http.middlewares=gateway-ratelimit@docker,gateway-compress@docker
+      # TLS-ready：websecure + 自签兜底；真实证书由 system-service 写入 file provider
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.forwardedHeaders.trustedIPs=127.0.0.1,172.22.0.1/32,172.28.0.0/16
+      - --entrypoints.websecure.http.middlewares=gateway-ratelimit@docker,gateway-compress@docker
+      # 证书由 system-service 签发并原子生成动态配置（不再与 Traefik certresolver 双 owner）
+      - --providers.file.directory=/var/lib/opic-techbase/edgecert/traefik-dynamic
+      - --providers.file.watch=true
+      - --ping=true
+      - --accesslog=true
+      - --log.level=INFO
+      # Prometheus 指标：随 api.insecure 暴露在 :8080/metrics；router 级标签开 P99
+      - --metrics.prometheus=true
+      - --metrics.prometheus.addrouterslabels=true
+      # Dashboard/API for inspecting routers; the host port below binds it to
+      # loopback only. Remove both lines if you don't want it at all.
+      - --api.insecure=true
+    ports:
+      - "${GATEWAY_PORT:-8000}:80"
+      - "${GATEWAY_TLS_PORT:-18443}:443"
+      - "127.0.0.1:8090:8080"
+    volumes:
+      # Docker Desktop for Mac denies container access to /var/run/docker.sock;
+      # set DOCKER_SOCK=/var/run/docker.sock.raw in .env there. Linux keeps the default.
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ${EDGE_CERT_HOST_DIR:-./certs}:/var/lib/opic-techbase/edgecert:ro
+    depends_on:
+      monitor-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      identity-service:
+        condition: service_started
+      system-service:
+        condition: service_started
+      audit-service:
+        condition: service_started
+      file-service:
+        condition: service_started
+      bpm-service:
+        condition: service_started
+      frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+    networks:
+      - opic-techbase-net
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: opic-techbase-prometheus
+    restart: unless-stopped
+    mem_limit: 1g
+    profiles:
+      - monitoring
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ../platform/deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../platform/deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - go_admin_kit_prometheus_data:/prometheus
+    depends_on:
+      monitor-service:
+        condition: service_started
+    networks:
+      - opic-techbase-net
+
+  # 告警出口（告警闭环）：Prometheus 规则 → 本容器分组去抖 → notify webhook
+  # 站内信。配置是模板：启动时 sed 把 NOTIFY_INTERNAL_TOKEN 注入 Bearer 凭据。
+  # 脚手架未启 notify-service 时投递失败仅记日志，不影响其余组件。
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    container_name: opic-techbase-alertmanager
+    restart: unless-stopped
+    mem_limit: 128m
+    profiles:
+      - monitoring
+    environment:
+      NOTIFY_INTERNAL_TOKEN: ${NOTIFY_INTERNAL_TOKEN:-}
+      # 企业微信群机器人 webhook（带外 critical 告警）；未配时 critical 仍有站内信兜底
+      WECOM_WEBHOOK: ${WECOM_WEBHOOK:-http://127.0.0.1:1/blackhole}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - sed -e "s|__NOTIFY_TOKEN__|$$NOTIFY_INTERNAL_TOKEN|" -e "s|__WECOM_WEBHOOK__|$$WECOM_WEBHOOK|" /etc/alertmanager/alertmanager.tpl.yml > /tmp/alertmanager.yml && exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ../platform/deploy/alertmanager/alertmanager.tpl.yml:/etc/alertmanager/alertmanager.tpl.yml:ro
+      - go_admin_kit_alertmanager_data:/alertmanager
+    networks:
+      - opic-techbase-net
+
+  # 主机指标（磁盘/内存/CPU）：挂宿主根只读
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    container_name: opic-techbase-node-exporter
+    restart: unless-stopped
+    mem_limit: 64m
+    profiles:
+      - monitoring
+    pid: host
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - opic-techbase-net
+
+  # 统一日志：Loki 存储 + promtail 采全容器 stdout，Grafana Explore 里查
+  # （{service="auth"} |= "关键词"）。保留 7 天，filesystem 单机存储。
+  loki:
+    image: grafana/loki:3.7.6
+    container_name: opic-techbase-loki
+    restart: unless-stopped
+    mem_limit: 512m
+    profiles:
+      - monitoring
+    command:
+      - -config.file=/etc/loki/config.yml
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ../platform/deploy/loki/loki-config.yml:/etc/loki/config.yml:ro
+      - go_admin_kit_loki_data:/loki
+    networks:
+      - opic-techbase-net
+
+  promtail:
+    image: grafana/promtail:3.6.11
+    container_name: opic-techbase-promtail
+    restart: unless-stopped
+    mem_limit: 256m
+    profiles:
+      - monitoring
+    command:
+      - -config.file=/etc/promtail/config.yml
+    volumes:
+      - ../platform/deploy/loki/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - opic-techbase-net
+
+  grafana:
+    image: grafana/grafana:13.1.3
+    container_name: opic-techbase-grafana
+    restart: unless-stopped
+    mem_limit: 512m
+    profiles:
+      - monitoring
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # 管理后台 iframe 嵌入看板：允许匿名 Viewer 只读 + 放开 X-Frame 限制。
+      # Grafana 只在内网端口暴露，匿名仅 Viewer 角色，可接受；公网部署需收紧。
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3003}:3000"
+    volumes:
+      - go_admin_kit_grafana_data:/var/lib/grafana
+      - ../platform/deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - opic-techbase-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    container_name: opic-techbase-otel-collector
+    restart: unless-stopped
+    profiles:
+      - tracing
+    command:
+      - --config=/etc/otelcol/config.yaml
+    ports:
+      - "127.0.0.1:${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+    volumes:
+      - ../platform/deploy/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      jaeger:
+        condition: service_started
+    networks:
+      - opic-techbase-net
+
+  jaeger:
+    # v2 单镜像（v1 EOL 2025-12-31）。基于 OTel Collector 框架，v1 的 env
+    # COLLECTOR_OTLP_ENABLED 已失效（v2 默认收 OTLP 4317/4318 + memory 存储）。
+    image: jaegertracing/jaeger:2.20.0
+    container_name: opic-techbase-jaeger
+    restart: unless-stopped
+    mem_limit: 512m
+    profiles:
+      - tracing
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    networks:
+      - opic-techbase-net
+
+networks:
+  # 与 infra 栈共享的外部网络。子网钉在 172.28.0.0/16（TRUSTED_PROXIES 白名单
+  # 依赖它，改动需同步 backend/auth-service 的 TRUSTED_PROXIES env）；
+  # 创建命令见 docker-compose.infra.yml 头部。
+  opic-techbase-net:
+    external: true
+    name: opic-techbase-net
+
+volumes:
+  go_admin_kit_uploads:
+  go_admin_kit_prometheus_data:
+  go_admin_kit_alertmanager_data:
+  go_admin_kit_loki_data:
+  go_admin_kit_grafana_data:
