@@ -1,0 +1,554 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/sharptoolbox/opic-techbase/services/audit/internal/api"
+	"github.com/sharptoolbox/opic-techbase/services/audit/internal/config"
+	authDAO "github.com/sharptoolbox/opic-techbase/services/audit/internal/dao/auth"
+	systemDAO "github.com/sharptoolbox/opic-techbase/services/audit/internal/dao/system"
+	"github.com/sharptoolbox/opic-techbase/services/audit/internal/events"
+	"github.com/sharptoolbox/opic-techbase/services/audit/internal/middleware"
+	localmodel "github.com/sharptoolbox/opic-techbase/services/audit/internal/model"
+	"github.com/sharptoolbox/opic-techbase/services/audit/internal/pkg/runtimeconfig"
+	authsvc "github.com/sharptoolbox/opic-techbase/services/audit/internal/service/auth"
+	systemsvc "github.com/sharptoolbox/opic-techbase/services/audit/internal/service/system"
+	authdao "github.com/sharptoolbox/opic-techbase/services/shared/pkg/authdao"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/authz"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/database"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/graceful"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/grpcx"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/jwt"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/logger"
+	sharedmetrics "github.com/sharptoolbox/opic-techbase/services/shared/pkg/metrics"
+	sharedmw "github.com/sharptoolbox/opic-techbase/services/shared/pkg/middleware"
+	model "github.com/sharptoolbox/opic-techbase/services/shared/pkg/model"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/notifyclient"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/observability"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/outbox"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/redis"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/secretbox"
+	sharedapi "github.com/sharptoolbox/opic-techbase/services/shared/pkg/sharedapi"
+	tenantscope "github.com/sharptoolbox/opic-techbase/services/shared/pkg/tenant"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/webhookx"
+
+	auditv1 "github.com/sharptoolbox/opic-techbase/services/api/gen/audit/v1"
+	"github.com/nats-io/nats.go"
+	"gorm.io/gorm"
+)
+
+func setupCORS(router *gin.Engine) {
+	cfg := config.Cfg.CORS
+	corsConfig := cors.Config{
+		AllowMethods:     cfg.AllowMethods,
+		AllowHeaders:     cfg.AllowHeaders,
+		ExposeHeaders:    cfg.ExposeHeaders,
+		AllowCredentials: cfg.AllowCredentials,
+		MaxAge:           time.Duration(cfg.MaxAge) * time.Hour,
+	}
+
+	if config.Cfg.App.Env == "development" {
+		allowedOrigins := make(map[string]struct{}, len(cfg.AllowOrigins))
+		for _, origin := range cfg.AllowOrigins {
+			allowedOrigins[strings.TrimSpace(origin)] = struct{}{}
+		}
+		corsConfig.AllowOrigins = nil
+		corsConfig.AllowOriginFunc = func(origin string) bool {
+			if _, ok := allowedOrigins[origin]; ok {
+				return true
+			}
+			return isLocalDevelopmentOrigin(origin)
+		}
+		router.Use(cors.New(corsConfig))
+		return
+	}
+
+	if cfg.AllowCredentials {
+		if len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*" {
+			logger.Warn("production CORS cannot use '*' with credentials enabled")
+			corsConfig.AllowOrigins = []string{}
+		} else {
+			corsConfig.AllowOrigins = cfg.AllowOrigins
+		}
+	} else if len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*" {
+		corsConfig.AllowAllOrigins = true
+	} else {
+		corsConfig.AllowOrigins = cfg.AllowOrigins
+	}
+
+	router.Use(cors.New(corsConfig))
+}
+
+func isLocalDevelopmentOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+
+	switch strings.ToLower(parsed.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func printStartupBanner(name, version, env string, port int) {
+	fmt.Printf("\n%s v%s\nEnvironment: %s\nServer: http://localhost:%d\nAPI: http://localhost:%d/api/v1\n\n", name, version, env, port, port)
+	logger.Info("server started",
+		logger.String("app", name),
+		logger.String("version", version),
+		logger.String("env", env),
+		logger.Int("port", port),
+	)
+}
+
+func configureGinWriters(env string) {
+	if env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultWriter = io.Discard
+		gin.DefaultErrorWriter = io.Discard
+		return
+	}
+
+	gin.DefaultWriter = logger.NewGinWriter()
+	gin.DefaultErrorWriter = logger.NewGinErrorWriter()
+}
+
+func stopOperationLogProcessor(cancel context.CancelFunc, done <-chan struct{}, timeout time.Duration) error {
+	if cancel != nil {
+		cancel()
+	}
+	if done == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		<-done
+		return nil
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("operation log processor shutdown timed out after %s", timeout)
+	}
+}
+
+// envInt 读环境变量整数，空/非法用默认值。
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// startGRPCServer 启动 gRPC 服务并注册 Consul（Phase 1 服务发现试点）。
+// CONSUL_ADDR=disabled 时跳过注册（本机/单测不依赖 Consul）；注册失败仅告警不阻断 HTTP。
+func startGRPCServer(ctx context.Context, grpcPort int) (cleanup func(), err error) {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	if err != nil {
+		return nil, fmt.Errorf("grpc listen: %w", err)
+	}
+	srv := grpcx.NewServer()
+	auditv1.RegisterAuditServiceServer(srv, api.NewAuditGRPC(database.DB))
+	go func() {
+		_ = srv.Serve(lis) // 退出时 GracefulStop 接管
+	}()
+	logger.Info("grpc server started", logger.Int("port", grpcPort))
+
+	consulAddr := os.Getenv("CONSUL_ADDR")
+	if consulAddr == "disabled" {
+		return func() { srv.GracefulStop() }, nil
+	}
+	host := grpcx.LocalIP()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	deregister, regErr := grpcx.Register(consulAddr, grpcx.Instance{
+		ServiceName: "audit-service",
+		Host:        host,
+		Port:        grpcPort,
+	})
+	if regErr != nil {
+		logger.Warn("consul register failed（跳过，HTTP 不受影响）", logger.Err(regErr))
+	}
+	return func() {
+		if deregister != nil {
+			deregister()
+		}
+		srv.GracefulStop()
+	}, nil
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		if logger.Logger != nil {
+			logger.Error("server exited with error", logger.Err(err))
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "server exited with error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context) error {
+	if err := config.Load(); err != nil {
+		return fmt.Errorf("config load failed: %w", err)
+	}
+	jwt.SetConfig(jwt.JWTConfig{Secret: config.Cfg.JWT.Secret, Issuer: config.Cfg.JWT.Issuer, AccessTokenExpire: config.Cfg.JWT.AccessTokenExpire, RefreshTokenExpire: config.Cfg.JWT.RefreshTokenExpire, RefreshTokenRotation: config.Cfg.JWT.RefreshTokenRotation})
+
+	logCfg := config.Cfg.Logger
+	logger.InitLogger(logCfg.FilePath, logCfg.Level, logCfg.MaxSize, logCfg.MaxBackups, logCfg.MaxAge)
+	defer func() {
+		if logger.Logger != nil {
+			_ = logger.Logger.Sync()
+		}
+	}()
+
+	logger.Info("initializing database")
+	if err := database.InitDatabase(database.Config{
+		DSN:                    config.Cfg.Database.GetDSN(),
+		Host:                   config.Cfg.Database.Host,
+		Port:                   config.Cfg.Database.Port,
+		DBName:                 config.Cfg.Database.DBName,
+		MaxIdleConns:           config.Cfg.Database.MaxIdleConns,
+		MaxOpenConns:           config.Cfg.Database.MaxOpenConns,
+		ConnMaxLifetimeSeconds: config.Cfg.Database.ConnMaxLifetimeSeconds,
+		ConnMaxIdleTimeSeconds: config.Cfg.Database.ConnMaxIdleTimeSeconds,
+	}); err != nil {
+		return fmt.Errorf("database initialization failed: %w", err)
+	}
+	if err := authz.RegisterDataScopePlugin(database.DB); err != nil {
+		return fmt.Errorf("data scope plugin registration failed: %w", err)
+	}
+	authz.SetDefaultDB(database.DB)
+	registerAuthzScopedModels()
+	webhookKey, err := config.WebhookEncryptionKey(config.Cfg)
+	if err != nil {
+		return err
+	}
+	var webhookKeyring *secretbox.Keyring
+	if len(webhookKey) == 32 {
+		webhookKeyring, err = secretbox.NewKeyring(secretbox.Key{ID: config.Cfg.Webhook.KeyID, Material: webhookKey})
+		clear(webhookKey)
+		if err != nil {
+			return fmt.Errorf("initialize webhook keyring: %w", err)
+		}
+	}
+	webhookPolicy := webhookx.Policy{AllowHTTP: config.Cfg.Webhook.AllowHTTP, AllowPrivate: config.Cfg.Webhook.AllowPrivate}
+	systemsvc.ConfigureWebhookDefaults(webhookKeyring, webhookPolicy)
+	// Phase 2D：审计事件消费者（订阅 audit.log.> 写 audit_svc）。
+	// Phase 5：Outbox worker——投递 public.outbox_events → NATS（业务方同事务写入）。
+	if natsURL := config.Cfg.NATS.URL; natsURL != "" {
+		stopConsumer, err := events.StartConsumer(ctx, natsURL, database.DB)
+		if err != nil {
+			logger.Warn("audit events consumer start failed（跳过，直写审计不受影响）", logger.Err(err))
+		} else {
+			defer stopConsumer()
+			logger.Info("audit events consumer started", logger.String("nats", natsURL))
+		}
+		if stopWorker, err := startOutboxWorker(ctx, natsURL, database.DB); err != nil {
+			logger.Warn("outbox worker start failed（事务 Outbox 投递暂停）", logger.Err(err))
+		} else if stopWorker != nil {
+			defer stopWorker()
+			logger.Info("outbox worker started")
+		}
+	}
+	if err := tenantscope.Register(database.DB); err != nil {
+		return fmt.Errorf("tenant scope plugin registration failed: %w", err)
+	}
+	consoleSessionService := authsvc.NewConsoleSessionServiceWithDB(database.DB)
+	middleware.SetAuthMiddlewareDependencies(middleware.AuthMiddlewareDependencies{
+		Users:           authDAO.NewUserDAO(database.DB),
+		Permissions:     authdao.NewPermissionDAO(database.DB),
+		ConsoleSessions: &consoleSessionService,
+	})
+	authz.SetPersistence(authz.Persistence{
+		Users:       authDAO.NewUserDAO(database.DB),
+		Permissions: authdao.NewPermissionDAO(database.DB),
+		DataScope:   authz.NewDatabaseDataScopeStore(database.DB),
+	})
+	runtimeconfig.SetSecurityPolicyStore(systemDAO.NewSettingDAO(database.DB))
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("database close failed", logger.Err(err))
+		}
+	}()
+
+	logger.Info("initializing redis")
+	if err := redis.InitRedis(redis.Config{
+		Host:     config.Cfg.Redis.Host,
+		Port:     config.Cfg.Redis.Port,
+		Password: config.Cfg.Redis.Password,
+		DB:       config.Cfg.Redis.DB,
+		PoolSize: config.Cfg.Redis.PoolSize,
+	}); err != nil {
+		return fmt.Errorf("redis initialization failed: %w", err)
+	}
+	authz.SetRemoteCache(authz.NewGoRedisRemoteCache(redis.Client))
+	jwt.SetRedis(redis.Client)
+	defer func() {
+		if err := redis.Close(); err != nil {
+			logger.Error("redis close failed", logger.Err(err))
+		}
+	}()
+
+	lifecycleCtx, cancelLifecycle := context.WithCancel(ctx)
+	defer cancelLifecycle()
+
+	// Persist operation logs for the admin CRUD this service now owns.
+	operationLogService := systemsvc.NewOperationLogServiceWithDB(database.DB)
+	operationLogDone := middleware.StartOperationLogProcessor(lifecycleCtx, &operationLogService)
+	defer func() {
+		if err := stopOperationLogProcessor(cancelLifecycle, operationLogDone, 5*time.Second); err != nil {
+			logger.Warn("operation log processor shutdown timeout", logger.Err(err))
+		}
+	}()
+
+	// Consume auth-service login events via Redis pub/sub into login_logs.
+	loginNotify := notifyclient.New(config.Cfg.Notify.APIBase, config.Cfg.Notify.Token)
+	loginLogService := systemsvc.NewLoginLogServiceWithDB(database.DB).WithNotifier(loginNotify)
+	authEventConsumer, err := events.StartRedisLoginConsumer(lifecycleCtx, redis.Client, &loginLogService)
+	if err != nil {
+		logger.Warn("redis login event consumer start failed, login logs disabled", logger.Err(err))
+	} else if authEventConsumer != nil {
+		defer authEventConsumer.Close()
+		logger.Info("redis login event consumer enabled")
+	}
+
+	// 日志保留策略：按 AUDIT_LOG_RETENTION_DAYS 周期清理操作/登录日志
+	// （默认关闭；audit_logs 不清理，见 service/system/log_retention.go）。
+	if systemsvc.StartLogRetentionCleaner(lifecycleCtx, database.DB, &operationLogService, &loginLogService, systemsvc.LogRetentionOptions{
+		RetentionDays: config.Cfg.Retention.LogRetentionDays,
+		ScanInterval:  time.Duration(config.Cfg.Retention.LogRetentionScanIntervalSeconds) * time.Second,
+	}) {
+		logger.Info("log retention cleaner enabled",
+			logger.Int("retention_days", config.Cfg.Retention.LogRetentionDays))
+	}
+
+	if worker := systemsvc.StartWebhookWorker(lifecycleCtx, database.DB, webhookKeyring, systemsvc.WebhookWorkerOptions{
+		ScanInterval:   time.Duration(config.Cfg.Webhook.ScanIntervalSeconds) * time.Second,
+		BatchSize:      config.Cfg.Webhook.BatchSize,
+		MaxAttempts:    config.Cfg.Webhook.MaxAttempts,
+		RequestTimeout: time.Duration(config.Cfg.Webhook.RequestTimeoutSeconds) * time.Second,
+		Policy:         webhookPolicy,
+	}); worker != nil {
+		logger.Info("webhook delivery worker enabled")
+	} else {
+		logger.Warn("webhook delivery disabled: WEBHOOK_ENCRYPTION_KEY is not configured")
+	}
+
+	// 安全事件检测器：扫审计日志异常模式（写入激增/权限风暴/失败激增），
+	// 命中落 security_events + 站内信通知平台管理员（notify 未配时静默跳过）。
+	notifyClient := notifyclient.New(config.Cfg.Notify.APIBase, config.Cfg.Notify.Token)
+	systemsvc.StartSecurityEventDetector(lifecycleCtx, database.DB, notifyClient, systemsvc.SecurityDetectorOptions{
+		ScanInterval:        60 * time.Second,
+		Window:              10 * time.Minute,
+		WriteThreshold:      config.Cfg.SecurityDetect.WriteThreshold,
+		PermissionThreshold: config.Cfg.SecurityDetect.PermissionThreshold,
+		FailureThreshold:    config.Cfg.SecurityDetect.FailureThreshold,
+		NotifyUserID:        1,
+		NotifyURL:           "/system/security-events",
+	})
+
+	// Refresh cached department trees when another instance (or the monolith)
+	// changes departments.
+	departmentTreeListener, err := authz.StartDepartmentTreeInvalidationListener(lifecycleCtx)
+	if err != nil {
+		logger.Warn("department tree invalidation listener start failed", logger.Err(err))
+	} else {
+		defer func() {
+			if err := departmentTreeListener.Close(); err != nil {
+				logger.Warn("department tree invalidation listener close failed", logger.Err(err))
+			}
+		}()
+	}
+
+	// Warm up the runtime security policy cache; failures fall back to the
+	// static config defaults on first request.
+	if err := runtimeconfig.DefaultSecurityPolicyReader().Refresh(ctx); err != nil {
+		logger.Warn("security policy warmup failed", logger.Err(err))
+	}
+
+	runtimeConfigListener, err := runtimeconfig.StartInvalidationListener(lifecycleCtx)
+	if err != nil {
+		logger.Warn("runtime config invalidation listener start failed", logger.Err(err))
+	} else {
+		defer func() {
+			if err := runtimeConfigListener.Close(); err != nil {
+				logger.Warn("runtime config invalidation listener close failed", logger.Err(err))
+			}
+		}()
+	}
+
+	tracingCfg := config.Cfg.Observability.Tracing
+	shutdownTracing, err := observability.InitTracer(ctx, observability.Config{
+		Enabled:      tracingCfg.Enabled,
+		ServiceName:  tracingCfg.ServiceName,
+		Environment:  tracingCfg.Environment,
+		OTLPEndpoint: tracingCfg.OTLPEndpoint,
+		SampleRatio:  tracingCfg.SampleRatio,
+	})
+	if err != nil {
+		return fmt.Errorf("tracing initialization failed: %w", err)
+	}
+	if tracingCfg.Enabled {
+		logger.Info("tracing enabled",
+			logger.String("service", tracingCfg.ServiceName),
+			logger.String("env", tracingCfg.Environment),
+			logger.String("otlp", tracingCfg.OTLPEndpoint),
+			logger.Any("sample_ratio", tracingCfg.SampleRatio),
+		)
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdownTracing(ctx); err != nil {
+				logger.Error("tracing shutdown failed", logger.Err(err))
+			}
+		}()
+	}
+
+	configureGinWriters(config.Cfg.App.Env)
+
+	router := gin.New()
+	if len(config.Cfg.Security.TrustedProxies) > 0 {
+		if err := router.SetTrustedProxies(config.Cfg.Security.TrustedProxies); err != nil {
+			return fmt.Errorf("trusted proxy config failed: %w", err)
+		}
+	}
+
+	// HTTP 指标（GET /metrics，Prometheus 抓取）：先于其余中间件注册，
+	// 端点不进日志/限流链；METRICS_ENABLED=false 关闭
+	sharedmetrics.Install(router)
+	if sqlDB, err := database.DB.DB(); err == nil {
+		sharedmetrics.SetDBStats(sqlDB.Stats)
+	}
+	router.Use(sharedmw.RequestID(config.Cfg.Observability.RequestIDHeader))
+	if tracingCfg.Enabled {
+		router.Use(observability.GinTracing(tracingCfg.ServiceName, sharedmw.RequestIDKey))
+	}
+	router.Use(sharedmw.SecurityHeaders(config.Cfg.Security.Headers.Enabled, config.Cfg.Security.Headers.HSTS))
+	router.Use(sharedmw.Recovery())
+	router.Use(middleware.DynamicRateLimit(runtimeconfig.DefaultSecurityPolicyReader()))
+	router.Use(sharedmw.RequestLogger())
+	router.Use(sharedmw.ErrorHandler())
+	setupCORS(router)
+	api.SetupRoutesWithDeps(router, sharedapi.Dependencies{DB: database.DB, Redis: redis.Client})
+
+	grpcPort := envInt("GRPC_PORT", 9082)
+	grpcCleanup, err := startGRPCServer(ctx, grpcPort)
+	if err != nil {
+		return fmt.Errorf("grpc server start failed: %w", err)
+	}
+
+	port := config.Cfg.App.Port
+	server := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: router}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("server listen failed: %w", err)
+	}
+	printStartupBanner(config.Cfg.App.Name, config.Cfg.App.Version, config.Cfg.App.Env, port)
+	sh := graceful.New(graceful.WithTimeout(15 * time.Second))
+	if grpcCleanup != nil {
+		sh.Register("grpc", func(ctx context.Context) error {
+			grpcCleanup()
+			return nil
+		})
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		logger.Info("server listening", logger.String("addr", server.Addr))
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+	sh.Register("http-server", func(ctx context.Context) error {
+		return server.Shutdown(ctx)
+	})
+	if err := sh.WaitAndShutdown(); err != nil {
+		logger.Error("graceful shutdown error", logger.Err(err))
+	}
+	select {
+	case err := <-serverErr:
+		return err
+	default:
+		return nil
+	}
+}
+
+// startOutboxWorker 连接 NATS JetStream，轮询 outbox_events 并同步 Publish。
+// 生产方（如 crm 开启 outbox.EnableTransactional）在业务事务内写入该表。
+func startOutboxWorker(ctx context.Context, natsURL string, db *gorm.DB) (func(), error) {
+	if natsURL == "" || db == nil {
+		return nil, nil
+	}
+	nc, err := nats.Connect(natsURL,
+		nats.Name("audit-outbox-worker"),
+		nats.MaxReconnects(-1),
+		nats.Timeout(3*time.Second),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("nats connect: %w", err)
+	}
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, fmt.Errorf("jetstream: %w", err)
+	}
+	// 与 auditevents 同 stream，保证 subject audit.log.> 可投
+	if _, err := js.StreamInfo("audit_events"); err != nil {
+		if _, err := js.AddStream(&nats.StreamConfig{
+			Name:      "audit_events",
+			Subjects:  []string{"audit.log.>"},
+			Storage:   nats.FileStorage,
+			Retention: nats.LimitsPolicy,
+			MaxAge:    7 * 24 * time.Hour,
+		}); err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("ensure stream: %w", err)
+		}
+	}
+	pub := outbox.PublisherFunc(func(ctx context.Context, subject string, payload []byte) error {
+		_, err := js.Publish(subject, payload, nats.Context(ctx))
+		return err
+	})
+	stop := outbox.StartWorker(ctx, db, pub, outbox.Options{
+		PollInterval: 2 * time.Second,
+		BatchSize:    32,
+		MaxAttempts:  8,
+		Logger: func(format string, args ...any) {
+			logger.Info(fmt.Sprintf(format, args...))
+		},
+	})
+	return func() {
+		stop()
+		nc.Close()
+	}, nil
+}
+
+func registerAuthzScopedModels() {
+	authz.RegisterScopedModel(reflect.TypeOf(model.File{}), authz.ScopeByOwner)
+	authz.RegisterScopedModel(reflect.TypeOf(localmodel.LoginLog{}), authz.ScopeByOwner)
+	authz.RegisterScopedModel(reflect.TypeOf(localmodel.OperationLog{}), authz.ScopeByOwner)
+}

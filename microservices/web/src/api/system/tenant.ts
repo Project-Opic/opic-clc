@@ -1,0 +1,51 @@
+import request from '@/utils/request'
+import type { TenantInfo } from '@/types'
+
+export function getTenantList(params?: { page?: number; page_size?: number; keyword?: string; status?: number }) {
+  return request.get('/api/v1/tenants', { params }) as Promise<{
+    list: TenantInfo[]
+    total: number
+    page: number
+    page_size: number
+  }>
+}
+
+export function getTenant(id: number) {
+  return request.get(`/api/v1/tenants/${id}`) as Promise<{ tenant: TenantInfo; user_count: number }>
+}
+
+export type TenantCreateResult = {
+  tenant: TenantInfo
+  /** 开通时自动创建的初始管理员凭据（一次性展示后应转交租户管理员） */
+  admin: { username: string; initial_password: string } | null
+}
+
+export function createTenant(data: {
+  code: string
+  name: string
+  plan?: string
+  max_users?: number
+  status?: number
+  /** 租户套餐（权限包）；缺省/0 = 不限 */
+  package_id?: number
+}) {
+  return request.post('/api/v1/tenants', data) as Promise<TenantCreateResult>
+}
+
+export function updateTenant(
+  id: number,
+  data: {
+    name?: string
+    plan?: string
+    max_users?: number
+    status?: number
+    /** 租户套餐：缺省 = 不改；0 = 解绑；>0 = 绑定 */
+    package_id?: number
+  },
+) {
+  return request.put(`/api/v1/tenants/${id}`, data) as Promise<TenantInfo>
+}
+
+export function deleteTenant(id: number) {
+  return request.delete(`/api/v1/tenants/${id}`) as Promise<void>
+}

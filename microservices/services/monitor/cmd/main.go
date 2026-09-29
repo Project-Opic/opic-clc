@@ -1,0 +1,502 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"reflect"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/sharptoolbox/opic-techbase/services/monitor/internal/api"
+	"github.com/sharptoolbox/opic-techbase/services/monitor/internal/config"
+	authDAO "github.com/sharptoolbox/opic-techbase/services/monitor/internal/dao/auth"
+	monitordao "github.com/sharptoolbox/opic-techbase/services/monitor/internal/dao/monitor"
+	systemDAO "github.com/sharptoolbox/opic-techbase/services/monitor/internal/dao/system"
+	"github.com/sharptoolbox/opic-techbase/services/monitor/internal/middleware"
+	localmodel "github.com/sharptoolbox/opic-techbase/services/monitor/internal/model"
+	"github.com/sharptoolbox/opic-techbase/services/monitor/internal/pkg/runtimeconfig"
+	authsvc "github.com/sharptoolbox/opic-techbase/services/monitor/internal/service/auth"
+	monitorSvc "github.com/sharptoolbox/opic-techbase/services/monitor/internal/service/monitor"
+	systemSvc "github.com/sharptoolbox/opic-techbase/services/monitor/internal/service/system"
+	authdao "github.com/sharptoolbox/opic-techbase/services/shared/pkg/authdao"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/authz"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/database"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/graceful"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/grpcx"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/jwt"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/logger"
+	sharedmw "github.com/sharptoolbox/opic-techbase/services/shared/pkg/middleware"
+	model "github.com/sharptoolbox/opic-techbase/services/shared/pkg/model"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/observability"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/redis"
+	sharedapi "github.com/sharptoolbox/opic-techbase/services/shared/pkg/sharedapi"
+
+	monitorv1 "github.com/sharptoolbox/opic-techbase/services/api/gen/monitor/v1"
+	monitorapi "github.com/sharptoolbox/opic-techbase/services/monitor/internal/api/monitor"
+)
+
+// @title           Go Admin Kit API
+// @version         1.0
+// @description     A Gin + GORM + Redis admin backend starter.
+// @host            localhost:8081
+// @BasePath        /api/v1
+// @securityDefinitions.apikey Bearer
+// @in              header
+// @name            Authorization
+// @description     Type "Bearer" followed by a space and JWT token.
+
+func setupCORS(router *gin.Engine) {
+	cfg := config.Cfg.CORS
+	corsConfig := cors.Config{
+		AllowMethods:     cfg.AllowMethods,
+		AllowHeaders:     cfg.AllowHeaders,
+		ExposeHeaders:    cfg.ExposeHeaders,
+		AllowCredentials: cfg.AllowCredentials,
+		MaxAge:           time.Duration(cfg.MaxAge) * time.Hour,
+	}
+
+	if config.Cfg.App.Env == "development" {
+		allowedOrigins := make(map[string]struct{}, len(cfg.AllowOrigins))
+		for _, origin := range cfg.AllowOrigins {
+			allowedOrigins[strings.TrimSpace(origin)] = struct{}{}
+		}
+		corsConfig.AllowOrigins = nil
+		corsConfig.AllowOriginFunc = func(origin string) bool {
+			if _, ok := allowedOrigins[origin]; ok {
+				return true
+			}
+			return isLocalDevelopmentOrigin(origin)
+		}
+		router.Use(cors.New(corsConfig))
+		return
+	}
+
+	if cfg.AllowCredentials {
+		if len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*" {
+			logger.Warn("production CORS cannot use '*' with credentials enabled")
+			corsConfig.AllowOrigins = []string{}
+		} else {
+			corsConfig.AllowOrigins = cfg.AllowOrigins
+		}
+	} else if len(cfg.AllowOrigins) == 1 && cfg.AllowOrigins[0] == "*" {
+		corsConfig.AllowAllOrigins = true
+	} else {
+		corsConfig.AllowOrigins = cfg.AllowOrigins
+	}
+
+	router.Use(cors.New(corsConfig))
+}
+
+func isLocalDevelopmentOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+
+	switch strings.ToLower(parsed.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func printStartupBanner(name, version, env string, port int) {
+	fmt.Printf("\n%s v%s\nEnvironment: %s\nServer: http://localhost:%d\nAPI: http://localhost:%d/api/v1\n\n", name, version, env, port, port)
+	logger.Info("server started",
+		logger.String("app", name),
+		logger.String("version", version),
+		logger.String("env", env),
+		logger.Int("port", port),
+	)
+}
+
+func configureGinWriters(env string) {
+	if env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+		gin.DefaultWriter = io.Discard
+		gin.DefaultErrorWriter = io.Discard
+		return
+	}
+
+	gin.DefaultWriter = logger.NewGinWriter()
+	gin.DefaultErrorWriter = logger.NewGinErrorWriter()
+}
+
+// serveHTTPServer couples the HTTP listener to the shared graceful shutdown
+// registry. The injected context makes the production path testable without
+// synthesizing process signals, while Shutdown still drains in-flight requests
+// before the remaining LIFO handlers run.
+func serveHTTPServer(ctx context.Context, server *http.Server, listener net.Listener, sh *graceful.Shutdowner) error {
+	if sh == nil {
+		sh = graceful.New(graceful.WithTimeout(15 * time.Second))
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		serverErr <- err
+	}()
+	sh.Register("http-server", func(shutdownCtx context.Context) error {
+		return server.Shutdown(shutdownCtx)
+	})
+
+	select {
+	case err := <-serverErr:
+		return errors.Join(err, sh.Shutdown())
+	case <-ctx.Done():
+		if err := sh.Shutdown(); err != nil {
+			return err
+		}
+		return <-serverErr
+	}
+}
+
+func startDepartmentTreeInvalidationListener(ctx context.Context) (io.Closer, error) {
+	return authz.StartDepartmentTreeInvalidationListener(ctx)
+}
+
+func startRuntimeConfigInvalidationListener(ctx context.Context) (*redis.StringSubscriber, error) {
+	return runtimeconfig.StartInvalidationListener(ctx)
+}
+
+func stopOperationLogProcessor(cancel context.CancelFunc, done <-chan struct{}, timeout time.Duration) error {
+	if cancel != nil {
+		cancel()
+	}
+	if done == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		<-done
+		return nil
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("operation log processor shutdown timed out after %s", timeout)
+	}
+}
+
+type jobSchedulerShutdowner interface {
+	Shutdown() context.Context
+}
+
+func shutdownJobScheduler(scheduler jobSchedulerShutdowner, timeout time.Duration) error {
+	if scheduler == nil {
+		return nil
+	}
+	ctx := scheduler.Shutdown()
+	if ctx == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		<-ctx.Done()
+		return nil
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("job scheduler shutdown timed out after %s", timeout)
+	}
+}
+
+// startGRPCServer 启动 gRPC 服务并注册 Consul（Phase 1 服务发现试点）。
+// CONSUL_ADDR=disabled 时跳过注册（本机/单测不依赖 Consul）；注册失败仅告警不阻断 HTTP。
+func startGRPCServer(ctx context.Context, grpcPort int) (cleanup func(), err error) {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	if err != nil {
+		return nil, fmt.Errorf("grpc listen: %w", err)
+	}
+	srv := grpcx.NewServer()
+	monitorv1.RegisterMonitorServiceServer(srv, monitorapi.NewMonitorGRPC())
+	go func() {
+		_ = srv.Serve(lis) // 退出时 GracefulStop 接管
+	}()
+	logger.Info("grpc server started", logger.Int("port", grpcPort))
+
+	consulAddr := os.Getenv("CONSUL_ADDR")
+	if consulAddr == "disabled" {
+		return func() { srv.GracefulStop() }, nil
+	}
+	host := grpcx.LocalIP()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	deregister, regErr := grpcx.Register(consulAddr, grpcx.Instance{
+		ServiceName: "monitor-service",
+		Host:        host,
+		Port:        grpcPort,
+	})
+	if regErr != nil {
+		logger.Warn("consul register failed（跳过，HTTP 不受影响）", logger.Err(regErr))
+	}
+	return func() {
+		if deregister != nil {
+			deregister()
+		}
+		srv.GracefulStop()
+	}, nil
+}
+
+// envInt 读环境变量整数，空/非法用默认值。
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		if logger.Logger != nil {
+			logger.Error("server exited with error", logger.Err(err))
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "server exited with error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context) error {
+	configPath := os.Getenv("CONFIG_FILE")
+	if configPath == "" {
+		configPath = "./configs/config.yaml"
+	}
+	if err := config.LoadConfig(configPath); err != nil {
+		return fmt.Errorf("config load failed: %w", err)
+	}
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	logCfg := config.Cfg.Logger
+	logger.InitLogger(logCfg.FilePath, logCfg.Level, logCfg.MaxSize, logCfg.MaxBackups, logCfg.MaxAge)
+	defer func() {
+		if logger.Logger != nil {
+			_ = logger.Logger.Sync()
+		}
+	}()
+
+	logger.Info("initializing database")
+	if err := database.InitDatabase(database.Config{
+		DSN:                    config.Cfg.Database.GetDSN(),
+		Host:                   config.Cfg.Database.Host,
+		Port:                   config.Cfg.Database.Port,
+		DBName:                 config.Cfg.Database.DBName,
+		MaxIdleConns:           config.Cfg.Database.MaxIdleConns,
+		MaxOpenConns:           config.Cfg.Database.MaxOpenConns,
+		ConnMaxLifetimeSeconds: config.Cfg.Database.ConnMaxLifetimeSeconds,
+		ConnMaxIdleTimeSeconds: config.Cfg.Database.ConnMaxIdleTimeSeconds,
+	}); err != nil {
+		return fmt.Errorf("database initialization failed: %w", err)
+	}
+	if err := authz.RegisterDataScopePlugin(database.DB); err != nil {
+		return fmt.Errorf("data scope plugin registration failed: %w", err)
+	}
+	authz.SetDefaultDB(database.DB)
+	registerAuthzScopedModels()
+	middleware.SetAuthMiddlewareDependencies(middleware.AuthMiddlewareDependencies{
+		Users:           authDAO.NewUserDAO(database.DB),
+		Permissions:     authdao.NewPermissionDAO(database.DB),
+		ConsoleSessions: authsvc.NewConsoleSessionServiceWithDB(database.DB),
+	})
+	authz.SetPersistence(authz.Persistence{
+		Users:       authDAO.NewUserDAO(database.DB),
+		Permissions: authdao.NewPermissionDAO(database.DB),
+		DataScope:   authz.NewDatabaseDataScopeStore(database.DB),
+	})
+	runtimeconfig.SetSecurityPolicyStore(systemDAO.NewSettingDAO(database.DB))
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("database close failed", logger.Err(err))
+		}
+	}()
+
+	lifecycleCtx, cancelLifecycle := context.WithCancel(ctx)
+	defer cancelLifecycle()
+	operationLogService := systemSvc.NewOperationLogServiceWithDB(database.DB)
+	operationLogDone := middleware.StartOperationLogProcessor(lifecycleCtx, &operationLogService)
+	defer func() {
+		if err := stopOperationLogProcessor(cancelLifecycle, operationLogDone, 5*time.Second); err != nil {
+			logger.Warn("operation log processor shutdown timeout", logger.Err(err))
+		}
+	}()
+
+	logger.Info("initializing redis")
+	if err := redis.InitRedis(redis.Config{
+		Host:     config.Cfg.Redis.Host,
+		Port:     config.Cfg.Redis.Port,
+		Password: config.Cfg.Redis.Password,
+		DB:       config.Cfg.Redis.DB,
+		PoolSize: config.Cfg.Redis.PoolSize,
+	}); err != nil {
+		return fmt.Errorf("redis initialization failed: %w", err)
+	}
+	authz.SetRemoteCache(authz.NewGoRedisRemoteCache(redis.Client))
+	jwt.SetRedis(redis.Client)
+	defer func() {
+		if err := redis.Close(); err != nil {
+			logger.Error("redis close failed", logger.Err(err))
+		}
+	}()
+
+	departmentTreeListener, err := startDepartmentTreeInvalidationListener(lifecycleCtx)
+	if err != nil {
+		logger.Warn("department tree invalidation listener start failed", logger.Err(err))
+	} else {
+		defer func() {
+			if err := departmentTreeListener.Close(); err != nil {
+				logger.Warn("department tree invalidation listener close failed", logger.Err(err))
+			}
+		}()
+	}
+
+	runtimeConfigListener, err := startRuntimeConfigInvalidationListener(lifecycleCtx)
+	if err != nil {
+		logger.Warn("runtime config invalidation listener start failed", logger.Err(err))
+	} else {
+		defer func() {
+			if err := runtimeConfigListener.Close(); err != nil {
+				logger.Warn("runtime config invalidation listener close failed", logger.Err(err))
+			}
+		}()
+	}
+
+	tracingCfg := config.Cfg.Observability.Tracing
+	shutdownTracing, err := observability.InitTracer(ctx, observability.Config{
+		Enabled:      tracingCfg.Enabled,
+		ServiceName:  tracingCfg.ServiceName,
+		Environment:  tracingCfg.Environment,
+		OTLPEndpoint: tracingCfg.OTLPEndpoint,
+		SampleRatio:  tracingCfg.SampleRatio,
+	})
+	if err != nil {
+		return fmt.Errorf("tracing initialization failed: %w", err)
+	}
+	if tracingCfg.Enabled {
+		logger.Info("tracing enabled",
+			logger.String("service", tracingCfg.ServiceName),
+			logger.String("env", tracingCfg.Environment),
+			logger.String("otlp", tracingCfg.OTLPEndpoint),
+			logger.Any("sample_ratio", tracingCfg.SampleRatio),
+		)
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := shutdownTracing(ctx); err != nil {
+				logger.Error("tracing shutdown failed", logger.Err(err))
+			}
+		}()
+	}
+
+	configureGinWriters(config.Cfg.App.Env)
+
+	router := gin.New()
+	if len(config.Cfg.Security.TrustedProxies) > 0 {
+		if err := router.SetTrustedProxies(config.Cfg.Security.TrustedProxies); err != nil {
+			return fmt.Errorf("trusted proxy config failed: %w", err)
+		}
+	}
+
+	router.Use(sharedmw.RequestID(config.Cfg.Observability.RequestIDHeader))
+	if config.Cfg.Observability.Tracing.Enabled {
+		router.Use(observability.GinTracing(config.Cfg.Observability.Tracing.ServiceName, sharedmw.RequestIDKey))
+	}
+	if config.Cfg.Observability.MetricsEnabled {
+		router.Use(middleware.Metrics())
+	}
+	router.Use(sharedmw.SecurityHeaders(config.Cfg.Security.Headers.Enabled, config.Cfg.Security.Headers.HSTS))
+	router.Use(sharedmw.Recovery())
+
+	router.Use(middleware.DynamicRateLimit(runtimeconfig.DefaultSecurityPolicyReader()))
+
+	router.Use(sharedmw.RequestLogger())
+	router.Use(sharedmw.ErrorHandler())
+	setupCORS(router)
+	jobScheduler := monitorSvc.InitJobService(database.DB)
+	alertService := monitorSvc.NewAlertService(database.DB, redis.Client)
+	alertEvaluator := monitorSvc.StartAlertEvaluator(lifecycleCtx, alertService, monitorSvc.DefaultAlertEvaluationInterval)
+	metricSampler := monitorSvc.StartMetricSampler(
+		lifecycleCtx,
+		monitorSvc.NewDefaultAlertMetricCollector(database.DB, redis.Client),
+		monitordao.NewMetricSampleDAO(database.DB),
+		monitorSvc.DefaultSamplingInterval,
+	)
+	api.SetupRoutesWithDeps(router, sharedapi.Dependencies{DB: database.DB, Redis: redis.Client})
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := alertEvaluator.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("alert evaluator shutdown timeout", logger.Err(err))
+		}
+		if err := metricSampler.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("metric sampler shutdown timeout", logger.Err(err))
+		}
+	}()
+	defer func() {
+		if err := shutdownJobScheduler(jobScheduler, 5*time.Second); err != nil {
+			logger.Warn("job scheduler shutdown timeout", logger.Err(err))
+		}
+	}()
+
+	grpcPort := envInt("GRPC_PORT", 9081)
+	grpcCleanup, err := startGRPCServer(ctx, grpcPort)
+	if err != nil {
+		return fmt.Errorf("grpc server start failed: %w", err)
+	}
+
+	port := config.Cfg.App.Port
+	server := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: router}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("server listen failed: %w", err)
+	}
+	printStartupBanner(config.Cfg.App.Name, config.Cfg.App.Version, config.Cfg.App.Env, port)
+	sh := graceful.New(graceful.WithTimeout(15 * time.Second))
+	if grpcCleanup != nil {
+		sh.Register("grpc", func(ctx context.Context) error {
+			grpcCleanup()
+			return nil
+		})
+	}
+	signalCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	logger.Info("server listening", logger.String("addr", server.Addr))
+	if err := serveHTTPServer(signalCtx, server, listener, sh); err != nil {
+		return fmt.Errorf("server start failed: %w", err)
+	}
+	return nil
+}
+
+func registerAuthzScopedModels() {
+	authz.RegisterScopedModel(reflect.TypeOf(model.File{}), authz.ScopeByOwner)
+	authz.RegisterScopedModel(reflect.TypeOf(localmodel.LoginLog{}), authz.ScopeByOwner)
+	authz.RegisterScopedModel(reflect.TypeOf(localmodel.OperationLog{}), authz.ScopeByOwner)
+}

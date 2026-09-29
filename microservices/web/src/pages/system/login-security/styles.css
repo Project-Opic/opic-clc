@@ -1,0 +1,5 @@
+.login-security-section-title {
+  font-weight: 600;
+  color: var(--adm-color-text-secondary, rgba(0, 0, 0, 0.55));
+  margin: 4px 0 8px;
+}

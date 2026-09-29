@@ -1,0 +1,247 @@
+// Package events publishes best-effort authentication domain events to a
+// Redis Stream (auth:events).
+//
+// Publishing must never fail or block the login path: the publisher is
+// nil-safe, publishes asynchronously with a bounded timeout, and only logs a
+// warning when delivery fails.
+package events
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"time"
+
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/logger"
+	"github.com/redis/go-redis/v9"
+)
+
+// Subjects for auth events (stored in the stream entry's subject field).
+const (
+	SubjectLoginSuccess = "auth.login.success"
+	SubjectLoginFailed  = "auth.login.failed"
+	SubjectLogout       = "auth.logout"
+)
+
+// Login types recorded on auth.login.success events.
+const (
+	LoginTypeAccount     = "account"
+	LoginTypeTOTP        = "totp"
+	LoginTypeConsole     = "console"
+	LoginTypeOAuthGithub = "oauth:github"
+	LoginTypeOAuthWechat = "oauth:wechat"
+)
+
+const publishTimeout = 2 * time.Second
+const maxConcurrentPublishes = 64
+
+// StreamKey is the Redis Stream all auth events are appended to. The audit
+// service consumes it via a consumer group (at-least-once; survives consumer
+// restarts, unlike pub/sub which drops events published while it is down).
+const StreamKey = "auth:events"
+
+// streamMaxLen caps the stream via XADD MAXLEN ~ N so unconsumed events cannot
+// grow Redis unboundedly. At ~500B/event this bounds worst case to ~5MB.
+const streamMaxLen = 10000
+
+// LoginSuccessEvent is published on subject auth.login.success.
+type LoginSuccessEvent struct {
+	UserID    uint   `json:"user_id"`
+	Username  string `json:"username"`
+	TenantID  uint   `json:"tenant_id"`
+	IP        string `json:"ip"`
+	UserAgent string `json:"user_agent"`
+	LoginType string `json:"login_type"`
+	Timestamp string `json:"timestamp"`
+	DeviceID  string `json:"device_id"` // anonymous device fingerprint (X-Device-ID), for new-device login detection
+}
+
+// LoginFailedEvent is published on subject auth.login.failed.
+type LoginFailedEvent struct {
+	Username  string `json:"username"`
+	TenantID  uint   `json:"tenant_id"`
+	IP        string `json:"ip"`
+	UserAgent string `json:"user_agent"`
+	Reason    string `json:"reason"`
+	Timestamp string `json:"timestamp"`
+}
+
+// LogoutEvent is published on subject auth.logout.
+type LogoutEvent struct {
+	UserID    uint   `json:"user_id"`
+	Username  string `json:"username"`
+	IP        string `json:"ip"`
+	Timestamp string `json:"timestamp"`
+}
+
+// Transport is the minimal publish surface the Publisher needs. *nats.Conn
+// satisfies it; tests inject fakes.
+type Transport interface {
+	Publish(subject string, data []byte) error
+}
+
+// Publisher publishes JSON events to NATS. A nil *Publisher is a no-op, so
+// callers never need to guard against a disabled event bus.
+type Publisher struct {
+	transport Transport
+	closer    func()
+	timeout   time.Duration
+	slots     chan struct{}
+}
+
+// ConnectRedis builds a Publisher backed by Redis pub/sub. A nil client
+// disables event publishing and returns (nil, nil).
+func ConnectRedis(redisClient *redis.Client) (*Publisher, error) {
+	if redisClient == nil {
+		return nil, nil
+	}
+	return &Publisher{
+		transport: &redisClientAdapter{client: redisClient},
+		timeout:   publishTimeout,
+		slots:     make(chan struct{}, maxConcurrentPublishes),
+	}, nil
+}
+
+// redisClientAdapter appends events to the auth:events Redis Stream so a
+// consumer group can deliver them at-least-once (pub/sub lost events published
+// while the consumer was down, e.g. during audit rolling updates).
+type redisClientAdapter struct {
+	client *redis.Client
+}
+
+func (a *redisClientAdapter) Publish(subject string, data []byte) error {
+	return a.client.XAdd(context.Background(), &redis.XAddArgs{
+		Stream: StreamKey,
+		MaxLen: streamMaxLen,
+		Approx: true,
+		Values: map[string]any{"subject": subject, "payload": data},
+	}).Err()
+}
+
+// NewPublisherWithTransport builds a Publisher over an injected transport
+// (used by tests). A nil transport yields a nil, no-op Publisher.
+func NewPublisherWithTransport(transport Transport) *Publisher {
+	if transport == nil {
+		return nil
+	}
+	return &Publisher{transport: transport, timeout: publishTimeout, slots: make(chan struct{}, maxConcurrentPublishes)}
+}
+
+// Close releases the underlying connection, if any.
+func (p *Publisher) Close() {
+	if p == nil || p.closer == nil {
+		return
+	}
+	p.closer()
+}
+
+// PublishLoginSuccess publishes an auth.login.success event.
+func (p *Publisher) PublishLoginSuccess(event LoginSuccessEvent) {
+	if event.Timestamp == "" {
+		event.Timestamp = time.Now().Format(time.RFC3339)
+	}
+	p.publish(SubjectLoginSuccess, event)
+}
+
+// PublishLoginFailed publishes an auth.login.failed event.
+func (p *Publisher) PublishLoginFailed(event LoginFailedEvent) {
+	if event.Timestamp == "" {
+		event.Timestamp = time.Now().Format(time.RFC3339)
+	}
+	p.publish(SubjectLoginFailed, event)
+}
+
+// PublishLogout publishes an auth.logout event.
+func (p *Publisher) PublishLogout(event LogoutEvent) {
+	if event.Timestamp == "" {
+		event.Timestamp = time.Now().Format(time.RFC3339)
+	}
+	p.publish(SubjectLogout, event)
+}
+
+// publish delivers the event asynchronously and best-effort: it never blocks
+// the caller beyond spawning a goroutine, never returns an error, and gives
+// up after the publish timeout.
+func (p *Publisher) publish(subject string, event any) {
+	if p == nil || p.transport == nil {
+		return
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		warn("failed to marshal auth event", subject, err)
+		return
+	}
+
+	transport := p.transport
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = publishTimeout
+	}
+	if p.slots == nil {
+		// Lazy fallback for hand-constructed Publishers (tests); real
+		// constructors initialise slots so concurrent logins never race here.
+		p.slots = make(chan struct{}, maxConcurrentPublishes)
+	}
+	select {
+	case p.slots <- struct{}{}:
+	default:
+		warn("dropped auth event because publisher is saturated", subject, nil)
+		return
+	}
+	slots := p.slots
+	go func() {
+		done := make(chan error, 1)
+		go func() {
+			defer func() { <-slots }()
+			done <- transport.Publish(subject, payload)
+		}()
+
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case err := <-done:
+			if err != nil {
+				warn("failed to publish auth event", subject, err)
+			}
+		case <-timer.C:
+			warn("timed out publishing auth event", subject, nil)
+		}
+	}()
+}
+
+func warn(message, subject string, err error) {
+	if logger.Logger == nil {
+		return
+	}
+	if err != nil {
+		logger.Warn(message, logger.String("subject", subject), logger.Err(err))
+		return
+	}
+	logger.Warn(message, logger.String("subject", subject))
+}
+
+var (
+	defaultMu        sync.RWMutex
+	defaultPublisher *Publisher
+)
+
+// SetDefault installs the process-wide publisher used by the API handlers and
+// returns a restore function. A nil publisher disables publishing.
+func SetDefault(p *Publisher) func() {
+	defaultMu.Lock()
+	previous := defaultPublisher
+	defaultPublisher = p
+	defaultMu.Unlock()
+	return func() {
+		defaultMu.Lock()
+		defaultPublisher = previous
+		defaultMu.Unlock()
+	}
+}
+
+// Default returns the process-wide publisher (possibly nil, which is safe).
+func Default() *Publisher {
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
+	return defaultPublisher
+}

@@ -1,0 +1,186 @@
+/* 空状态样式（从 index.css 拆出） */
+
+/* ============================================================
+   页面打磨 · 空状态(GlassEmpty) —— 玻璃托盘 + 呼吸光晕
+   经 ConfigProvider renderEmpty 注入全站
+   ============================================================ */
+
+.glass-empty {
+  padding: 40px 0 32px;
+  text-align: center;
+}
+
+.glass-empty-compact {
+  padding: 20px 0 16px;
+}
+
+.glass-empty-compact .glass-empty-icon {
+  width: 48px;
+  height: 48px;
+  font-size: 22px;
+  border-radius: 14px;
+}
+
+.glass-empty-compact .glass-empty-text {
+  margin-top: 12px;
+}
+
+.glass-empty-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  font-size: 28px;
+  color: rgba(148, 163, 184, 0.55);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px) saturate(1.3);
+  -webkit-backdrop-filter: blur(8px) saturate(1.3);
+}
+
+/* 托盘底下一汪呼吸的光 */
+.glass-empty-icon::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  width: 54px;
+  height: 10px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(99, 102, 241, 0.25), transparent 70%);
+  filter: blur(4px);
+  animation: glass-empty-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes glass-empty-breathe {
+  0%, 100% {
+    opacity: 0.9;
+    transform: translateX(-50%) scaleX(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: translateX(-50%) scaleX(0.75);
+  }
+}
+
+.glass-empty-text {
+  margin-top: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: rgba(148, 163, 184, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-empty-icon::after {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+[data-theme='light'] .glass-empty-icon {
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.9);
+}
+
+[data-theme='light'] .glass-empty-icon::after {
+  background: radial-gradient(ellipse, rgba(37, 99, 235, 0.2), transparent 70%);
+}
+
+[data-theme='light'] .glass-empty-text {
+  color: #94a3b8;
+}
+
+/* ============================================================
+   全局消息与通知反馈 (Toast & Notification) · 液态玻璃微质感
+   ============================================================ */
+
+/* AntD 全局轻提示 (message Toast) 胶囊 */
+.ant-message-notice-content {
+  padding: 9px 18px !important;
+  border-radius: 999px !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  line-height: 1.5 !important;
+  background: rgba(18, 20, 36, 0.88) !important;
+  backdrop-filter: blur(20px) saturate(1.8) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.8) !important;
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 16px 36px rgba(0, 0, 0, 0.45) !important;
+  color: rgba(241, 245, 249, 0.96) !important;
+  animation: liquid-toast-rise 0.32s cubic-bezier(0.22, 1.4, 0.36, 1) both;
+}
+
+[data-theme='light'] .ant-message-notice-content {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
+    0 12px 32px rgba(37, 99, 235, 0.14) !important;
+  color: #0f172a !important;
+}
+
+@keyframes liquid-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 提示图标柔光 */
+.ant-message-custom-content .anticon-check-circle,
+.ant-message-custom-content .anticon-check {
+  color: #34d399 !important;
+  filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.65));
+}
+
+.ant-message-custom-content .anticon-close-circle,
+.ant-message-custom-content .anticon-close {
+  color: #f87171 !important;
+  filter: drop-shadow(0 0 6px rgba(248, 113, 113, 0.65));
+}
+
+.ant-message-custom-content .anticon-exclamation-circle,
+.ant-message-custom-content .anticon-warning {
+  color: #fbbf24 !important;
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.65));
+}
+
+.ant-message-custom-content .anticon-info-circle,
+.ant-message-custom-content .anticon-info {
+  color: #818cf8 !important;
+  filter: drop-shadow(0 0 6px rgba(129, 140, 248, 0.65));
+}
+
+/* AntD 全局通知抽屉 (Notification) */
+.ant-notification-notice {
+  border-radius: 16px !important;
+  background: rgba(18, 20, 36, 0.9) !important;
+  backdrop-filter: blur(24px) saturate(1.8) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.8) !important;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 20px 48px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme='light'] .ant-notification-notice {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border: 1px solid rgba(15, 23, 42, 0.08) !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
+    0 16px 40px rgba(37, 99, 235, 0.14) !important;
+}

@@ -1,0 +1,190 @@
+// Package api 装配 system 服务的 HTTP 对外面。所有抽取路由的 /api/v1
+// 布局都与单体完全一致，
+// 使网关可以在不改变任何客户端的前提下切换流量。
+package api
+
+import (
+	"github.com/gin-gonic/gin"
+	sharedapi "github.com/sharptoolbox/opic-techbase/services/shared/pkg/sharedapi"
+	"github.com/sharptoolbox/opic-techbase/services/system/internal/api/common"
+	"github.com/sharptoolbox/opic-techbase/services/system/internal/api/system"
+	"github.com/sharptoolbox/opic-techbase/services/system/internal/config"
+	"github.com/sharptoolbox/opic-techbase/services/system/internal/middleware"
+	authsvc "github.com/sharptoolbox/opic-techbase/services/system/internal/service/auth"
+	systemsvc "github.com/sharptoolbox/opic-techbase/services/system/internal/service/system"
+)
+
+// SetupRoutes 使用旧的全局回退挂载 system 服务 API。
+func SetupRoutes(router *gin.Engine) {
+	SetupRoutesWithDeps(router, sharedapi.Dependencies{})
+}
+
+// SetupRoutesWithDeps 使用注入的基础设施句柄挂载 API。
+func SetupRoutesWithDeps(router *gin.Engine, deps sharedapi.Dependencies) {
+	api := router.Group("/api/v1")
+
+	common.RegisterPublicRoutesWithDeps(api, deps)
+
+	menuMgmtAPI := system.NewMenuManagementAPI()
+	menuUserAPI := system.NewMenuAPI()
+	var permissionMenuDiagnosticAPI *system.PermissionMenuDiagnosticAPI
+	dictAPI := system.NewDictAPI()
+	noticeAPI := system.NewNoticeAPI()
+	errCodeAPI := system.NewErrCodeAPI()
+	settingAPI := system.NewSettingAPI()
+	edgeCertAPI := system.NewEdgeCertAPIWithDB(deps.DB)
+	// ACME HTTP-01 公开挑战（无鉴权，Let's Encrypt 回调）。实例与管理 API
+	// 共用同一持久化数据库，避免多副本命中不同内存状态。
+	router.GET("/.well-known/acme-challenge/:token", edgeCertAPI.ACMEChallenge)
+	onlineUserAPI := system.NewOnlineUserAPI()
+	notificationAPI := system.NewNotificationAPI()
+	weatherAPI := system.NewWeatherAPI()
+	grpcDemoAPI := system.NewGRPCDemoAPI()
+	var codegenAPI *system.CodegenAPI
+	if deps.DB != nil {
+		codegenAPI = system.NewCodegenAPIWithOptions(systemsvc.NewCodegenServiceWithDB(deps.DB), codegenAPIOptions())
+	}
+	if deps.DB != nil {
+		menuMgmtAPI = system.NewMenuManagementAPIWithService(systemsvc.NewMenuServiceWithDB(deps.DB))
+		menuUserAPI = system.NewMenuAPIWithService(systemsvc.NewMenuUserServiceWithDB(deps.DB))
+		permissionMenuDiagnosticAPI = system.NewPermissionMenuDiagnosticAPIWithService(systemsvc.NewPermissionMenuDiagnosticServiceWithDB(deps.DB))
+		dictAPI = system.NewDictAPIWithService(systemsvc.NewDictServiceWithDB(deps.DB))
+		noticeAPI = system.NewNoticeAPIWithService(systemsvc.NewNoticeServiceWithDB(deps.DB))
+		errCodeAPI = system.NewErrCodeAPIWithService(systemsvc.NewErrCodeServiceWithDB(deps.DB))
+		settingAPI = system.NewSettingAPIWithService(systemsvc.NewSettingServiceWithDB(deps.DB))
+		notificationAPI = system.NewNotificationAPIWithService(systemsvc.NewNoticeServiceWithDB(deps.DB))
+
+		onlineUserService := &systemsvc.OnlineUserService{}
+		if deps.Redis != nil {
+			onlineUserService = systemsvc.NewOnlineUserServiceWithClient(deps.Redis)
+		}
+		onlineUserAPI = system.NewOnlineUserAPIWithServices(onlineUserService, authsvc.NewUserServiceWithDB(deps.DB))
+	}
+
+	public := api.Group("/")
+	{
+		// WebSocket 升级通过一次性 ticket 认证，而非请求头。
+		public.GET("/ws/notifications", notificationAPI.Connect)
+	}
+
+	protected := api.Group("/")
+	protected.Use(middleware.AuthMiddleware(), middleware.OperationLogger())
+	{
+		protected.POST("/ws/notifications/ticket", notificationAPI.CreateTicket)
+
+		protected.GET("/user/menus", menuUserAPI.GetUserMenus)
+
+		// 仪表盘天气 chip：登录即可见，不设权限点
+		protected.GET("/system/weather", weatherAPI.GetLiveWeather)
+
+		if codegenAPI != nil {
+			protected.GET("/codegen/capabilities", middleware.PermissionMiddleware("system:codegen:list"), codegenAPI.Capabilities)
+			protected.GET("/codegen/tables", middleware.PermissionMiddleware("system:codegen:list"), codegenAPI.GetTables)
+			protected.GET("/codegen/tables/:name/columns", middleware.PermissionMiddleware("system:codegen:list"), codegenAPI.GetColumns)
+			protected.GET("/codegen/tables/:name/schema", middleware.PermissionMiddleware("system:codegen:list"), codegenAPI.GetSchema)
+			protected.POST("/codegen/preview", middleware.PermissionMiddleware("system:codegen:generate"), codegenAPI.Preview)
+			protected.POST("/codegen/download", middleware.PermissionMiddleware("system:codegen:generate"), codegenAPI.Download)
+			protected.POST("/codegen/write", middleware.PlatformAdminMiddleware(), middleware.PermissionMiddleware("system:codegen:write"), codegenAPI.Write)
+		}
+
+		protected.GET("/menus", middleware.PermissionMiddleware("system:menu:list"), menuMgmtAPI.GetMenuList)
+		if permissionMenuDiagnosticAPI != nil {
+			protected.GET("/menus/permission-diagnostics", middleware.PermissionMiddleware("system:permission:diagnose"), permissionMenuDiagnosticAPI.DiagnoseMenus)
+		}
+		protected.GET("/menus/tree", middleware.PermissionMiddleware("system:menu:list"), menuMgmtAPI.GetMenuTree)
+		protected.GET("/menus/:id", middleware.PermissionMiddleware("system:menu:list"), menuMgmtAPI.GetMenu)
+		protected.POST("/menus", middleware.PermissionMiddleware("system:menu:create"), menuMgmtAPI.CreateMenu)
+		protected.PUT("/menus/:id", middleware.PermissionMiddleware("system:menu:update"), menuMgmtAPI.UpdateMenu)
+		protected.DELETE("/menus/:id", middleware.PermissionMiddleware("system:menu:delete"), menuMgmtAPI.DeleteMenu)
+
+		protected.GET("/dict-types", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetTypeList)
+		protected.GET("/dict-types/all", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetAllTypes)
+		protected.GET("/dict-types/:id", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetType)
+		protected.GET("/dict-types/:id/items", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetItemsByTypeID)
+		protected.POST("/dict-types", middleware.PermissionMiddleware("system:dict:create"), dictAPI.CreateType)
+		protected.PUT("/dict-types/:id", middleware.PermissionMiddleware("system:dict:update"), dictAPI.UpdateType)
+		protected.DELETE("/dict-types/:id", middleware.PermissionMiddleware("system:dict:delete"), dictAPI.DeleteType)
+
+		protected.GET("/dict-items", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetItemList)
+		protected.GET("/dict-items/:id", middleware.PermissionMiddleware("system:dict:list"), dictAPI.GetItem)
+		protected.POST("/dict-items", middleware.PermissionMiddleware("system:dict:create"), dictAPI.CreateItem)
+		protected.PUT("/dict-items/:id", middleware.PermissionMiddleware("system:dict:update"), dictAPI.UpdateItem)
+		protected.DELETE("/dict-items/:id", middleware.PermissionMiddleware("system:dict:delete"), dictAPI.DeleteItem)
+
+		protected.GET("/dicts/:code", dictAPI.GetDictData)
+		protected.GET("/dicts", dictAPI.GetMultipleDictData)
+		protected.GET("/dicts/all", dictAPI.GetAllDictData)
+
+		protected.GET("/notices", middleware.PermissionMiddleware("system:notice:list"), noticeAPI.GetNoticeList)
+		protected.GET("/notices/active", noticeAPI.GetActiveNotices)
+		protected.GET("/notices/:id", middleware.PermissionMiddleware("system:notice:list"), noticeAPI.GetNotice)
+		protected.POST("/notices", middleware.PermissionMiddleware("system:notice:create"), noticeAPI.CreateNotice)
+		protected.PUT("/notices/:id", middleware.PermissionMiddleware("system:notice:update"), noticeAPI.UpdateNotice)
+		protected.DELETE("/notices/:id", middleware.PermissionMiddleware("system:notice:delete"), noticeAPI.DeleteNotice)
+		protected.PUT("/notices/:id/status", middleware.PermissionMiddleware("system:notice:update"), noticeAPI.UpdateNoticeStatus)
+
+		// 错误码管理：文案在线改，30s TTL 热生效；/all 供服务/前端整包拉取
+		protected.GET("/error-codes", middleware.PermissionMiddleware("system:errcode:list"), errCodeAPI.GetList)
+		protected.GET("/error-codes/all", errCodeAPI.GetAllEnabled)
+		protected.GET("/error-codes/:id", middleware.PermissionMiddleware("system:errcode:list"), errCodeAPI.Get)
+		protected.POST("/error-codes", middleware.PermissionMiddleware("system:errcode:create"), errCodeAPI.Create)
+		protected.PUT("/error-codes/:id", middleware.PermissionMiddleware("system:errcode:update"), errCodeAPI.Update)
+		protected.DELETE("/error-codes/:id", middleware.PermissionMiddleware("system:errcode:delete"), errCodeAPI.Delete)
+
+		// 系统设置属平台级（AI/SMTP 密钥等），在权限码之上再要求平台管理员
+		settingGuard := middleware.PlatformAdminMiddleware()
+		protected.GET("/system-settings", settingGuard, middleware.PermissionMiddleware("system:setting:list"), settingAPI.GetSettings)
+		protected.POST("/system-settings/batch", settingGuard, middleware.PermissionMiddleware("system:setting:update"), settingAPI.BatchUpsertSettings)
+		protected.GET("/system-settings/:key", settingGuard, middleware.PermissionMiddleware("system:setting:list"), settingAPI.GetSetting)
+		protected.PUT("/system-settings/:key", settingGuard, middleware.PermissionMiddleware("system:setting:update"), settingAPI.UpsertSetting)
+		protected.DELETE("/system-settings/:key", settingGuard, middleware.PermissionMiddleware("system:setting:delete"), settingAPI.DeleteSetting)
+
+		// 租户级配置覆盖：租户管理员配自己的 AI/邮件/天气（平台默认仍在 system-settings，
+		// 不要求 PlatformAdmin；租户来自请求 ctx）。白名单外拒绝。
+		protected.GET("/tenant-settings", middleware.PermissionMiddleware("system:setting:list"), settingAPI.GetTenantSettings)
+		protected.PUT("/tenant-settings/:key", middleware.PermissionMiddleware("system:setting:update"), settingAPI.UpsertTenantSetting)
+		protected.DELETE("/tenant-settings/:key", middleware.PermissionMiddleware("system:setting:delete"), settingAPI.DeleteTenantSetting)
+
+		protected.GET("/online-users", middleware.PermissionMiddleware("system:online-user:list"), onlineUserAPI.GetOnlineUsers)
+		protected.GET("/online-users/count", middleware.PermissionMiddleware("system:online-user:list"), onlineUserAPI.GetOnlineUserCount)
+		protected.DELETE("/online-users/:token_id", middleware.PermissionMiddleware("system:online-user:kick"), onlineUserAPI.ForceLogout)
+
+		// 短信管理（渠道/模板/发送日志/发送），详见 routes_sms.go
+		registerSmsRoutes(router, protected, deps)
+
+		// 边缘免费证书（Let's Encrypt HTTP-01）——平台管理员
+		edgeGuard := middleware.PlatformAdminMiddleware()
+		protected.GET("/edge-certs", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:list"), edgeCertAPI.List)
+		protected.GET("/edge-certs/capabilities", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:list"), edgeCertAPI.Capabilities)
+		protected.POST("/edge-certs", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:issue"), edgeCertAPI.Create)
+		protected.POST("/edge-certs/:id/issue", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:issue"), edgeCertAPI.Issue)
+		protected.POST("/edge-certs/:id/renew", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:issue"), edgeCertAPI.Renew)
+		protected.POST("/edge-certs/:id/deploy", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:issue"), edgeCertAPI.Deploy)
+		protected.POST("/edge-certs/:id/probe", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:issue"), edgeCertAPI.Probe)
+		protected.GET("/edge-certs/:id/tasks", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:list"), edgeCertAPI.ListTasks)
+		protected.GET("/edge-certs/:id/tasks/:taskId", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:list"), edgeCertAPI.GetTask)
+		protected.GET("/edge-certs/:id/certificate", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:list"), edgeCertAPI.Certificate)
+		protected.POST("/edge-certs/:id/export", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:export"), edgeCertAPI.Export)
+		protected.GET("/edge-certs/:id/download", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:export"), edgeCertAPI.Download)
+		protected.DELETE("/edge-certs/:id", edgeGuard, middleware.PermissionMiddleware("system:edge-cert:delete"), edgeCertAPI.Delete)
+
+		// Phase 1 演示：经 Consul 发现 + gRPC 调监控服务摘要（验证分布式链路）
+		protected.GET("/grpc-demo/monitor-summary", grpcDemoAPI.GetMonitorSummary)
+	}
+}
+
+func codegenAPIOptions() system.CodegenAPIOptions {
+	options := system.CodegenAPIOptions{WriteEnabled: config.Cfg.Codegen.WriteEnabled}
+	if config.Cfg.Codegen.RepoRoot == "" {
+		return options
+	}
+	repository, err := systemsvc.NewRepositoryWriter(config.Cfg.Codegen.RepoRoot)
+	if err != nil {
+		return options
+	}
+	options.RepositorySource = repository
+	if options.WriteEnabled {
+		options.RepositoryWriter = repository
+	}
+	return options
+}

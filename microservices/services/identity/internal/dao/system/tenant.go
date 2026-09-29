@@ -1,0 +1,82 @@
+package system
+
+import (
+	"context"
+	"strings"
+
+	localmodel "github.com/sharptoolbox/opic-techbase/services/identity/internal/model"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/pagination"
+	"gorm.io/gorm"
+)
+
+// TenantDAO persists SaaS tenants.
+type TenantDAO struct {
+	db *gorm.DB
+}
+
+func NewTenantDAO(db *gorm.DB) *TenantDAO {
+	return &TenantDAO{db: db}
+}
+
+func (d *TenantDAO) dbWithContext(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return d.db.WithContext(ctx)
+}
+
+func (d *TenantDAO) ListContext(ctx context.Context, req pagination.PageRequest, keyword string, status *int8) ([]localmodel.Tenant, int64, error) {
+	q := d.dbWithContext(ctx).Model(&localmodel.Tenant{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("code ILIKE ? OR name ILIKE ?", like, like)
+	}
+	if status != nil {
+		q = q.Where("status = ?", *status)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []localmodel.Tenant
+	err := q.Scopes(pagination.Paginate(req)).Order("id ASC").Find(&list).Error
+	return list, total, err
+}
+
+func (d *TenantDAO) GetByIDContext(ctx context.Context, id uint) (*localmodel.Tenant, error) {
+	var t localmodel.Tenant
+	err := d.dbWithContext(ctx).First(&t, id).Error
+	return &t, err
+}
+
+func (d *TenantDAO) GetByCodeContext(ctx context.Context, code string) (*localmodel.Tenant, error) {
+	var t localmodel.Tenant
+	err := d.dbWithContext(ctx).Where("code = ?", strings.TrimSpace(code)).First(&t).Error
+	return &t, err
+}
+
+func (d *TenantDAO) CreateContext(ctx context.Context, t *localmodel.Tenant) error {
+	return d.dbWithContext(ctx).Create(t).Error
+}
+
+func (d *TenantDAO) UpdateContext(ctx context.Context, t *localmodel.Tenant) error {
+	return d.dbWithContext(ctx).Save(t).Error
+}
+
+// DeleteContext 删除租户行（级联清理在 TenantService.Delete 内事务处理）。
+func (d *TenantDAO) DeleteContext(ctx context.Context, id uint) error {
+	result := d.dbWithContext(ctx).Where("id = ?", id).Delete(&localmodel.Tenant{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (d *TenantDAO) CountUsersContext(ctx context.Context, tenantID uint) (int64, error) {
+	var n int64
+	err := d.dbWithContext(ctx).Model(&localmodel.User{}).Where("tenant_id = ?", tenantID).Count(&n).Error
+	return n, err
+}

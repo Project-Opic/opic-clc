@@ -1,0 +1,152 @@
+package system
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"gorm.io/gorm"
+
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/audittrail"
+	model "github.com/sharptoolbox/opic-techbase/services/shared/pkg/model"
+	"github.com/sharptoolbox/opic-techbase/services/shared/pkg/pagination"
+)
+
+type MenuDAO struct {
+	db *gorm.DB
+}
+
+func NewMenuDAO(db *gorm.DB) *MenuDAO {
+	return &MenuDAO{db: db}
+}
+
+func (d *MenuDAO) dbWithContext(ctx context.Context) *gorm.DB {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return d.db.WithContext(ctx)
+}
+
+var ErrMenuHasChildren = errors.New("cannot delete menu with children")
+
+func (d *MenuDAO) GetMenuByIDContext(ctx context.Context, id uint) (*model.Menu, error) {
+	var menu model.Menu
+	result := d.dbWithContext(ctx).First(&menu, id)
+	return &menu, result.Error
+}
+
+func (d *MenuDAO) GetMenuListContext(ctx context.Context, req pagination.PageRequest, keyword string, status *int8) ([]model.Menu, int64, error) {
+	var menus []model.Menu
+	var total int64
+
+	query := d.dbWithContext(ctx).Model(&model.Menu{})
+	if keyword != "" {
+		query = query.Where("name LIKE ? OR title LIKE ? OR path LIKE ?",
+			"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	result := query.Scopes(pagination.Paginate(req)).
+		Order("parent_id ASC, sort ASC, created_at ASC").
+		Find(&menus)
+
+	return menus, total, result.Error
+}
+
+func (d *MenuDAO) GetMenuTreeContext(ctx context.Context, status *int8) ([]model.Menu, error) {
+	query := d.dbWithContext(ctx).Model(&model.Menu{})
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+
+	var menus []model.Menu
+	result := query.Order("parent_id ASC, sort ASC, created_at ASC").Find(&menus)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return buildMenuTree(menus, 0), nil
+}
+
+func buildMenuTree(menus []model.Menu, parentID uint) []model.Menu {
+	var tree []model.Menu
+	for i := range menus {
+		if menus[i].ParentID == parentID {
+			children := buildMenuTree(menus, menus[i].ID)
+			if children == nil {
+				menus[i].Children = []model.Menu{}
+			} else {
+				menus[i].Children = children
+			}
+			tree = append(tree, menus[i])
+		}
+	}
+	return tree
+}
+
+func (d *MenuDAO) CreateMenuContext(ctx context.Context, menu *model.Menu) error {
+	return d.dbWithContext(ctx).Create(menu).Error
+}
+
+func (d *MenuDAO) UpdateMenuContext(ctx context.Context, menu *model.Menu) error {
+	return d.dbWithContext(ctx).Save(menu).Error
+}
+
+func (d *MenuDAO) DeleteMenuContext(ctx context.Context, id uint) error {
+	return d.dbWithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.Menu{}).Where("parent_id = ?", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrMenuHasChildren
+		}
+
+		if err := tx.Where("menu_id = ?", id).Delete(&model.MenuPermission{}).Error; err != nil {
+			return err
+		}
+
+		return tx.Delete(&model.Menu{}, id).Error
+	})
+}
+
+func (d *MenuDAO) AssignPermissionsContext(ctx context.Context, menuID uint, permissionIDs []uint) error {
+	return d.dbWithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		before := make([]uint, 0)
+		if err := tx.Model(&model.MenuPermission{}).Where("menu_id = ?", menuID).Pluck("permission_id", &before).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("menu_id = ?", menuID).Delete(&model.MenuPermission{}).Error; err != nil {
+			return err
+		}
+
+		if len(permissionIDs) > 0 {
+			menuPermissions := make([]model.MenuPermission, 0, len(permissionIDs))
+			for _, permissionID := range permissionIDs {
+				menuPermissions = append(menuPermissions, model.MenuPermission{
+					MenuID:       menuID,
+					PermissionID: permissionID,
+				})
+			}
+			if err := tx.Create(&menuPermissions).Error; err != nil {
+				return err
+			}
+		}
+		return audittrail.RecordAssociation(ctx, tx, audittrail.RecordAssociationRequest{
+			TargetType:    "menu_permissions",
+			TargetID:      fmt.Sprint(menuID),
+			Action:        "update",
+			FixedTenantID: 1, // 菜单平台归属，循 MenuTarget 先例
+			Before:        map[string]any{"permission_ids": append([]uint{}, before...)},
+			After:         map[string]any{"permission_ids": append([]uint{}, permissionIDs...)},
+			Summary:       fmt.Sprintf("update menu %d permissions", menuID),
+		})
+	})
+}

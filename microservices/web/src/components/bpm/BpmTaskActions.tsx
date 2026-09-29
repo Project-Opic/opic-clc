@@ -1,0 +1,317 @@
+import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Button, Form, Input, Modal, Radio, Select, Space } from 'antd'
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  EditOutlined,
+  SwapOutlined,
+  UndoOutlined,
+  UsergroupAddOutlined,
+  UserSwitchOutlined,
+} from '@ant-design/icons'
+import { message } from '@/utils/feedback'
+import {
+  addSignTask,
+  approveTask,
+  delegateTask,
+  rejectTask,
+  resolveDelegateTask,
+  returnTask,
+  transferTask,
+  type BpmTask,
+} from '@/api/bpm'
+import BpmResubmitModal from '@/components/bpm/BpmResubmitModal'
+import { useUserNameMap } from '@/hooks/useUserNameMap'
+
+// 任务详情 actions 缺省（后端未返回动作列表）时的基线：M1/M2 常规审批动作。
+// 服务端仍是权威校验方，越权动作会被拒绝并由拦截器提示。
+const FALLBACK_ACTIONS = ['approve', 'reject', 'transfer', 'return_start']
+
+type ModalMode =
+  | 'approve'
+  | 'reject'
+  | 'transfer'
+  | 'return'
+  | 'add_sign'
+  | 'delegate'
+  | 'delegate_resolve'
+
+/**
+ * 审批任务动作条（待办行 / 任务详情动作区 / 实例详情复用同一份，含弹窗）。
+ * 按任务详情返回的动作列表动态渲染：approve/reject/transfer/return_start/
+ * return_prev/resubmit/add_sign/delegate/delegate_resolve。
+ * - 转办：选人（复用现有用户映射数据源）+ 意见选填
+ * - 退回：退回到发起人/上一节点（return_prev 仅当动作列表含它时显示）+ 意见必填
+ * - 加签：多选审批人（同节点同轮次并列参与收敛）+ 意见选填
+ * - 委派：选人办理，办结后回到本人；办理完成意见必填
+ * - 重新提交：复用 BpmResubmitModal（含撤销流程入口）
+ */
+interface BpmTaskActionsProps {
+  task: BpmTask
+  /** 任务详情返回的动作列表；undefined = 未知（按基线渲染，交给后端兜底校验） */
+  actions?: string[]
+  /** 行内用 link（默认），详情动作区用 default 实体按钮 */
+  buttonType?: 'link' | 'default'
+  onDone: () => void
+}
+
+export default function BpmTaskActions({
+  task,
+  actions,
+  buttonType = 'link',
+  onDone,
+}: BpmTaskActionsProps) {
+  const { t } = useTranslation()
+  const [modal, setModal] = useState<ModalMode | null>(null)
+  const [resubmitOpen, setResubmitOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [form] = Form.useForm()
+  const userMap = useUserNameMap()
+
+  const acts = actions ?? FALLBACK_ACTIONS
+  const canReturnStart = acts.includes('return_start')
+  const canReturnPrev = acts.includes('return_prev')
+
+  const userOptions = useMemo(
+    () =>
+      Object.entries(userMap)
+        .map(([id, name]) => ({ value: Number(id), label: name }))
+        .filter((o) => o.value !== task.assignee_id),
+    [userMap, task.assignee_id],
+  )
+
+  const openModal = (mode: ModalMode) => {
+    form.resetFields()
+    if (mode === 'return') {
+      form.setFieldsValue({ to: canReturnStart ? 'start' : 'prev' })
+    }
+    setModal(mode)
+  }
+
+  const onSubmit = async () => {
+    if (!modal) return
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setSubmitting(true)
+    try {
+      if (modal === 'approve') {
+        const res = await approveTask(task.id, values.comment)
+        message.success(res?.instance_status === 'approved' ? t('已同意，流程审批通过') : t('已同意'))
+      } else if (modal === 'reject') {
+        const res = await rejectTask(task.id, values.comment)
+        message.success(res?.instance_status === 'rejected' ? t('已拒绝，流程结束') : t('已拒绝'))
+      } else if (modal === 'transfer') {
+        await transferTask(task.id, values.target_user_id, values.comment)
+        message.success(t('已转办，新处理人将收到待办通知'))
+      } else if (modal === 'add_sign') {
+        await addSignTask(task.id, values.user_ids, values.comment)
+        message.success(t('已加签，新审批人将收到待办通知'))
+      } else if (modal === 'delegate') {
+        await delegateTask(task.id, values.target_user_id, values.comment)
+        message.success(t('已委派，受托人办结后任务将回到你名下'))
+      } else if (modal === 'delegate_resolve') {
+        await resolveDelegateTask(task.id, values.comment)
+        message.success(t('已办结，任务已回到原处理人'))
+      } else {
+        await returnTask(task.id, values.to, values.comment)
+        message.success(values.to === 'start' ? t('已退回发起人') : t('已退回上一节点'))
+      }
+      setModal(null)
+      onDone()
+    } catch {
+      // 错误提示由 request 拦截器统一弹出
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const size = buttonType === 'link' ? 'small' : 'middle'
+  const modalTitles: Record<ModalMode, string> = {
+    approve: '同意',
+    reject: '拒绝',
+    transfer: '转办',
+    return: '退回',
+    add_sign: '加签',
+    delegate: '委派',
+    delegate_resolve: '办理完成',
+  }
+  const commentRequired = modal === 'reject' || modal === 'return' || modal === 'delegate_resolve'
+
+  return (
+    <>
+      <Space size={0} wrap className={buttonType === 'link' ? 'table-actions' : undefined}>
+        {acts.includes('approve') && (
+          <Button type={buttonType} size={size} icon={<CheckOutlined />} onClick={() => openModal('approve')}>
+            {t('同意')}
+          </Button>
+        )}
+        {acts.includes('reject') && (
+          <Button type={buttonType} size={size} danger icon={<CloseOutlined />} onClick={() => openModal('reject')}>
+            {t('拒绝')}
+          </Button>
+        )}
+        {acts.includes('delegate_resolve') && (
+          <Button
+            type={buttonType === 'link' ? 'link' : 'primary'}
+            size={size}
+            icon={<CheckCircleOutlined />}
+            onClick={() => openModal('delegate_resolve')}
+          >
+            {t('办理完成')}
+          </Button>
+        )}
+        {acts.includes('transfer') && (
+          <Button type={buttonType} size={size} icon={<SwapOutlined />} onClick={() => openModal('transfer')}>
+            {t('转办')}
+          </Button>
+        )}
+        {acts.includes('add_sign') && (
+          <Button type={buttonType} size={size} icon={<UsergroupAddOutlined />} onClick={() => openModal('add_sign')}>
+            {t('加签')}
+          </Button>
+        )}
+        {acts.includes('delegate') && (
+          <Button type={buttonType} size={size} icon={<UserSwitchOutlined />} onClick={() => openModal('delegate')}>
+            {t('委派')}
+          </Button>
+        )}
+        {(canReturnStart || canReturnPrev) && (
+          <Button type={buttonType} size={size} icon={<UndoOutlined />} onClick={() => openModal('return')}>
+            {t('退回')}
+          </Button>
+        )}
+        {acts.includes('resubmit') && (
+          <Button
+            type={buttonType === 'link' ? 'link' : 'primary'}
+            size={size}
+            icon={<EditOutlined />}
+            onClick={() => setResubmitOpen(true)}
+          >
+            {t('重新提交')}
+          </Button>
+        )}
+      </Space>
+
+      <Modal
+        title={modal ? `${t(modalTitles[modal])}：${task.instance_title || t('实例 #{{id}}', { id: task.instance_id })}` : ''}
+        open={!!modal}
+        onOk={() => void onSubmit()}
+        onCancel={() => setModal(null)}
+        confirmLoading={submitting}
+        okText={modal ? t('确认{{title}}', { title: t(modalTitles[modal]) }) : t('确认')}
+        okButtonProps={modal === 'reject' ? { danger: true } : undefined}
+        destroyOnHidden
+      >
+        <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
+          {modal === 'transfer' && (
+            <Form.Item
+              name="target_user_id"
+              label={t('转办给')}
+              rules={[{ required: true, message: t('请选择转办目标用户') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('选择用户（任务将转由其处理，计数规则不变）')}
+                options={userOptions}
+              />
+            </Form.Item>
+          )}
+          {modal === 'add_sign' && (
+            <Form.Item
+              name="user_ids"
+              label={t('加签给')}
+              rules={[{ required: true, message: t('请选择加签审批人') }]}
+            >
+              <Select
+                mode="multiple"
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('选择审批人（与你并列参与本节点审批）')}
+                options={userOptions}
+              />
+            </Form.Item>
+          )}
+          {modal === 'delegate' && (
+            <Form.Item
+              name="target_user_id"
+              label={t('委派给')}
+              rules={[{ required: true, message: t('请选择委派目标用户') }]}
+            >
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={t('选择用户（其办结后任务回到你名下，由你做审批决定）')}
+                options={userOptions}
+              />
+            </Form.Item>
+          )}
+          {modal === 'return' && (
+            <Form.Item name="to" label={t('退回到')} rules={[{ required: true, message: t('请选择退回目标') }]}>
+              <Radio.Group
+                options={[
+                  ...(canReturnStart
+                    ? [{ label: t('发起人（修改后可重新提交）'), value: 'start' }]
+                    : []),
+                  ...(canReturnPrev ? [{ label: t('上一节点（重新审批）'), value: 'prev' }] : []),
+                ]}
+              />
+            </Form.Item>
+          )}
+          <Form.Item
+            name="comment"
+            label={
+              modal === 'transfer'
+                ? t('转办说明')
+                : modal === 'add_sign'
+                  ? t('加签说明')
+                  : modal === 'delegate'
+                    ? t('委派说明')
+                    : modal === 'delegate_resolve'
+                      ? t('办理意见')
+                      : t('审批意见')
+            }
+            rules={
+              commentRequired
+                ? [
+                    {
+                      required: true,
+                      message:
+                        modal === 'return'
+                          ? t('退回时必须填写意见')
+                          : modal === 'delegate_resolve'
+                            ? t('办理完成必须填写意见')
+                            : t('拒绝时必须填写审批意见'),
+                    },
+                  ]
+                : []
+            }
+          >
+            <Input.TextArea
+              rows={3}
+              maxLength={512}
+              placeholder={
+                modal === 'reject'
+                  ? t('请说明拒绝原因（必填）')
+                  : modal === 'return'
+                    ? t('请说明退回原因（必填）')
+                    : modal === 'delegate_resolve'
+                      ? t('请填写办理情况（必填，将展示在流程时间线）')
+                      : t('可选')
+              }
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <BpmResubmitModal
+        instanceId={task.instance_id}
+        open={resubmitOpen}
+        onClose={() => setResubmitOpen(false)}
+        onDone={onDone}
+      />
+    </>
+  )
+}

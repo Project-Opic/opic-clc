@@ -1,0 +1,177 @@
+import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Table, Button, Popconfirm, Space, Tag, Tooltip } from 'antd'
+import { message } from '@/utils/feedback'
+import { ReloadOutlined, DisconnectOutlined } from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
+import type { OnlineUser } from '@/types'
+import { getOnlineUserList, kickUser } from '@/api/system/online-user'
+import ListPageShell from '@/components/common/ListPageShell'
+import TableToolbar from '@/components/common/TableToolbar'
+import GlassEmpty from '@/components/common/GlassEmpty'
+import { formatDateTime } from '@/utils/format'
+import { usePermission } from '@/hooks/usePermission'
+import { useVisibilityInterval } from '@/hooks/useVisibilityInterval'
+import { useTableQuery } from '@/hooks/useTableQuery'
+
+function tokenFingerprint(tokenId: string): string {
+  if (tokenId.length <= 16) return tokenId
+  return `${tokenId.slice(0, 8)}...${tokenId.slice(-6)}`
+}
+
+export default function OnlineUserPage() {
+  const { t } = useTranslation()
+  const { hasPerm } = usePermission()
+  const fetchList = useCallback(async () => {
+    const list = await getOnlineUserList()
+    return { list, total: list.length }
+  }, [])
+  const onLoadError = useCallback(() => message.error(t('获取在线用户列表失败')), [t])
+  const { list, loading, reload } = useTableQuery({
+    params: null,
+    fetcher: fetchList,
+    onError: onLoadError,
+  })
+
+  // 在线会话有实时语义，静默轮询避免表格 loading 闪烁；
+  // 后台标签页暂停，回前台立即补一次
+  useVisibilityInterval(() => {
+    void reload({ silent: true })
+  }, 30000, false)
+
+  const handleKick = async (tokenId: string) => {
+    try {
+      await kickUser(tokenId)
+      message.success(t('已踢出该用户'))
+      void reload()
+    } catch {
+      message.error(t('踢出失败'))
+    }
+  }
+
+  const columns: ColumnsType<OnlineUser> = [
+    {
+      title: t('用户'),
+      dataIndex: 'username',
+      width: 220,
+      ellipsis: true,
+      render: (v: string, record) => {
+        const text = record.nickname ? `${v}（${record.nickname}）` : v
+        return (
+          <span className="online-user-cell">
+            <span className="live-dot" />
+            <span className="list-primary-cell">{text}</span>
+          </span>
+        )
+      },
+    },
+    {
+      title: 'Token',
+      dataIndex: 'token_id',
+      width: 190,
+      responsive: ['lg'],
+      render: (v: string) => (
+        <Tooltip title={v}>
+          <Tag variant="filled" className="cell-mono list-code-tag">{tokenFingerprint(v)}</Tag>
+        </Tooltip>
+      ),
+    },
+    {
+      title: t('IP / 位置'),
+      dataIndex: 'ip',
+      width: 220,
+      ellipsis: true,
+      responsive: ['sm'],
+      render: (v: string, record) => {
+        const text = [v, record.location].filter(Boolean).join(' · ')
+        return text ? <span className="cell-mono">{text}</span> : <span className="cell-muted">—</span>
+      },
+    },
+    {
+      title: t('浏览器 / 系统'),
+      dataIndex: 'browser',
+      width: 200,
+      ellipsis: true,
+      responsive: ['md'],
+      render: (v: string, record) => {
+        const text = [v, record.os].filter(Boolean).join(' / ')
+        return text || <span className="cell-muted">—</span>
+      },
+    },
+    {
+      title: t('登录时间'),
+      dataIndex: 'login_time',
+      width: 170,
+      className: 'cell-time',
+      render: formatDateTime,
+    },
+    {
+      title: t('过期时间'),
+      dataIndex: 'access_token_expires_at',
+      width: 170,
+      className: 'cell-time',
+      responsive: ['lg'],
+      render: formatDateTime,
+    },
+    {
+      title: t('操作'),
+      width: 80,
+      fixed: 'right',
+      align: 'center',
+      render: (_, record) => (
+        <Space size={4} className="table-actions compact-table-actions">
+          {hasPerm('system:online-user:kick') && (
+            <Popconfirm
+              title={t('确认踢出该用户?')}
+              onConfirm={() => handleKick(record.token_id)}
+            >
+              <Tooltip title={t('踢出')}>
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  aria-label={t('踢出在线用户')}
+                  icon={<DisconnectOutlined />}
+                />
+              </Tooltip>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <ListPageShell
+      className="online-user-page"
+      toolbar={(
+        <TableToolbar
+          title="在线用户"
+          total={list.length}
+          extra={
+            <>
+              <span className="auto-refresh-hint">
+                <span className="live-dot" />
+                {t('每 30 秒自动刷新')}
+              </span>
+              <Button icon={<ReloadOutlined />} onClick={() => void reload()} loading={loading}>
+                {t('刷新')}
+              </Button>
+            </>
+          }
+        />
+      )}
+      >
+      <Table
+        rowKey="token_id"
+          className="list-table"
+          columns={columns}
+          dataSource={list}
+          loading={loading}
+          scroll={{ x: 'max-content' }}
+          locale={{ emptyText: <GlassEmpty text="当前没有在线会话" compact /> }}
+        pagination={{ showTotal: (n) => t('共 {{n}} 条', { n }), showSizeChanger: true }}
+      />
+    </ListPageShell>
+  )
+}
