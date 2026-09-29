@@ -53,6 +53,21 @@ var Config struct {
 		// DistDir 前端构建产物目录(空则不托管)
 		DistDir string `yaml:"dist_dir"`
 	} `yaml:"frontend"`
+	MQ struct {
+		// Enabled false 时使用 Noop 发布器(如实降级,不报错)
+		Enabled       bool   `yaml:"enabled"`
+		URL           string `yaml:"url"`            // NATS 地址,如 nats://127.0.0.1:4222
+		SubjectPrefix string `yaml:"subject_prefix"` // 固定 opic(opic.<source>.<type>)
+		JetStream     bool   `yaml:"jetstream"`      // JetStream 持久化(事件回放/持久订阅)
+		TimeoutSec    int    `yaml:"timeout_sec"`
+	} `yaml:"mq"`
+	Workflow struct {
+		// Enabled false 时使用 Noop Runner(如实降级)
+		Enabled   bool   `yaml:"enabled"`
+		Host      string `yaml:"host"`      // Temporal Server,如 localhost:7233
+		Namespace string `yaml:"namespace"`
+		TaskQueue string `yaml:"task_queue"` // opic.<中心名>,每中心一个队列
+	} `yaml:"workflow"`
 }
 
 var once sync.Once

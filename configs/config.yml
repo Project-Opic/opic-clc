@@ -42,3 +42,20 @@ ontology:
 # 前端构建产物目录(空则不托管;开发期前端走 vite proxy)
 frontend:
   dist_dir: ""
+
+# 事件总线:NATS(O-SYS 事件总线契约的第 3 层实现;v3.3 附录 A.2 #14)
+# enabled=false 时为如实降级(Noop);主题命名 opic.<source>.<type>;审计头 X-Trace-Id/X-User-Id 透传
+mq:
+  enabled: false
+  url: "nats://127.0.0.1:4222"
+  subject_prefix: opic
+  jetstream: false
+  timeout_sec: 5
+
+# 持久工作流运行时:Temporal(O-APP 编排结构的域外执行载体;v3.3 附录 A.2 #15)
+# enabled=false 时为如实降级;task queue 每中心一个;WorkflowID 与 O-APP WFL 编号族对齐
+workflow:
+  enabled: false
+  host: "localhost:7233"
+  namespace: default
+  task_queue: opic.platform-base-center

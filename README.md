@@ -107,3 +107,12 @@ sales 登录 → 建草稿 → 提交(启动 FLOW-CUSTOMER-APPROVAL,状态「待
 
 差异(有意为之):响应结构从 `{success,message,data,errorCode}` 升级为 OPIC `returnInfo` 规范;
 认证新增 ZITADEL 模式;数据库从 SQLite 升级为 PostgreSQL 16(Pigsty 供给)。
+
+## 事件总线与持久工作流（v3.3 新增模块）
+
+| 模块 | 说明 | 依赖 |
+|---|---|---|
+| `pkg/mq` | 事件总线客户端封装：主题 `opic.<source>.<type>`、信封（ID/Type/Source/TraceID/UserID/OccurredAt/Data）、审计头 `X-Trace-Id`/`X-User-Id` 透传；`enabled=false` 如实降级为 Noop | NATS / JetStream（第 3 层，可替换） |
+| `internal/workflow` | 持久工作流接入点：task queue `opic.<中心名>`、WorkflowID 与 `O-APP` `WFL` 编号族对齐；执行明细供 O-MON 采集 | Temporal Server（第 3 层，可替换） |
+
+契约（基线 v3.3 附录 A.2 #14/#15）：业务代码只依赖本仓库接口（`mq.Publisher` / `workflow.Runner`），**不得直接 import NATS / Temporal SDK**（契约不漂移）；编排结构合法性判定在 O-APP，本底座只承载运行（Q-4 同型边界）。`go test ./pkg/mq/... ./internal/workflow/...` 为纯本地单测（无需服务端）。
