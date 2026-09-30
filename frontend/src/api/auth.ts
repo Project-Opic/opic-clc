@@ -15,6 +15,7 @@ export interface MenuItem {
   icon: string | null
   path: string | null
   permission_code?: string | null
+  type?: string
   children?: MenuItem[]
 }
 
@@ -25,20 +26,22 @@ export interface LoginPayload {
   menus: MenuItem[]
 }
 
+export type AuthInfo = Omit<LoginPayload, 'token'>
+
 export const authApi = {
   login(username: string, password: string) {
-    return http.post<LoginPayload>('/auth/login', { username, password })
+    return http.post<LoginPayload>('/api/auth/login', { username, password })
   },
   info() {
-    return http.get<Omit<LoginPayload, 'token'>>('/auth/info')
+    return http.get<AuthInfo>('/api/auth/info')
   },
   logout() {
-    return http.post('/auth/logout')
+    return http.post('/api/auth/logout')
   },
   mode() {
-    return http.get<{ mode: string; allow_local_login: boolean }>('/auth/mode')
+    return http.get<{ mode: string; allow_local_login: boolean }>('/api/auth/mode')
   },
   zitadelLoginUrl() {
-    return http.get<{ url: string }>('/auth/login-url')
+    return http.get<{ url: string }>('/api/auth/login-url')
   },
 }

@@ -1,153 +1,213 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { GitBranch, Plus, Rocket } from 'lucide-react'
+import { Button, Card, Col, Form, Input, Modal, Row, Select, Space, Table, Tag, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { BranchesOutlined, PlusOutlined, RocketOutlined, SearchOutlined } from '@ant-design/icons'
 import { flowApi, type FlowDefinition } from '../../api/flow'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
 
-const typeLabel: Record<string, string> = { APPROVAL: '审批流', COLLABORATION: '协同流' }
+const flowTypeLabel: Record<string, string> = { APPROVAL: '审批流', COLLABORATION: '协同流' }
 
-function defStatus(status: number) {
-  if (status === 1) return { label: '已发布', className: 'badge-success' }
-  if (status === 2) return { label: '已停用', className: 'badge-neutral' }
-  return { label: '草稿', className: 'badge-warning' }
+interface CreateFormValues {
+  code: string
+  name: string
+  flow_type: 'APPROVAL' | 'COLLABORATION'
+  description?: string
 }
 
 export default function FlowDefinitions() {
   const navigate = useNavigate()
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const hasPerm = usePermission()
+  const [form] = Form.useForm<CreateFormValues>()
   const [data, setData] = useState<FlowDefinition[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [keyword, setKeyword] = useState('')
+  const [loading, setLoading] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ code: '', name: '', flow_type: 'APPROVAL', description: '' })
+  const [creating, setCreating] = useState(false)
 
-  const load = async () => {
-    const res = await flowApi.listDefinitions({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size, kw = keyword) => {
+    setLoading(true)
+    try {
+      const res = await flowApi.listDefinitions({ page: p, size: s, keyword: kw })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
+
+  const handleSearch = () => {
+    setPage(1)
+    load(1, size, keyword)
+  }
 
   const handleCreate = async () => {
+    const values = await form.validateFields()
+    setCreating(true)
     try {
-      const r: any = await flowApi.createDefinition(form)
-      toast('创建成功')
+      const r = await flowApi.createDefinition({
+        code: values.code,
+        name: values.name,
+        flow_type: values.flow_type,
+        description: values.description || '',
+      })
+      message.success('创建成功')
       setShowCreate(false)
       navigate(`/flow/designer/${r.id}`)
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setCreating(false)
     }
   }
 
-  const handlePublish = async (d: FlowDefinition) => {
-    try {
-      await flowApi.publishDefinition(d.id)
-      toast('发布成功')
-      load()
-    } catch (err: any) {
-      toast(err.message, 'error')
-    }
+  const handlePublish = (d: FlowDefinition) => {
+    Modal.confirm({
+      title: '发布流程',
+      content: `确认发布流程「${d.name}」？发布后流程定义不可再修改。`,
+      okText: '发布',
+      onOk: async () => {
+        await flowApi.publishDefinition(d.id)
+        message.success('发布成功')
+        load()
+      },
+    })
   }
+
+  const columns: ColumnsType<FlowDefinition> = [
+    { title: '流程编码', dataIndex: 'code', key: 'code', width: 160 },
+    { title: '流程名称', dataIndex: 'name', key: 'name' },
+    {
+      title: '流程类型',
+      dataIndex: 'flow_type',
+      key: 'flow_type',
+      width: 110,
+      render: (v: string) => flowTypeLabel[v] || v,
+    },
+    { title: '版本', dataIndex: 'version', key: 'version', width: 70, render: (v: number) => `v${v}` },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (v: number) =>
+        v === 1 ? <Tag color="green">已发布</Tag> : v === 2 ? <Tag>已停用</Tag> : <Tag color="gold">草稿</Tag>,
+    },
+    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, render: (v) => v || '-' },
+    {
+      title: '操作',
+      key: 'action',
+      width: 170,
+      render: (_, record) => (
+        <Space>
+          <Button type="link" size="small" icon={<BranchesOutlined />} onClick={() => navigate(`/flow/designer/${record.id}`)}>
+            设计
+          </Button>
+          {record.status === 0 && hasPerm('flow:definition:publish') && (
+            <Button type="link" size="small" icon={<RocketOutlined />} onClick={() => handlePublish(record)}>
+              发布
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ]
 
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div className="flex-between" style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-        <h3 style={{ fontWeight: 700 }}>流程定义</h3>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
-          <Plus size={14} /> 新建流程
-        </button>
-      </div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>流程编码</th>
-              <th>流程名称</th>
-              <th>流程类型</th>
-              <th>触发方式</th>
-              <th>版本</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((d) => {
-              const s = defStatus(d.status)
-              return (
-                <tr key={d.id}>
-                  <td>{d.code}</td>
-                  <td>{d.name}</td>
-                  <td>{typeLabel[d.flow_type] || d.flow_type}</td>
-                  <td>{d.trigger_type}</td>
-                  <td>v{d.version}</td>
-                  <td><span className={`badge ${s.className}`}>{s.label}</span></td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/flow/designer/${d.id}`)}>
-                      <GitBranch size={14} /> 设计
-                    </button>
-                    {d.status !== 1 && (
-                      <button className="btn btn-primary btn-sm" style={{ marginLeft: 8 }} onClick={() => handlePublish(d)}>
-                        <Rocket size={14} /> 发布
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination page={page} size={size} total={total} onChange={setPage} />
-      </div>
+    <Card>
+      <TableToolbar
+        title="流程定义"
+        total={total}
+        extra={
+          <Space wrap>
+            <Input
+              placeholder="编码 / 名称"
+              allowClear
+              style={{ width: 200 }}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={handleSearch}
+            />
+            <Button icon={<SearchOutlined />} onClick={handleSearch}>
+              查询
+            </Button>
+            {hasPerm('flow:definition:add') && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setShowCreate(true) }}>
+                新建流程
+              </Button>
+            )}
+          </Space>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
         title="新建流程定义"
         open={showCreate}
-        onClose={() => setShowCreate(false)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setShowCreate(false)}>取消</button>
-            <button className="btn btn-primary" onClick={handleCreate}>创建并设计</button>
-          </>
-        }
+        onCancel={() => setShowCreate(false)}
+        onOk={handleCreate}
+        okText="创建并设计"
+        confirmLoading={creating}
+        destroyOnHidden
       >
-        <div className="form-grid-2">
-          <div className="form-item span-2">
-            <label className="field-label required">流程编码</label>
-            <div className="field-control">
-              <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item span-2">
-            <label className="field-label required">流程名称</label>
-            <div className="field-control">
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item span-2">
-            <label className="field-label">流程类型</label>
-            <div className="field-control">
-              <select value={form.flow_type} onChange={(e) => setForm({ ...form, flow_type: e.target.value })}>
-                <option value="APPROVAL">审批流</option>
-                <option value="COLLABORATION">协同流</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-item span-2">
-            <label className="field-label">描述</label>
-            <div className="field-control">
-              <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            </div>
-          </div>
-        </div>
+        <Form form={form} layout="vertical" initialValues={{ flow_type: 'APPROVAL' }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="流程编码" name="code" rules={[{ required: true, message: '请输入流程编码' }]}>
+                <Input placeholder="如 CUSTOMER_APPROVAL" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="流程名称" name="name" rules={[{ required: true, message: '请输入流程名称' }]}>
+                <Input placeholder="请输入流程名称" />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="流程类型" name="flow_type" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 'APPROVAL', label: '审批流' },
+                    { value: 'COLLABORATION', label: '协同流' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="描述" name="description">
+                <Input.TextArea rows={2} placeholder="请输入描述" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }

@@ -1,188 +1,307 @@
 import { useEffect, useState } from 'react'
-import { Edit2, Plus, Trash2 } from 'lucide-react'
-import { permissionApi, type Permission } from '../../api/permission'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Switch,
+  Table,
+  message,
+} from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { EditOutlined, PlusOutlined, SearchOutlined, DeleteOutlined } from '@ant-design/icons'
+import { permissionApi, type Permission, type PermissionSaveBody } from '../../api/system'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
 
-const emptyForm = {
-  code: '', name: '', target_type: 'BEHAVIOR', target_ref: '', data_scope: 'ALL', abac_condition: '', status: 1,
+interface FormValues {
+  code: string
+  name: string
+  target_type: string
+  target_ref: string
+  data_scope: string
+  abac_condition?: string
+  status: number
+}
+
+const emptyForm: FormValues = {
+  code: '',
+  name: '',
+  target_type: 'BEHAVIOR',
+  target_ref: '',
+  data_scope: 'ALL',
+  abac_condition: '',
+  status: 1,
 }
 
 export default function PermissionManage() {
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
-  const [keyword, setKeyword] = useState('')
+  const hasPerm = usePermission()
+  const [form] = Form.useForm<FormValues>()
   const [data, setData] = useState<Permission[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [keyword, setKeyword] = useState('')
+  const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<Permission | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ ...emptyForm })
+  const [saving, setSaving] = useState(false)
 
-  const load = async () => {
-    const res = await permissionApi.list({ page, size, keyword })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size, kw = keyword) => {
+    setLoading(true)
+    try {
+      const res = await permissionApi.list({ page: p, size: s, keyword: kw })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
+
+  const handleSearch = () => {
+    setPage(1)
+    load(1, size, keyword)
+  }
 
   const openAdd = () => {
     setEditing(null)
-    setForm({ ...emptyForm })
+    form.setFieldsValue({ ...emptyForm })
     setShowForm(true)
   }
 
   const openEdit = (p: Permission) => {
     setEditing(p)
-    setForm({
-      code: p.code, name: p.name, target_type: p.target_type, target_ref: p.target_ref,
-      data_scope: p.data_scope, abac_condition: p.abac_condition || '', status: p.status,
+    form.setFieldsValue({
+      code: p.code,
+      name: p.name,
+      target_type: p.target_type,
+      target_ref: p.target_ref,
+      data_scope: p.data_scope,
+      abac_condition: p.abac_condition || '',
+      status: p.status,
     })
     setShowForm(true)
   }
 
   const handleSave = async () => {
+    const values = await form.validateFields()
+    setSaving(true)
     try {
-      if (editing) await permissionApi.update(editing.id, form)
-      else await permissionApi.create(form)
-      toast('保存成功')
+      const body: PermissionSaveBody = {
+        code: values.code,
+        name: values.name,
+        target_type: values.target_type,
+        target_ref: values.target_ref,
+        data_scope: values.data_scope,
+        abac_condition: values.abac_condition || '',
+        status: values.status,
+      }
+      if (editing) {
+        await permissionApi.update(editing.id, body)
+        message.success('更新成功')
+      } else {
+        await permissionApi.create(body)
+        message.success('创建成功')
+      }
       setShowForm(false)
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 校验失败或接口报错(拦截器已提示)
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleDelete = async (p: Permission) => {
-    if (!window.confirm(`确认删除权限「${p.code}」？`)) return
     try {
       await permissionApi.remove(p.id)
-      toast('删除成功')
+      message.success('删除成功')
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
     }
   }
 
-  return (
-    <div>
-      <div className="card" style={{ padding: '20px' }}>
-        <div className="flex-between">
-          <div className="form-item" style={{ width: 320 }}>
-            <label className="field-label">关键词</label>
-            <div className="field-control">
-              <input placeholder="权限编码 / 名称" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
-            </div>
-          </div>
-          <div className="toolbar">
-            <button className="btn btn-primary" onClick={() => { setPage(1); load() }}>查询</button>
-            <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> 新增</button>
-          </div>
-        </div>
-      </div>
+  const columns: ColumnsType<Permission> = [
+    { title: '权限编码', dataIndex: 'code', key: 'code', width: 200 },
+    { title: '名称', dataIndex: 'name', key: 'name', width: 140 },
+    { title: '目标类型', dataIndex: 'target_type', key: 'target_type', width: 100 },
+    { title: '目标引用', dataIndex: 'target_ref', key: 'target_ref', width: 160 },
+    { title: '数据范围', dataIndex: 'data_scope', key: 'data_scope', width: 100 },
+    {
+      title: 'ABAC 条件',
+      dataIndex: 'abac_condition',
+      key: 'abac_condition',
+      ellipsis: true,
+      render: (v) => v || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (v: number) => <Switch checked={v === 1} disabled size="small" />,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 150,
+      render: (_, record) => (
+        <Space size={0}>
+          {hasPerm('system:permission:edit') && (
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {hasPerm('system:permission:delete') && (
+            <Popconfirm title={`确认删除权限「${record.code}」？`} onConfirm={() => handleDelete(record)}>
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>权限编码</th>
-                <th>名称</th>
-                <th>目标类型</th>
-                <th>目标引用</th>
-                <th>数据范围</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.code}</td>
-                  <td>{p.name}</td>
-                  <td>{p.target_type}</td>
-                  <td>{p.target_ref}</td>
-                  <td>{p.data_scope}</td>
-                  <td><span className={`badge ${p.status === 1 ? 'badge-success' : 'badge-neutral'}`}>{p.status === 1 ? '启用' : '禁用'}</span></td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}><Edit2 size={14} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => handleDelete(p)}><Trash2 size={14} /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-          <Pagination page={page} size={size} total={total} onChange={setPage} />
-        </div>
-      </div>
+  return (
+    <Card>
+      <TableToolbar
+        title="权限管理"
+        total={total}
+        extra={
+          <Space wrap>
+            <Input
+              placeholder="权限编码 / 名称"
+              allowClear
+              style={{ width: 200 }}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={handleSearch}
+            />
+            <Button icon={<SearchOutlined />} onClick={handleSearch}>
+              查询
+            </Button>
+            {hasPerm('system:permission:add') && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+                新增
+              </Button>
+            )}
+          </Space>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
         title={editing ? '编辑权限' : '新增权限'}
         open={showForm}
-        onClose={() => setShowForm(false)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setShowForm(false)}>取消</button>
-            <button className="btn btn-primary" onClick={handleSave}>保存</button>
-          </>
-        }
+        onCancel={() => setShowForm(false)}
+        onOk={handleSave}
+        confirmLoading={saving}
+        destroyOnHidden
+        width={640}
       >
-        <div className="form-grid-2">
-          <div className="form-item">
-            <label className="field-label required">权限编码</label>
-            <div className="field-control"><input value={form.code} disabled={!!editing} onChange={(e) => setForm({ ...form, code: e.target.value })} /></div>
-          </div>
-          <div className="form-item">
-            <label className="field-label required">名称</label>
-            <div className="field-control"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">目标类型</label>
-            <div className="field-control">
-              <select value={form.target_type} onChange={(e) => setForm({ ...form, target_type: e.target.value })}>
-                <option value="BEHAVIOR">行为</option>
-                <option value="ENTITY">实体</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label required">目标引用</label>
-            <div className="field-control"><input value={form.target_ref} onChange={(e) => setForm({ ...form, target_ref: e.target.value })} /></div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">数据范围</label>
-            <div className="field-control">
-              <select value={form.data_scope} onChange={(e) => setForm({ ...form, data_scope: e.target.value })}>
-                <option value="ALL">全部</option>
-                <option value="OWN">本人</option>
-                <option value="DEPT">本部门</option>
-                <option value="CUSTOM">自定义</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">状态</label>
-            <div className="field-control">
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: Number(e.target.value) })}>
-                <option value={1}>启用</option>
-                <option value={0}>禁用</option>
-              </select>
-            </div>
-          </div>
-          {form.data_scope === 'CUSTOM' && (
-            <div className="form-item span-2">
-              <label className="field-label required">ABAC 条件</label>
-              <div className="field-control"><input value={form.abac_condition} onChange={(e) => setForm({ ...form, abac_condition: e.target.value })} /></div>
-            </div>
-          )}
-        </div>
+        <Form form={form} layout="vertical" initialValues={emptyForm}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="权限编码" name="code" rules={[{ required: true, message: '请输入权限编码' }]}>
+                <Input placeholder="如 customer:save" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
+                <Input placeholder="权限名称" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="目标类型" name="target_type" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 'BEHAVIOR', label: '行为' },
+                    { value: 'ENTITY', label: '实体' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="目标引用" name="target_ref" rules={[{ required: true, message: '请输入目标引用' }]}>
+                <Input placeholder="目标引用" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="数据范围" name="data_scope" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 'ALL', label: '全部' },
+                    { value: 'OWN', label: '本人' },
+                    { value: 'DEPT', label: '本部门' },
+                    { value: 'CUSTOM', label: '自定义' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="状态" name="status" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 1, label: '启用' },
+                    { value: 0, label: '禁用' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item
+                label="ABAC 条件"
+                name="abac_condition"
+                rules={[
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (getFieldValue('data_scope') !== 'CUSTOM' || (value && String(value).trim())) {
+                        return Promise.resolve()
+                      }
+                      return Promise.reject(new Error('数据范围为自定义时必须填写 ABAC 条件'))
+                    },
+                  }),
+                ]}
+              >
+                <Input.TextArea rows={2} placeholder="如 dept_id == user.dept_id" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }

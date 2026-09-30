@@ -1,145 +1,179 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, RotateCcw, Search } from 'lucide-react'
+import { Button, Card, Form, Input, Select, Space, Table } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { customerApi, type Customer } from '../../api/customer'
 import { metaApi, type DictItem } from '../../api/meta'
-import Pagination from '../../components/Pagination'
-import { Badge } from '../../utils/status'
+import TableToolbar from '../../admin/components/TableToolbar'
+import { CustomerStatusPill } from '../../admin/components/StatusPill'
+
+interface FilterValues {
+  customer_no?: string
+  customer_name?: string
+  status?: string
+}
 
 export default function CustomerQuery() {
   const navigate = useNavigate()
-  const [filters, setFilters] = useState({ customer_no: '', customer_name: '', status: '' })
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const [form] = Form.useForm<FilterValues>()
   const [data, setData] = useState<Customer[]>([])
   const [total, setTotal] = useState(0)
-  const [types, setTypes] = useState<DictItem[]>([])
-  const [levels, setLevels] = useState<DictItem[]>([])
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [loading, setLoading] = useState(false)
   const [statuses, setStatuses] = useState<string[]>([])
+  const [typeDict, setTypeDict] = useState<DictItem[]>([])
+  const [levelDict, setLevelDict] = useState<DictItem[]>([])
 
-  const label = (items: DictItem[], code: string) => items.find((i) => i.code === code)?.label || code
+  const typeLabel = useMemo(() => new Map(typeDict.map((d) => [d.code, d.label])), [typeDict])
+  const levelLabel = useMemo(() => new Map(levelDict.map((d) => [d.code, d.label])), [levelDict])
+
+  const load = async (p = page, s = size) => {
+    setLoading(true)
+    try {
+      const values = form.getFieldsValue()
+      const res = await customerApi.list({
+        page: p,
+        size: s,
+        customer_no: values.customer_no,
+        customer_name: values.customer_name,
+        status: values.status,
+      })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    metaApi.dictionaries().then((d) => {
-      setTypes(d.CUSTOMER_TYPE)
-      setLevels(d.CUSTOMER_LEVEL)
-    })
-    metaApi.customerStatus().then(setStatuses)
+    metaApi
+      .dictionaries()
+      .then((d) => {
+        setTypeDict(d.CUSTOMER_TYPE || [])
+        setLevelDict(d.CUSTOMER_LEVEL || [])
+      })
+      .catch(() => {})
+    metaApi
+      .customerStatus()
+      .then(setStatuses)
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
-  const load = async () => {
-    const res = await customerApi.list({ page, size, ...filters })
-    setData(res.list)
-    setTotal(res.total)
-  }
-
-  const handleQuery = () => {
+  const handleSearch = () => {
     setPage(1)
-    load()
+    load(1, size)
   }
 
   const handleReset = () => {
-    setFilters({ customer_no: '', customer_name: '', status: '' })
+    form.resetFields()
     setPage(1)
+    load(1, size)
   }
 
-  return (
-    <div>
-      <div className="card" style={{ padding: '20px' }}>
-        <div className="form-grid-3">
-          <div className="form-item">
-            <label className="field-label">客户编号</label>
-            <div className="field-control">
-              <input value={filters.customer_no} onChange={(e) => setFilters({ ...filters, customer_no: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">客户名称</label>
-            <div className="field-control">
-              <input value={filters.customer_name} onChange={(e) => setFilters({ ...filters, customer_name: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">审批状态</label>
-            <div className="field-control">
-              <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-                <option value="">全部</option>
-                {statuses.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-        <div className="toolbar-right">
-          <button className="btn btn-primary" onClick={handleQuery}>
-            <Search size={14} /> 查询
-          </button>
-          <button className="btn btn-secondary" onClick={handleReset}>
-            <RotateCcw size={14} /> 重置
-          </button>
-        </div>
-      </div>
+  const columns: ColumnsType<Customer> = [
+    { title: '客户编号', dataIndex: 'customer_no', key: 'customer_no', width: 150 },
+    { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name' },
+    {
+      title: '客户类型',
+      dataIndex: 'customer_type',
+      key: 'customer_type',
+      width: 120,
+      render: (v: string) => typeLabel.get(v) || v || '-',
+    },
+    {
+      title: '客户等级',
+      dataIndex: 'customer_level',
+      key: 'customer_level',
+      width: 120,
+      render: (v: string) => levelLabel.get(v) || v || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 160,
+      render: (v: string) => <CustomerStatusPill status={v} />,
+    },
+    {
+      title: '申请人',
+      dataIndex: 'applicant_name',
+      key: 'applicant_name',
+      width: 100,
+      render: (v: string | null) => v || '-',
+    },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    {
+      title: '操作',
+      key: 'action',
+      width: 90,
+      render: (_, record) => (
+        <Button type="link" size="small" onClick={() => navigate(`/customer/apply?id=${record.id}`)}>
+          查看
+        </Button>
+      ),
+    },
+  ]
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-          <h3 style={{ fontWeight: 700 }}>查询结果</h3>
-        </div>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>客户编号</th>
-                <th>客户名称</th>
-                <th>客户类型</th>
-                <th>客户等级</th>
-                <th>联系人</th>
-                <th>联系电话</th>
-                <th>审批状态</th>
-                <th>申请人</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.customer_no}</td>
-                  <td>{c.customer_name}</td>
-                  <td>{label(types, c.customer_type)}</td>
-                  <td>{label(levels, c.customer_level)}</td>
-                  <td>{c.contact_person || '-'}</td>
-                  <td>{c.contact_phone || '-'}</td>
-                  <td><Badge status={c.status} /></td>
-                  <td>{c.applicant_name || '-'}</td>
-                  <td>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => navigate(`/customer/apply?id=${c.id}`)}
-                    >
-                      <Eye size={14} /> 查看
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {data.length === 0 && (
-                <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', color: '#94a3b8' }}>
-                    暂无数据
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-          <Pagination page={page} size={size} total={total} onChange={setPage} />
-        </div>
-      </div>
-    </div>
+  return (
+    <Card>
+      <TableToolbar
+        title="客户查询"
+        total={total}
+        extra={
+          <Space wrap>
+            <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+              查询
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={handleReset}>
+              重置
+            </Button>
+          </Space>
+        }
+      />
+      <Form form={form} layout="inline" style={{ marginBottom: 16, rowGap: 8 }}>
+        <Form.Item name="customer_no">
+          <Input placeholder="客户编号" allowClear style={{ width: 180 }} onPressEnter={handleSearch} />
+        </Form.Item>
+        <Form.Item name="customer_name">
+          <Input placeholder="客户名称" allowClear style={{ width: 180 }} onPressEnter={handleSearch} />
+        </Form.Item>
+        <Form.Item name="status">
+          <Select
+            placeholder="状态"
+            allowClear
+            style={{ width: 180 }}
+            options={statuses.map((s) => ({ value: s, label: s }))}
+          />
+        </Form.Item>
+      </Form>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
+    </Card>
   )
 }

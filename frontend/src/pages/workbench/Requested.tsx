@@ -1,89 +1,122 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, Undo2 } from 'lucide-react'
-import { workbenchApi, type RequestedItem } from '../../api/workbench'
+import { Button, Card, Popconfirm, Table, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { EyeOutlined, ReloadOutlined } from '@ant-design/icons'
+import { workbenchApi, type RequestedItem } from '../../api/flow'
 import { customerApi } from '../../api/customer'
-import Pagination from '../../components/Pagination'
-import { toast } from '../../components/toast'
-import { Badge } from '../../utils/status'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
+import { CustomerStatusPill, InstanceStatusPill } from '../../admin/components/StatusPill'
 
 export default function Requested() {
   const navigate = useNavigate()
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const hasPerm = usePermission()
   const [data, setData] = useState<RequestedItem[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [loading, setLoading] = useState(false)
 
-  const load = async () => {
-    const res = await workbenchApi.requested({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size) => {
+    setLoading(true)
+    try {
+      const res = await workbenchApi.requested({ page: p, size: s })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
   const handleWithdraw = async (c: RequestedItem) => {
-    if (!window.confirm(`确认撤回客户「${c.customer_name}」的申请？`)) return
     try {
       await customerApi.withdraw(c.id)
-      toast('已撤回')
+      message.success('已撤回')
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
     }
   }
 
+  const columns: ColumnsType<RequestedItem> = [
+    { title: '客户编号', dataIndex: 'customer_no', key: 'customer_no', width: 150 },
+    { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 170,
+      render: (v: string) => <CustomerStatusPill status={v} />,
+    },
+    {
+      title: '流程状态',
+      dataIndex: 'flow_status',
+      key: 'flow_status',
+      width: 130,
+      render: (v: string | undefined) => (v ? <InstanceStatusPill status={v} /> : '-'),
+    },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+    {
+      title: '操作',
+      key: 'action',
+      width: 150,
+      render: (_, record) => (
+        <>
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/customer/apply?id=${record.id}`)}>
+            查看
+          </Button>
+          {record.status === '待客户经理审批' && hasPerm('customer:submit') && (
+            <Popconfirm
+              title={`确认撤回客户「${record.customer_name}」的申请？`}
+              onConfirm={() => handleWithdraw(record)}
+            >
+              <Button type="link" size="small" danger>
+                撤回
+              </Button>
+            </Popconfirm>
+          )}
+        </>
+      ),
+    },
+  ]
+
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-        <h3 style={{ fontWeight: 700 }}>我的申请</h3>
-      </div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>客户编号</th>
-              <th>客户名称</th>
-              <th>客户类型</th>
-              <th>审批状态</th>
-              <th>申请时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((c) => (
-              <tr key={c.id}>
-                <td>{c.customer_no}</td>
-                <td>{c.customer_name}</td>
-                <td>{c.customer_type}</td>
-                <td><Badge status={c.status} /></td>
-                <td>{c.created_at}</td>
-                <td>
-                  <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/customer/apply?id=${c.id}`)}>
-                    <Eye size={14} /> 查看
-                  </button>
-                  {c.status === '待客户经理审批' && (
-                    <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8 }} onClick={() => handleWithdraw(c)}>
-                      <Undo2 size={14} /> 撤回
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {data.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8' }}>暂无申请</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination page={page} size={size} total={total} onChange={setPage} />
-      </div>
-    </div>
+    <Card>
+      <TableToolbar
+        title="我的申请"
+        total={total}
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => load()}>
+            刷新
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
+    </Card>
   )
 }

@@ -19,23 +19,25 @@ export interface Customer {
   flow_status?: string
 }
 
+export type CustomerDraftBody = Partial<Omit<Customer, 'id' | 'customer_no' | 'status' | 'applicant_id' | 'applicant_name' | 'instance_id' | 'created_at'>>
+
 export const customerApi = {
   list(params: { page?: number; size?: number; customer_no?: string; customer_name?: string; status?: string }) {
-    return http.get<PageResult<Customer>>('/customer', params)
+    return http.get<PageResult<Customer>>('/api/customer', params)
   },
   get(id: number) {
-    return http.get<Customer>(`/customer/${id}`)
+    return http.get<Customer>(`/api/customer/${id}`)
   },
-  createDraft(data: Partial<Customer>) {
-    return http.post<Customer>('/customer/draft', data)
+  createDraft(data: CustomerDraftBody) {
+    return http.post<Customer>('/api/customer/draft', data)
   },
-  updateDraft(id: number, data: Partial<Customer>) {
-    return http.put<Customer>(`/customer/${id}/draft`, data)
+  updateDraft(id: number, data: CustomerDraftBody) {
+    return http.put<Customer>(`/api/customer/${id}/draft`, data)
   },
   submit(id: number) {
-    return http.post<Customer>(`/customer/${id}/submit`)
+    return http.post<Customer>(`/api/customer/${id}/submit`)
   },
   withdraw(id: number) {
-    return http.post<Customer>(`/customer/${id}/withdraw`)
+    return http.post<Customer>(`/api/customer/${id}/withdraw`)
   },
 }

@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/sharptoolbox/ontology-driven-dev/go-techbase/internal/pkg/config"
+	"gitcode.com/opic-ontology/opic-techbase/internal/config"
 )
 
 // Registry 运行时注册表(与 Python 版同构)。

@@ -1,186 +1,243 @@
 import { useEffect, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 import { useSearchParams } from 'react-router-dom'
-import { RotateCcw, Save, Send } from 'lucide-react'
-import { customerApi, type Customer } from '../../api/customer'
+import { Button, Card, Col, Form, Input, Row, Select, Space, message } from 'antd'
+import { ReloadOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
+import { customerApi } from '../../api/customer'
 import { metaApi, type DictItem } from '../../api/meta'
-import { toast } from '../../components/toast'
-import { Badge } from '../../utils/status'
+import { setAuth } from '../../store/slices/authSlice'
+import { usePermission } from '../../hooks/usePermission'
+import type { RootState, AppDispatch } from '../../store'
+import { authApi } from '../../api/auth'
+import { CustomerStatusPill } from '../../admin/components/StatusPill'
 
-const emptyForm = {
-  customer_name: '',
-  customer_type: '',
-  industry: '',
-  contact_person: '',
-  contact_phone: '',
-  customer_level: '',
-  address: '',
-  remark: '',
+interface CustomerFormValues {
+  customer_name: string
+  customer_type: string
+  customer_level: string
+  industry?: string
+  contact_person?: string
+  contact_phone?: string
+  address?: string
+  remark?: string
 }
+
+/** 仅 草稿/已驳回(及新建)可编辑与提交 */
+const EDITABLE_STATUS = ['草稿', '已驳回']
 
 export default function CustomerApply() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const id = searchParams.get('id')
-  const [form, setForm] = useState({ ...emptyForm })
-  const [customerId, setCustomerId] = useState<number | null>(id ? Number(id) : null)
-  const [status, setStatus] = useState('')
+  const idParam = searchParams.get('id')
+  const dispatch = useDispatch<AppDispatch>()
+  const user = useSelector((s: RootState) => s.auth.user)
+  const hasPerm = usePermission()
+  const [form] = Form.useForm<CustomerFormValues>()
   const [types, setTypes] = useState<DictItem[]>([])
   const [levels, setLevels] = useState<DictItem[]>([])
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('')
+  const [customerNo, setCustomerNo] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    metaApi.dictionaries().then((d) => {
-      setTypes(d.CUSTOMER_TYPE)
-      setLevels(d.CUSTOMER_LEVEL)
-    })
+    metaApi
+      .dictionaries()
+      .then((d) => {
+        setTypes(d.CUSTOMER_TYPE || [])
+        setLevels(d.CUSTOMER_LEVEL || [])
+      })
+      .catch(() => {})
   }, [])
 
+  // 兜底:直接刷新页面时 Redux 里可能还没有 user,先恢复登录态
   useEffect(() => {
-    if (customerId) {
-      customerApi.get(customerId).then((c) => {
-        setForm({
+    if (!user) {
+      authApi
+        .info()
+        .then((info) => dispatch(setAuth({ info })))
+        .catch(() => {})
+    }
+  }, [user, dispatch])
+
+  useEffect(() => {
+    if (!idParam) {
+      setStatus('')
+      setCustomerNo('')
+      return
+    }
+    customerApi
+      .get(Number(idParam))
+      .then((c) => {
+        setCustomerNo(c.customer_no)
+        form.setFieldsValue({
           customer_name: c.customer_name,
           customer_type: c.customer_type,
+          customer_level: c.customer_level,
           industry: c.industry || '',
           contact_person: c.contact_person || '',
           contact_phone: c.contact_phone || '',
-          customer_level: c.customer_level,
           address: c.address || '',
           remark: c.remark || '',
         })
         setStatus(c.status)
       })
-    }
-  }, [customerId])
+      .catch(() => {})
+  }, [idParam, form])
 
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const editable = !idParam || EDITABLE_STATUS.includes(status)
 
-  const editable = status === '' || status === '草稿' || status === '已驳回'
+  const draftBody = (values: CustomerFormValues) => ({
+    customer_name: values.customer_name,
+    customer_type: values.customer_type,
+    customer_level: values.customer_level,
+    industry: values.industry || '',
+    contact_person: values.contact_person || '',
+    contact_phone: values.contact_phone || '',
+    address: values.address || '',
+    remark: values.remark || '',
+  })
 
+  /** 暂存:有 ?id 走 PUT,否则 POST;返回客户 id */
   const saveDraft = async (): Promise<number | null> => {
-    if (!form.customer_name || !form.customer_type || !form.customer_level) {
-      toast('请填写客户名称、客户类型、客户等级', 'error')
-      return null
-    }
+    const values = await form.validateFields()
+    setSaving(true)
     try {
-      if (customerId) {
-        await customerApi.updateDraft(customerId, form)
-        return customerId
+      if (idParam) {
+        await customerApi.updateDraft(Number(idParam), draftBody(values))
+        return Number(idParam)
       }
-      const c = await customerApi.createDraft(form)
-      setCustomerId(c.id)
+      const c = await customerApi.createDraft(draftBody(values))
       setSearchParams({ id: String(c.id) })
       return c.id
-    } catch (err: any) {
-      toast(err.message, 'error')
-      return null
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleDraft = async () => {
-    const savedId = await saveDraft()
-    if (savedId) toast('暂存成功')
+    try {
+      await saveDraft()
+      message.success('暂存成功')
+      if (idParam) {
+        const c = await customerApi.get(Number(idParam))
+        setStatus(c.status)
+        setCustomerNo(c.customer_no)
+      }
+    } catch {
+      // 校验失败或接口报错(拦截器已提示)
+    }
   }
 
   const handleSubmit = async () => {
-    setLoading(true)
+    setSubmitting(true)
     try {
       const savedId = await saveDraft()
       if (!savedId) return
       const c = await customerApi.submit(savedId)
       setStatus(c.status)
-      toast('提交成功，已启动客户审批流')
-    } catch (err: any) {
-      toast(err.message, 'error')
+      message.success('提交成功')
+    } catch {
+      // 拦截器已提示
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
   const handleReset = () => {
-    setForm({ ...emptyForm })
-    setCustomerId(null)
+    form.resetFields()
     setStatus('')
     setSearchParams({})
   }
 
   return (
-    <div className="card">
-      <div className="card-title">
-        <h2>客户申请</h2>
-        <div className="toolbar">
-          {status && status !== '草稿' && status !== '已驳回' && <Badge status={status} />}
-          <button className="btn btn-secondary" onClick={handleReset}>
-            <RotateCcw size={14} /> 重置
-          </button>
-          <button className="btn btn-secondary" onClick={handleDraft} disabled={!editable}>
-            <Save size={14} /> 暂存
-          </button>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={!editable || loading}>
-            <Send size={14} /> 提交
-          </button>
-        </div>
-      </div>
-
-      <div className="form-grid-2">
-        <div className="form-item">
-          <label className="field-label required">客户名称</label>
-          <div className="field-control">
-            <input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-        <div className="form-item">
-          <label className="field-label required">客户类型</label>
-          <div className="field-control">
-            <select value={form.customer_type} onChange={(e) => set('customer_type', e.target.value)} disabled={!editable}>
-              <option value="">请选择</option>
-              {types.map((t) => (
-                <option key={t.code} value={t.code}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="form-item">
-          <label className="field-label">所属行业</label>
-          <div className="field-control">
-            <input value={form.industry} onChange={(e) => set('industry', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-        <div className="form-item">
-          <label className="field-label">联系人</label>
-          <div className="field-control">
-            <input value={form.contact_person} onChange={(e) => set('contact_person', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-        <div className="form-item">
-          <label className="field-label">联系电话</label>
-          <div className="field-control">
-            <input value={form.contact_phone} onChange={(e) => set('contact_phone', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-        <div className="form-item">
-          <label className="field-label required">客户等级</label>
-          <div className="field-control">
-            <select value={form.customer_level} onChange={(e) => set('customer_level', e.target.value)} disabled={!editable}>
-              <option value="">请选择</option>
-              {levels.map((t) => (
-                <option key={t.code} value={t.code}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="form-item span-2">
-          <label className="field-label">客户地址</label>
-          <div className="field-control">
-            <input value={form.address} onChange={(e) => set('address', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-        <div className="form-item span-2">
-          <label className="field-label">备注</label>
-          <div className="field-control">
-            <textarea rows={3} value={form.remark} onChange={(e) => set('remark', e.target.value)} disabled={!editable} />
-          </div>
-        </div>
-      </div>
-    </div>
+    <Card
+      title="客户申请"
+      extra={
+        <Space>
+          {status && <CustomerStatusPill status={status} />}
+          <Button icon={<ReloadOutlined />} onClick={handleReset} disabled={!editable}>
+            重置
+          </Button>
+          {hasPerm('customer:save') && (
+            <Button icon={<SaveOutlined />} loading={saving} onClick={handleDraft} disabled={!editable}>
+              暂存
+            </Button>
+          )}
+          {hasPerm('customer:submit') && (
+            <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={handleSubmit} disabled={!editable}>
+              提交
+            </Button>
+          )}
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical" disabled={!editable}>
+        <Row gutter={24}>
+          <Col span={12}>
+            <Form.Item label="客户编号">
+              <Input value={customerNo || '暂存后自动生成'} disabled readOnly />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              label="客户名称"
+              name="customer_name"
+              rules={[{ required: true, message: '请输入客户名称' }]}
+            >
+              <Input placeholder="请输入客户名称" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              label="客户类型"
+              name="customer_type"
+              rules={[{ required: true, message: '请选择客户类型' }]}
+            >
+              <Select
+                placeholder="请选择"
+                options={types.map((t) => ({ value: t.code, label: t.label }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              label="客户等级"
+              name="customer_level"
+              rules={[{ required: true, message: '请选择客户等级' }]}
+            >
+              <Select
+                placeholder="请选择"
+                options={levels.map((t) => ({ value: t.code, label: t.label }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="所属行业" name="industry">
+              <Input placeholder="请输入所属行业" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="联系人" name="contact_person">
+              <Input placeholder="请输入联系人" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="联系电话" name="contact_phone">
+              <Input placeholder="请输入联系电话" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="客户地址" name="address">
+              <Input placeholder="请输入客户地址" />
+            </Form.Item>
+          </Col>
+          <Col span={24}>
+            <Form.Item label="备注" name="remark">
+              <Input.TextArea rows={3} placeholder="请输入备注" />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Form>
+    </Card>
   )
 }

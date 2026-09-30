@@ -24,7 +24,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/sharptoolbox/ontology-driven-dev/go-techbase/internal/pkg/config"
+	"gitcode.com/opic-ontology/opic-techbase/internal/config"
 )
 
 // PKCEChallenge 生成 S256 code_challenge(verifier 为随机 state 串)。
@@ -48,12 +48,14 @@ func NewState() string {
 }
 
 // IssueLocalToken 签发 HS256 会话令牌(local 模式)。
+// jti(Redis 吊销黑名单用)恒定生成,令牌形状不随 Redis 开关变化。
 func IssueLocalToken(userID int64, username string) (string, error) {
 	cfg := config.Config.Auth
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        NewState(),
 			Subject:   fmt.Sprintf("%d", userID),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(cfg.JWTExpiresHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

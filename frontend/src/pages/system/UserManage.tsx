@@ -1,246 +1,383 @@
 import { useEffect, useState } from 'react'
-import { Edit2, KeyRound, Plus, Shield, Trash2 } from 'lucide-react'
-import { userApi, type SysUser } from '../../api/user'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
-import { usePermission } from '../../stores/userStore'
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Table,
+  Tag,
+  message,
+} from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { EditOutlined, KeyOutlined, PlusOutlined, SearchOutlined, DeleteOutlined } from '@ant-design/icons'
+import { userApi, type SysUser, type UserSaveBody } from '../../api/system'
+import { roleApi, type SysRole } from '../../api/system'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
+import { EnableStatusPill } from '../../admin/components/StatusPill'
 
-const emptyForm = {
-  username: '', password: '', real_name: '', email: '', phone: '',
-  actor_type: 'HUMAN', status: 1, role_ids: [] as number[],
+interface FormValues {
+  username?: string
+  password?: string
+  real_name?: string
+  email?: string
+  phone?: string
+  actor_type: string
+  department_id?: number | null
+  status: number
+  role_ids: number[]
+}
+
+const emptyForm: FormValues = {
+  username: '',
+  password: '',
+  real_name: '',
+  email: '',
+  phone: '',
+  actor_type: 'HUMAN',
+  department_id: null,
+  status: 1,
+  role_ids: [],
 }
 
 export default function UserManage() {
   const hasPerm = usePermission()
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
-  const [keyword, setKeyword] = useState('')
+  const [form] = Form.useForm<FormValues>()
+  const [pwdForm] = Form.useForm<{ new_password: string }>()
   const [data, setData] = useState<SysUser[]>([])
   const [total, setTotal] = useState(0)
-  const [roleOptions, setRoleOptions] = useState<{ id: number; name: string; code: string }[]>([])
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [keyword, setKeyword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [roleOptions, setRoleOptions] = useState<SysRole[]>([])
   const [editing, setEditing] = useState<SysUser | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ ...emptyForm })
+  const [saving, setSaving] = useState(false)
+  const [pwdUser, setPwdUser] = useState<SysUser | null>(null)
+  const [pwdSaving, setPwdSaving] = useState(false)
 
-  const load = async () => {
-    const res = await userApi.list({ page, size, keyword })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size, kw = keyword) => {
+    setLoading(true)
+    try {
+      const res = await userApi.list({ page: p, size: s, keyword: kw })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
-
-  useEffect(() => {
-    userApi.roleOptions().then(setRoleOptions)
-  }, [])
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
+
+  useEffect(() => {
+    roleApi
+      .list({ page: 1, size: 50 })
+      .then((r) => setRoleOptions(r.list || []))
+      .catch(() => {})
+  }, [])
+
+  const handleSearch = () => {
+    setPage(1)
+    load(1, size, keyword)
+  }
 
   const openAdd = () => {
     setEditing(null)
-    setForm({ ...emptyForm })
+    form.setFieldsValue({ ...emptyForm })
     setShowForm(true)
   }
 
   const openEdit = (u: SysUser) => {
     setEditing(u)
-    setForm({
-      username: u.username, password: '', real_name: u.real_name || '', email: u.email || '',
-      phone: u.phone || '', actor_type: u.actor_type, status: u.status,
+    form.setFieldsValue({
+      username: u.username,
+      password: '',
+      real_name: u.real_name || '',
+      email: u.email || '',
+      phone: u.phone || '',
+      actor_type: u.actor_type,
+      department_id: u.department_id,
+      status: u.status,
       role_ids: u.roles.map((r) => r.id),
     })
     setShowForm(true)
   }
 
-  const toggleRole = (id: number) => {
-    setForm((f) => ({
-      ...f,
-      role_ids: f.role_ids.includes(id) ? f.role_ids.filter((r) => r !== id) : [...f.role_ids, id],
-    }))
-  }
-
   const handleSave = async () => {
+    const values = await form.validateFields()
+    setSaving(true)
     try {
       if (editing) {
-        await userApi.update(editing.id, form)
+        const body: UserSaveBody = {
+          real_name: values.real_name,
+          email: values.email,
+          phone: values.phone,
+          actor_type: values.actor_type,
+          department_id: values.department_id ?? null,
+          status: values.status,
+          role_ids: values.role_ids,
+        }
+        await userApi.update(editing.id, body)
+        message.success('更新成功')
       } else {
-        await userApi.create(form)
+        await userApi.create({
+          username: values.username,
+          password: values.password,
+          real_name: values.real_name,
+          email: values.email,
+          phone: values.phone,
+          actor_type: values.actor_type,
+          department_id: values.department_id ?? null,
+          status: values.status,
+          role_ids: values.role_ids,
+        })
+        message.success('创建成功')
       }
-      toast('保存成功')
       setShowForm(false)
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 校验失败或接口报错(拦截器已提示)
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleDelete = async (u: SysUser) => {
-    if (!window.confirm(`确认删除用户「${u.username}」？`)) return
     try {
       await userApi.remove(u.id)
-      toast('删除成功')
+      message.success('删除成功')
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
     }
   }
 
-  const handleResetPwd = async (u: SysUser) => {
-    const pwd = window.prompt(`重置用户「${u.username}」的密码：`, '123456')
-    if (!pwd) return
+  const handleResetPwd = async () => {
+    if (!pwdUser) return
+    const values = await pwdForm.validateFields()
+    setPwdSaving(true)
     try {
-      await userApi.resetPwd(u.id, pwd)
-      toast('重置成功')
-    } catch (err: any) {
-      toast(err.message, 'error')
+      await userApi.resetPwd(pwdUser.id, values.new_password)
+      message.success('密码已重置')
+      setPwdUser(null)
+      pwdForm.resetFields()
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setPwdSaving(false)
     }
   }
+
+  const isAdminUser = (u: SysUser) => u.username === 'admin' || u.roles.some((r) => r.code === 'admin')
+
+  const columns: ColumnsType<SysUser> = [
+    { title: '用户名', dataIndex: 'username', key: 'username', width: 120 },
+    { title: '姓名', dataIndex: 'real_name', key: 'real_name', width: 110, render: (v) => v || '-' },
+    { title: '邮箱', dataIndex: 'email', key: 'email', render: (v) => v || '-' },
+    { title: '手机号', dataIndex: 'phone', key: 'phone', width: 130, render: (v) => v || '-' },
+    { title: '类型', dataIndex: 'actor_type', key: 'actor_type', width: 90 },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (v: number) => <EnableStatusPill value={v} />,
+    },
+    {
+      title: '角色',
+      dataIndex: 'roles',
+      key: 'roles',
+      render: (roles: SysUser['roles']) =>
+        roles && roles.length > 0 ? roles.map((r) => <Tag key={r.id} color="blue">{r.name}</Tag>) : '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 230,
+      render: (_, record) => (
+        <Space size={0}>
+          {hasPerm('system:user:edit') && (
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {hasPerm('system:user:reset-pwd') && (
+            <Button
+              type="link"
+              size="small"
+              icon={<KeyOutlined />}
+              onClick={() => {
+                setPwdUser(record)
+                pwdForm.resetFields()
+              }}
+            >
+              重置密码
+            </Button>
+          )}
+          {hasPerm('system:user:delete') && !isAdminUser(record) && (
+            <Popconfirm title={`确认删除用户「${record.username}」？`} onConfirm={() => handleDelete(record)}>
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
 
   return (
-    <div>
-      <div className="card" style={{ padding: '20px' }}>
-        <div className="flex-between">
-          <div className="form-item" style={{ width: 320 }}>
-            <label className="field-label">关键词</label>
-            <div className="field-control">
-              <input placeholder="用户名 / 手机号 / 姓名" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
-            </div>
-          </div>
-          <div className="toolbar">
-            <button className="btn btn-primary" onClick={() => { setPage(1); load() }}>查询</button>
+    <Card>
+      <TableToolbar
+        title="用户管理"
+        total={total}
+        extra={
+          <Space wrap>
+            <Input
+              placeholder="用户名 / 姓名 / 手机号"
+              allowClear
+              style={{ width: 200 }}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={handleSearch}
+            />
+            <Button icon={<SearchOutlined />} onClick={handleSearch}>
+              查询
+            </Button>
             {hasPerm('system:user:add') && (
-              <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> 新增</button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+                新增
+              </Button>
             )}
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>用户名</th>
-                <th>姓名</th>
-                <th>手机号</th>
-                <th>角色</th>
-                <th>类型</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((u) => (
-                <tr key={u.id}>
-                  <td>{u.username}</td>
-                  <td>{u.real_name || '-'}</td>
-                  <td>{u.phone || '-'}</td>
-                  <td>{u.roles.map((r) => r.name).join('、') || '-'}</td>
-                  <td>{u.actor_type}</td>
-                  <td>
-                    <span className={`badge ${u.status === 1 ? 'badge-success' : 'badge-neutral'}`}>
-                      {u.status === 1 ? '启用' : '禁用'}
-                    </span>
-                  </td>
-                  <td>
-                    {hasPerm('system:user:edit') && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(u)}><Edit2 size={14} /></button>
-                    )}
-                    {hasPerm('system:user:assign-role') && (
-                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => openEdit(u)}><Shield size={14} /></button>
-                    )}
-                    {hasPerm('system:user:reset-pwd') && (
-                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => handleResetPwd(u)}><KeyRound size={14} /></button>
-                    )}
-                    {hasPerm('system:user:delete') && u.username !== 'admin' && (
-                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => handleDelete(u)}><Trash2 size={14} /></button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-          <Pagination page={page} size={size} total={total} onChange={setPage} />
-        </div>
-      </div>
+          </Space>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
         title={editing ? '编辑用户' : '新增用户'}
         open={showForm}
-        onClose={() => setShowForm(false)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setShowForm(false)}>取消</button>
-            <button className="btn btn-primary" onClick={handleSave}>保存</button>
-          </>
-        }
+        onCancel={() => setShowForm(false)}
+        onOk={handleSave}
+        confirmLoading={saving}
+        destroyOnHidden
+        width={640}
       >
-        <div className="form-grid-2">
-          <div className="form-item">
-            <label className="field-label required">用户名</label>
-            <div className="field-control">
-              <input value={form.username} disabled={!!editing} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">{editing ? '密码(留空不改)' : '初始密码'}</label>
-            <div className="field-control">
-              <input type="password" value={form.password} placeholder={editing ? '留空则不修改' : '默认 123456'} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">姓名</label>
-            <div className="field-control">
-              <input value={form.real_name} onChange={(e) => setForm({ ...form, real_name: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">手机号</label>
-            <div className="field-control">
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">邮箱</label>
-            <div className="field-control">
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">类型</label>
-            <div className="field-control">
-              <select value={form.actor_type} onChange={(e) => setForm({ ...form, actor_type: e.target.value })}>
-                <option value="HUMAN">人工账户</option>
-                <option value="SYSTEM">系统账户</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">状态</label>
-            <div className="field-control">
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: Number(e.target.value) })}>
-                <option value={1}>启用</option>
-                <option value={0}>禁用</option>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div className="prop-row" style={{ marginTop: 16 }}>
-          <label>分配角色</label>
-          <div className="toolbar" style={{ gap: 16 }}>
-            {roleOptions.map((r) => (
-              <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.role_ids.includes(r.id)} onChange={() => toggleRole(r.id)} style={{ width: 'auto' }} />
-                {r.name}
-              </label>
-            ))}
-          </div>
-        </div>
+        <Form form={form} layout="vertical" initialValues={emptyForm}>
+          <Row gutter={16}>
+            {!editing && (
+              <>
+                <Col span={12}>
+                  <Form.Item label="用户名" name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+                    <Input placeholder="登录用户名" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="初始密码" name="password" rules={[{ required: true, message: '请输入初始密码' }]}>
+                    <Input.Password placeholder="初始密码" />
+                  </Form.Item>
+                </Col>
+              </>
+            )}
+            <Col span={12}>
+              <Form.Item label="姓名" name="real_name">
+                <Input placeholder="真实姓名" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="邮箱" name="email">
+                <Input placeholder="邮箱" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="手机号" name="phone">
+                <Input placeholder="手机号" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="账户类型" name="actor_type" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 'HUMAN', label: '人工账户' },
+                    { value: 'SYSTEM', label: '系统账户' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="状态" name="status" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 1, label: '启用' },
+                    { value: 0, label: '禁用' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="分配角色" name="role_ids">
+                <Select
+                  mode="multiple"
+                  placeholder="选择角色"
+                  allowClear
+                  options={roleOptions.map((r) => ({ value: r.id, label: r.name }))}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
-    </div>
+
+      <Modal
+        title={`重置密码:${pwdUser?.username || ''}`}
+        open={!!pwdUser}
+        onOk={handleResetPwd}
+        onCancel={() => setPwdUser(null)}
+        confirmLoading={pwdSaving}
+        destroyOnHidden
+      >
+        <Form form={pwdForm} layout="vertical">
+          <Form.Item
+            label="新密码"
+            name="new_password"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 6, message: '密码至少 6 位' },
+            ]}
+          >
+            <Input.Password placeholder="请输入新密码" />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Card>
   )
 }

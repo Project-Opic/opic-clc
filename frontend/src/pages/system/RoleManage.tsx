@@ -1,226 +1,347 @@
 import { useEffect, useState } from 'react'
-import { Edit2, KeyRound, Plus, Trash2 } from 'lucide-react'
-import { roleApi, type SysRole } from '../../api/role'
-import { permissionApi, type Permission } from '../../api/permission'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
+import {
+  Button,
+  Card,
+  Checkbox,
+  Col,
+  Drawer,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  message,
+} from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { ApartmentOutlined, EditOutlined, PlusOutlined, SafetyOutlined, DeleteOutlined } from '@ant-design/icons'
+import { roleApi, permissionApi, type SysRole, type Permission, type RoleSaveBody } from '../../api/system'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
 
-const emptyForm = { name: '', code: '', parent_id: 0, description: '', status: 1 }
+interface FormValues {
+  name: string
+  code: string
+  parent_id: number
+  description?: string
+  status: number
+}
+
+const emptyForm: FormValues = { name: '', code: '', parent_id: 0, description: '', status: 1 }
 
 export default function RoleManage() {
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const hasPerm = usePermission()
+  const [form] = Form.useForm<FormValues>()
   const [data, setData] = useState<SysRole[]>([])
   const [total, setTotal] = useState(0)
-  const [editing, setEditing] = useState<SysRole | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ ...emptyForm })
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [keyword, setKeyword] = useState('')
+  const [loading, setLoading] = useState(false)
   const [allRoles, setAllRoles] = useState<SysRole[]>([])
   const [allPerms, setAllPerms] = useState<Permission[]>([])
+  const [editing, setEditing] = useState<SysRole | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [assignRole, setAssignRole] = useState<SysRole | null>(null)
-  const [selectedPerms, setSelectedPerms] = useState<Set<number>>(new Set())
+  const [selectedPerms, setSelectedPerms] = useState<number[]>([])
+  const [assignSaving, setAssignSaving] = useState(false)
 
-  const load = async () => {
-    const res = await roleApi.list({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size, kw = keyword) => {
+    setLoading(true)
+    try {
+      const res = await roleApi.list({ page: p, size: s, keyword: kw })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
   useEffect(() => {
-    roleApi.list({ page: 1, size: 100 }).then((r) => setAllRoles(r.list))
-    permissionApi.all().then(setAllPerms)
+    roleApi
+      .list({ page: 1, size: 50 })
+      .then((r) => setAllRoles(r.list || []))
+      .catch(() => {})
+    permissionApi
+      .all()
+      .then(setAllPerms)
+      .catch(() => setAllPerms([]))
   }, [])
+
+  const handleSearch = () => {
+    setPage(1)
+    load(1, size, keyword)
+  }
 
   const openAdd = () => {
     setEditing(null)
-    setForm({ ...emptyForm })
+    form.setFieldsValue({ ...emptyForm })
     setShowForm(true)
   }
 
   const openEdit = (r: SysRole) => {
     setEditing(r)
-    setForm({ name: r.name, code: r.code, parent_id: r.parent_id, description: r.description || '', status: r.status })
+    form.setFieldsValue({
+      name: r.name,
+      code: r.code,
+      parent_id: r.parent_id || 0,
+      description: r.description || '',
+      status: r.status,
+    })
     setShowForm(true)
   }
 
   const handleSave = async () => {
+    const values = await form.validateFields()
+    setSaving(true)
     try {
-      if (editing) await roleApi.update(editing.id, form)
-      else await roleApi.create(form)
-      toast('保存成功')
+      if (editing) {
+        const body: RoleSaveBody = {
+          name: values.name,
+          parent_id: values.parent_id,
+          description: values.description || '',
+          status: values.status,
+        }
+        await roleApi.update(editing.id, body)
+        message.success('更新成功')
+      } else {
+        await roleApi.create({
+          name: values.name,
+          code: values.code,
+          parent_id: values.parent_id,
+          description: values.description || '',
+          status: values.status,
+          permission_ids: [],
+          resource_ids: [],
+        })
+        message.success('创建成功')
+      }
       setShowForm(false)
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 校验失败或接口报错(拦截器已提示)
+    } finally {
+      setSaving(false)
     }
   }
 
   const handleDelete = async (r: SysRole) => {
-    if (!window.confirm(`确认删除角色「${r.name}」？`)) return
     try {
       await roleApi.remove(r.id)
-      toast('删除成功')
+      message.success('删除成功')
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
     }
   }
 
   const openAssign = (r: SysRole) => {
     setAssignRole(r)
-    setSelectedPerms(new Set(r.permissions))
-  }
-
-  const togglePerm = (id: number) => {
-    setSelectedPerms((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    setSelectedPerms(r.permissions || [])
   }
 
   const handleAssign = async () => {
     if (!assignRole) return
+    setAssignSaving(true)
     try {
-      await roleApi.assignPermissions(assignRole.id, Array.from(selectedPerms))
-      toast('分配成功')
+      await roleApi.assignPermissions(assignRole.id, selectedPerms)
+      message.success('权限已更新')
       setAssignRole(null)
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setAssignSaving(false)
     }
   }
 
-  return (
-    <div>
-      <div className="card" style={{ padding: '20px' }}>
-        <div className="flex-between">
-          <h3 style={{ fontWeight: 700 }}>角色列表</h3>
-          <button className="btn btn-primary" onClick={openAdd}><Plus size={14} /> 新增</button>
-        </div>
-      </div>
+  const roleName = (id: number) => allRoles.find((x) => x.id === id)?.name
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>角色名称</th>
-                <th>编码</th>
-                <th>父角色</th>
-                <th>描述</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((r) => {
-                const parent = allRoles.find((x) => x.id === r.parent_id)
-                return (
-                  <tr key={r.id}>
-                    <td>{r.name}</td>
-                    <td>{r.code}</td>
-                    <td>{parent?.name || '-'}</td>
-                    <td>{r.description || '-'}</td>
-                    <td><span className={`badge ${r.status === 1 ? 'badge-success' : 'badge-neutral'}`}>{r.status === 1 ? '启用' : '禁用'}</span></td>
-                    <td>
-                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(r)}><Edit2 size={14} /></button>
-                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => openAssign(r)}><KeyRound size={14} /></button>
-                      {r.code !== 'admin' && (
-                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => handleDelete(r)}><Trash2 size={14} /></button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-          <Pagination page={page} size={size} total={total} onChange={setPage} />
-        </div>
-      </div>
+  const columns: ColumnsType<SysRole> = [
+    { title: '角色名称', dataIndex: 'name', key: 'name', width: 150 },
+    { title: '编码', dataIndex: 'code', key: 'code', width: 150 },
+    {
+      title: '父角色',
+      dataIndex: 'parent_id',
+      key: 'parent_id',
+      width: 130,
+      render: (v: number) => (v ? roleName(v) || v : '-'),
+    },
+    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, render: (v) => v || '-' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 90,
+      render: (v: number) => <Switch checked={v === 1} disabled size="small" />,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 240,
+      render: (_, record) => (
+        <Space size={0}>
+          {hasPerm('system:role:edit') && (
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {hasPerm('system:role:assign') && (
+            <Button type="link" size="small" icon={<SafetyOutlined />} onClick={() => openAssign(record)}>
+              分配权限
+            </Button>
+          )}
+          {hasPerm('system:role:delete') && record.code !== 'admin' && (
+            <Popconfirm title={`确认删除角色「${record.name}」？`} onConfirm={() => handleDelete(record)}>
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <Card>
+      <TableToolbar
+        title="角色管理"
+        total={total}
+        extra={
+          <Space wrap>
+            <Input
+              placeholder="角色名称 / 编码"
+              allowClear
+              style={{ width: 200 }}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={handleSearch}
+            />
+            <Button icon={<ApartmentOutlined />} onClick={handleSearch}>
+              查询
+            </Button>
+            {hasPerm('system:role:add') && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+                新增
+              </Button>
+            )}
+          </Space>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
         title={editing ? '编辑角色' : '新增角色'}
         open={showForm}
-        onClose={() => setShowForm(false)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setShowForm(false)}>取消</button>
-            <button className="btn btn-primary" onClick={handleSave}>保存</button>
-          </>
-        }
+        onCancel={() => setShowForm(false)}
+        onOk={handleSave}
+        confirmLoading={saving}
+        destroyOnHidden
       >
-        <div className="form-grid-2">
-          <div className="form-item">
-            <label className="field-label required">角色名称</label>
-            <div className="field-control"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-          </div>
-          <div className="form-item">
-            <label className="field-label required">编码</label>
-            <div className="field-control"><input value={form.code} disabled={!!editing} onChange={(e) => setForm({ ...form, code: e.target.value })} /></div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">父角色</label>
-            <div className="field-control">
-              <select value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: Number(e.target.value) })}>
-                <option value={0}>无</option>
-                {allRoles.filter((r) => r.id !== editing?.id).map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="form-item">
-            <label className="field-label">状态</label>
-            <div className="field-control">
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: Number(e.target.value) })}>
-                <option value={1}>启用</option>
-                <option value={0}>禁用</option>
-              </select>
-            </div>
-          </div>
-          <div className="form-item span-2">
-            <label className="field-label">描述</label>
-            <div className="field-control"><input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
-          </div>
-        </div>
+        <Form form={form} layout="vertical" initialValues={emptyForm}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="角色名称" name="name" rules={[{ required: true, message: '请输入角色名称' }]}>
+                <Input placeholder="角色名称" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="编码"
+                name="code"
+                rules={[{ required: true, message: '请输入编码' }]}
+                extra={editing ? '角色编码不可修改' : undefined}
+              >
+                <Input placeholder="角色编码" disabled={!!editing} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="父角色" name="parent_id">
+                <Select
+                  allowClear
+                  options={[
+                    { value: 0, label: '无(顶级)' },
+                    ...allRoles
+                      .filter((r) => r.id !== editing?.id)
+                      .map((r) => ({ value: r.id, label: r.name })),
+                  ]}
+                  onChange={(v) => form.setFieldValue('parent_id', v ?? 0)}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="状态" name="status" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: 1, label: '启用' },
+                    { value: 0, label: '禁用' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="描述" name="description">
+                <Input.TextArea rows={2} placeholder="角色描述" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
 
-      <Modal
-        title={`分配权限 - ${assignRole?.name || ''}`}
+      <Drawer
+        title={`分配权限:${assignRole?.name || ''}`}
         open={!!assignRole}
         onClose={() => setAssignRole(null)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setAssignRole(null)}>取消</button>
-            <button className="btn btn-primary" onClick={handleAssign}>保存</button>
-          </>
+        width={480}
+        extra={
+          <Button type="primary" loading={assignSaving} onClick={handleAssign}>
+            保存
+          </Button>
         }
       >
-        <div className="table-container" style={{ maxHeight: 360, overflowY: 'auto' }}>
-          <table>
-            <thead><tr><th>选择</th><th>权限编码</th><th>名称</th></tr></thead>
-            <tbody>
-              {allPerms.map((p) => (
-                <tr key={p.id}>
-                  <td><input type="checkbox" style={{ width: 'auto' }} checked={selectedPerms.has(p.id)} onChange={() => togglePerm(p.id)} /></td>
-                  <td>{p.code}</td>
-                  <td>{p.name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
-    </div>
+        <Tag color="blue" style={{ marginBottom: 12 }}>{`已选 ${selectedPerms.length} 项`}</Tag>
+        <Checkbox.Group
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+          value={selectedPerms}
+          onChange={(v) => setSelectedPerms(v as number[])}
+        >
+          {allPerms.map((p) => (
+            <Checkbox key={p.id} value={p.id}>
+              {p.name}（{p.code}）
+            </Checkbox>
+          ))}
+        </Checkbox.Group>
+      </Drawer>
+    </Card>
   )
 }

@@ -1,142 +1,237 @@
 import { useEffect, useState } from 'react'
-import { Eye, Ban } from 'lucide-react'
-import { flowApi, type FlowInstance } from '../../api/flow'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
-import { statusBadge } from '../../utils/status'
+import {
+  Button,
+  Card,
+  Descriptions,
+  Drawer,
+  Input,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Timeline,
+  Typography,
+  message,
+  Popconfirm,
+} from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { EyeOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
+import { flowApi, type FlowInstance, type FlowInstanceDetail } from '../../api/flow'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
+import { InstanceStatusPill } from '../../admin/components/StatusPill'
+import dayjs from 'dayjs'
+
+const INSTANCE_STATUSES = ['RUNNING', 'APPROVED', 'REJECTED', 'TERMINATED']
+
+const statusTag = (s: string) => <InstanceStatusPill status={s} />
+
+const actionLabel: Record<string, string> = {
+  APPROVE: '通过',
+  REJECT: '驳回',
+  RETURN: '退回',
+  SUBMIT: '提交',
+  START: '发起',
+  TERMINATE: '终止',
+  CREATE: '创建',
+}
+
+const fmt = (v?: string | null) => {
+  if (!v) return '-'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : v
+}
 
 export default function FlowInstances() {
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const hasPerm = usePermission()
   const [data, setData] = useState<FlowInstance[]>([])
   const [total, setTotal] = useState(0)
-  const [detail, setDetail] = useState<any>(null)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [status, setStatus] = useState<string | undefined>()
+  const [keyword, setKeyword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [detail, setDetail] = useState<FlowInstanceDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
 
-  const load = async () => {
-    const res = await flowApi.listInstances({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size) => {
+    setLoading(true)
+    try {
+      const res = await flowApi.listInstances({ page: p, size: s, status, keyword })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
-  const openDetail = async (id: number) => {
-    const d = await flowApi.getInstance(id)
-    setDetail(d)
+  const handleSearch = () => {
+    setPage(1)
+    load(1, size)
   }
 
-  const handleTerminate = async (id: number) => {
-    if (!window.confirm('确认强制终止该流程实例？')) return
+  const openDetail = async (id: number) => {
+    setDetailLoading(true)
     try {
-      await flowApi.terminateInstance(id)
-      toast('已终止')
-      load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+      const d = await flowApi.getInstance(id)
+      setDetail(d)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setDetailLoading(false)
     }
   }
 
-  return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-        <h3 style={{ fontWeight: 700 }}>流程实例</h3>
-      </div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>流程</th>
-              <th>业务单号</th>
-              <th>发起人</th>
-              <th>状态</th>
-              <th>发起时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((i) => {
-              const s = statusBadge(i.status)
-              return (
-                <tr key={i.id}>
-                  <td>{i.def_name}</td>
-                  <td>{i.business_key}</td>
-                  <td>{i.creator_id}</td>
-                  <td><span className={`badge ${s.className}`}>{s.label}</span></td>
-                  <td>{i.started_at}</td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openDetail(i.id)}>
-                      <Eye size={14} /> 详情
-                    </button>
-                    {i.status === 'RUNNING' && (
-                      <button className="btn btn-danger btn-sm" style={{ marginLeft: 8 }} onClick={() => handleTerminate(i.id)}>
-                        <Ban size={14} /> 终止
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination page={page} size={size} total={total} onChange={setPage} />
-      </div>
+  const handleTerminate = async (id: number) => {
+    try {
+      await flowApi.terminateInstance(id)
+      message.success('已终止')
+      load()
+    } catch {
+      // 拦截器已提示
+    }
+  }
 
-      <Modal title="流程实例详情" open={!!detail} onClose={() => setDetail(null)} width={720}>
+  const columns: ColumnsType<FlowInstance> = [
+    { title: '流程名称', dataIndex: 'def_name', key: 'def_name', render: (v) => v || '-' },
+    { title: '流程编码', dataIndex: 'def_code', key: 'def_code', width: 160, render: (v) => v || '-' },
+    { title: '业务单号', dataIndex: 'business_key', key: 'business_key', width: 160 },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (v: string) => statusTag(v) },
+    { title: '发起时间', dataIndex: 'started_at', key: 'started_at', width: 170, render: fmt },
+    { title: '结束时间', dataIndex: 'ended_at', key: 'ended_at', width: 170, render: fmt },
+    {
+      title: '操作',
+      key: 'action',
+      width: 160,
+      render: (_, record) => (
+        <Space>
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openDetail(record.id)}>
+            详情
+          </Button>
+          {record.status === 'RUNNING' && hasPerm('flow:instance:terminate') && (
+            <Popconfirm title="确认强制终止该流程实例？" onConfirm={() => handleTerminate(record.id)}>
+              <Button type="link" size="small" danger icon={<StopOutlined />}>
+                终止
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
+
+  const taskColumns: ColumnsType<NonNullable<FlowInstanceDetail['tasks']>[number]> = [
+    { title: '节点', dataIndex: 'activity_name', key: 'activity_name' },
+    { title: '办理人', dataIndex: 'assignee_name', key: 'assignee_name', render: (v) => v || '-' },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 90 },
+    { title: '动作', dataIndex: 'action', key: 'action', width: 90, render: (v: string | null) => (v ? actionLabel[v] || v : '-') },
+    { title: '办理时间', dataIndex: 'done_at', key: 'done_at', width: 160, render: fmt },
+  ]
+
+  return (
+    <Card>
+      <TableToolbar title="流程实例" total={total} />
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Select
+          placeholder="状态"
+          allowClear
+          style={{ width: 160 }}
+          value={status}
+          onChange={(v) => setStatus(v)}
+          options={INSTANCE_STATUSES.map((s) => ({ value: s, label: s }))}
+        />
+        <Input
+          placeholder="业务单号"
+          allowClear
+          style={{ width: 200 }}
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onPressEnter={handleSearch}
+        />
+        <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+          查询
+        </Button>
+      </Space>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
+
+      <Drawer
+        title="流程实例详情"
+        open={!!detail}
+        onClose={() => setDetail(null)}
+        width={680}
+        loading={detailLoading}
+      >
         {detail && (
           <>
-            <div className="form-grid-2">
-              <div className="form-item"><label className="field-label">流程</label><div className="field-control"><span>{detail.definition?.name}</span></div></div>
-              <div className="form-item"><label className="field-label">业务单号</label><div className="field-control"><span>{detail.business_key}</span></div></div>
-              <div className="form-item"><label className="field-label">状态</label><div className="field-control"><BadgeText s={detail.status} /></div></div>
-              <div className="form-item"><label className="field-label">发起时间</label><div className="field-control"><span>{detail.started_at}</span></div></div>
-            </div>
-            <h4 style={{ margin: '16px 0 8px' }}>任务</h4>
-            <div className="table-container">
-              <table>
-                <thead><tr><th>节点</th><th>办理人</th><th>状态</th><th>动作</th></tr></thead>
-                <tbody>
-                  {detail.tasks.map((t: any) => (
-                    <tr key={t.id}>
-                      <td>{t.activity_name}</td>
-                      <td>{t.assignee_name || '-'}</td>
-                      <td>{t.status}</td>
-                      <td>{t.action || '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <h4 style={{ margin: '16px 0 8px' }}>审批历史</h4>
-            <div className="table-container">
-              <table>
-                <thead><tr><th>节点</th><th>操作人</th><th>动作</th><th>意见</th><th>时间</th></tr></thead>
-                <tbody>
-                  {detail.history.map((h: any) => (
-                    <tr key={h.id}>
-                      <td>{h.activity_name || '-'}</td>
-                      <td>{h.operator_name || '-'}</td>
-                      <td>{h.action}</td>
-                      <td>{h.comment || '-'}</td>
-                      <td>{h.created_at}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Descriptions column={2} size="small" bordered>
+              <Descriptions.Item label="流程">{detail.definition?.name || detail.def_name}</Descriptions.Item>
+              <Descriptions.Item label="流程编码">{detail.definition?.code || detail.def_code}</Descriptions.Item>
+              <Descriptions.Item label="业务单号">{detail.business_key}</Descriptions.Item>
+              <Descriptions.Item label="状态">{statusTag(detail.status)}</Descriptions.Item>
+              <Descriptions.Item label="发起时间">{fmt(detail.started_at)}</Descriptions.Item>
+              <Descriptions.Item label="结束时间">{fmt(detail.ended_at)}</Descriptions.Item>
+            </Descriptions>
+
+            <Typography.Title level={5} style={{ margin: '16px 0 8px' }}>
+              任务
+            </Typography.Title>
+            <Table
+              rowKey="id"
+              size="small"
+              columns={taskColumns}
+              dataSource={detail.tasks || []}
+              pagination={false}
+            />
+
+            <Typography.Title level={5} style={{ margin: '16px 0 8px' }}>
+              审批历史
+            </Typography.Title>
+            {(detail.history || []).length === 0 ? (
+              <Tag>暂无历史</Tag>
+            ) : (
+              <Timeline
+                items={(detail.history || []).map((h) => ({
+                  children: (
+                    <div>
+                      <div>
+                        <Typography.Text strong>{h.activity_name || '-'}</Typography.Text>{' '}
+                        <Tag>{actionLabel[h.action] || h.action}</Tag>
+                        <Typography.Text type="secondary">{h.operator_name || '-'}</Typography.Text>
+                      </div>
+                      {h.comment && <div style={{ color: '#888' }}>意见:{h.comment}</div>}
+                      <div style={{ color: '#aaa', fontSize: 12 }}>{fmt(h.created_at)}</div>
+                    </div>
+                  ),
+                }))}
+              />
+            )}
           </>
         )}
-      </Modal>
-    </div>
+      </Drawer>
+    </Card>
   )
-}
-
-function BadgeText({ s }: { s: string }) {
-  const b = statusBadge(s)
-  return <span className={`badge ${b.className}`}>{b.label}</span>
 }

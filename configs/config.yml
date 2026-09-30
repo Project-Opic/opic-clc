@@ -1,11 +1,11 @@
-# go-techbase 配置(PG16 由 OPIC-数据服务域/Pigsty 供给)
+# opic-techbase 配置(环境变量可覆盖,优先级 env > yaml > 默认;见 .env.example)
 app:
-  name: go-techbase
+  name: opic-techbase
   port: "9680"
 
 log:
   level: info
-  output: std
+  output: std    # std|file(file 时写 dir/opic-techbase.log,按大小轮转)
   dir: ./log
 
 # 数据库:PostgreSQL 16(OPIC-DBS 集成 Pigsty 部署;连接串经数据服务域自助申请)
@@ -18,6 +18,18 @@ database:
   sslmode: disable
   maxconns: 20
   minconns: 5
+
+# Redis(可选,对齐 gopherforge):启用后登出令牌写入吊销黑名单;未启用功能静默降级
+redis:
+  enabled: false
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+# Prometheus 指标(/metrics;env METRICS_ENABLED 可覆盖)
+metrics:
+  enabled: true
 
 # 身份认证:OPIC-零信任安全中心集成的 ZITADEL
 # mode=local     本地账号密码登录(开发/单机回退,HS256 会话)
@@ -39,6 +51,6 @@ auth:
 ontology:
   models_dir: models
 
-# 前端构建产物目录(空则不托管;开发期前端走 vite proxy)
+# 前端构建产物目录(空则不托管;开发期前端走 vite proxy;compose 走网关/nginx)
 frontend:
   dist_dir: ""

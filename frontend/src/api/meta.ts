@@ -1,6 +1,9 @@
 import { http } from './request'
 
-export interface DictItem { code: string; label: string }
+export interface DictItem {
+  code: string
+  label: string
+}
 
 export interface Rule {
   id: string
@@ -13,12 +16,12 @@ export interface Rule {
 
 export const metaApi = {
   dictionaries() {
-    return http.get<{ CUSTOMER_TYPE: DictItem[]; CUSTOMER_LEVEL: DictItem[] }>('/meta/dictionaries')
+    return http.get<{ CUSTOMER_TYPE: DictItem[]; CUSTOMER_LEVEL: DictItem[] }>('/api/meta/dictionaries')
   },
   customerStatus() {
-    return http.get<string[]>('/meta/customer-status')
+    return http.get<string[]>('/api/meta/customer-status')
   },
   rules() {
-    return http.get<Rule[]>('/meta/rules')
+    return http.get<Rule[]>('/api/meta/rules')
   },
 }

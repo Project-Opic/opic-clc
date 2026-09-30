@@ -1,116 +1,148 @@
 import { useEffect, useState } from 'react'
-import { Check, Inbox, X } from 'lucide-react'
-import { workbenchApi, type TodoItem } from '../../api/workbench'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
+import { Button, Card, Input, Modal, Space, Table, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { ReloadOutlined } from '@ant-design/icons'
+import { workbenchApi, type TodoItem } from '../../api/flow'
+import TableToolbar from '../../admin/components/TableToolbar'
+
+type PendingAction = 'approve' | 'reject' | 'return'
 
 export default function Todo() {
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
   const [data, setData] = useState<TodoItem[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [loading, setLoading] = useState(false)
   const [current, setCurrent] = useState<TodoItem | null>(null)
   const [comment, setComment] = useState('')
+  const [acting, setActing] = useState(false)
 
-  const load = async () => {
-    const res = await workbenchApi.todo({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const load = async (p = page, s = size) => {
+    setLoading(true)
+    try {
+      const res = await workbenchApi.todo({ page: p, size: s })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
-  const open = (t: TodoItem) => {
-    setCurrent(t)
-    setComment('')
-  }
-
-  const doAction = async (action: 'approve' | 'reject' | 'return') => {
+  const doAction = async (action: PendingAction) => {
     if (!current) return
+    setActing(true)
     try {
       if (action === 'approve') await workbenchApi.approve(current.id, comment)
       else if (action === 'reject') await workbenchApi.reject(current.id, comment)
       else await workbenchApi.returnTask(current.id, comment)
-      toast(action === 'approve' ? '审批通过' : action === 'reject' ? '已驳回' : '已退回')
+      message.success(action === 'approve' ? '审批通过' : action === 'reject' ? '已驳回' : '已退回')
       setCurrent(null)
+      setComment('')
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setActing(false)
     }
   }
 
+  const columns: ColumnsType<TodoItem> = [
+    {
+      title: '客户编号',
+      dataIndex: 'customer_no',
+      key: 'customer_no',
+      width: 150,
+      render: (v: string | undefined, r) => v || r.business_key || '-',
+    },
+    { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name', render: (v) => v || '-' },
+    { title: '审批节点', dataIndex: 'activity_name', key: 'activity_name', width: 180 },
+    { title: '提交人', dataIndex: 'applicant_name', key: 'applicant_name', width: 120, render: (v) => v || '-' },
+    { title: '提交时间', dataIndex: 'started_at', key: 'started_at', width: 180, render: (v) => v || '-' },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_, record) => (
+        <Button
+          type="primary"
+          size="small"
+          onClick={() => {
+            setCurrent(record)
+            setComment('')
+          }}
+        >
+          处理
+        </Button>
+      ),
+    },
+  ]
+
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-        <h3 style={{ fontWeight: 700 }}>我的待办</h3>
-      </div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>客户名称</th>
-              <th>客户编号</th>
-              <th>审批节点</th>
-              <th>提交人</th>
-              <th>提交时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((t) => (
-              <tr key={t.id}>
-                <td>{t.customer_name || '-'}</td>
-                <td>{t.customer_no || t.business_key}</td>
-                <td>{t.activity_name}</td>
-                <td>{t.applicant_name || '-'}</td>
-                <td>{t.started_at}</td>
-                <td>
-                  <button className="btn btn-primary btn-sm" onClick={() => open(t)}>
-                    <Inbox size={14} /> 处理
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {data.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', color: '#94a3b8' }}>暂无待办</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination page={page} size={size} total={total} onChange={setPage} />
-      </div>
+    <Card>
+      <TableToolbar
+        title="我的待办"
+        total={total}
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => load()}>
+            刷新
+          </Button>
+        }
+      />
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
         title="审批处理"
         open={!!current}
-        onClose={() => setCurrent(null)}
+        onCancel={() => setCurrent(null)}
         footer={
-          <>
-            <button className="btn btn-danger" onClick={() => doAction('reject')}>
-              <X size={14} /> 驳回
-            </button>
-            <button className="btn btn-secondary" onClick={() => doAction('return')}>退回</button>
-            <button className="btn btn-primary" onClick={() => doAction('approve')}>
-              <Check size={14} /> 通过
-            </button>
-          </>
+          <Space>
+            <Button danger loading={acting} onClick={() => doAction('reject')}>
+              驳回
+            </Button>
+            <Button loading={acting} onClick={() => doAction('return')}>
+              退回
+            </Button>
+            <Button type="primary" loading={acting} onClick={() => doAction('approve')}>
+              通过
+            </Button>
+          </Space>
         }
       >
-        <p className="text-secondary" style={{ marginBottom: 12 }}>
-          客户：{current?.customer_name}（{current?.customer_no}） · 节点：{current?.activity_name}
+        <p style={{ color: '#888' }}>
+          客户：{current?.customer_name || '-'}（{current?.customer_no || current?.business_key || '-'}） · 节点：
+          {current?.activity_name}
         </p>
-        <div className="prop-row">
-          <label>审批意见</label>
-          <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
-        </div>
+        <Input.TextArea
+          rows={3}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          placeholder="审批意见(可空)"
+        />
       </Modal>
-    </div>
+    </Card>
   )
 }

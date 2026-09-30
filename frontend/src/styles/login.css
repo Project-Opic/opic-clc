@@ -1,0 +1,610 @@
+/* 视觉体系移植自 gopherforge (https://github.com/SuperiorChuo/gopherforge) MIT License,适配 OPIC 技术底座。
+   品牌页样式(登录页 + 玻璃 403 页):永远深空风格,不受 [data-glass] 主题作用域限制。
+   装饰全部纯 CSS,不引第三方库。 */
+
+/* ===== 页面底 #07070f + 三团极光色斑 ===== */
+.brand-page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: hidden;
+  background: #07070f;
+}
+
+/* 页面底噪:极淡颗粒 */
+.brand-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image:
+    radial-gradient(circle at 20% 40%, rgba(255, 255, 255, 0.02) 0%, transparent 40%),
+    radial-gradient(circle at 80% 60%, rgba(255, 255, 255, 0.02) 0%, transparent 40%);
+}
+
+.brand-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.brand-aurora-1 {
+  width: 780px;
+  height: 780px;
+  top: -260px;
+  left: -180px;
+  filter: blur(110px);
+  opacity: 0.78;
+  background: radial-gradient(circle at 35% 35%, #6366f1 0%, #4f46e5 35%, transparent 68%);
+  animation: brand-drift-1 18s ease-in-out infinite alternate;
+}
+
+.brand-aurora-2 {
+  width: 680px;
+  height: 680px;
+  bottom: -280px;
+  right: -160px;
+  filter: blur(110px);
+  opacity: 0.7;
+  background: radial-gradient(circle at 40% 40%, #a855f7 0%, #7c3aed 35%, transparent 68%);
+  animation: brand-drift-2 22s ease-in-out infinite alternate;
+}
+
+.brand-aurora-3 {
+  width: 520px;
+  height: 520px;
+  top: 28%;
+  left: 52%;
+  filter: blur(100px);
+  opacity: 0.45;
+  background: radial-gradient(circle at 50% 50%, #38bdf8 0%, #0ea5e9 35%, transparent 68%);
+  animation: brand-drift-3 26s ease-in-out infinite alternate;
+}
+
+@keyframes brand-drift-1 {
+  to { transform: translate(120px, 90px) scale(1.18); }
+}
+
+@keyframes brand-drift-2 {
+  to { transform: translate(-110px, -80px) scale(1.12); }
+}
+
+@keyframes brand-drift-3 {
+  to { transform: translate(-150px, 80px) scale(0.88); }
+}
+
+/* 细网格,向中心渐隐 */
+.brand-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 45%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 45%, #000 20%, transparent 75%);
+  animation: brand-grid-breathe 14s ease-in-out infinite alternate;
+}
+
+@keyframes brand-grid-breathe {
+  to { opacity: 0.55; }
+}
+
+/* ===== 玻璃壳(920px 左右分栏) ===== */
+.brand-shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 920px;
+  max-width: 100%;
+  min-height: 560px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: rgba(15, 16, 32, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(36px) saturate(1.7) brightness(1.05);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7) brightness(1.05);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.14),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset -1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.03),
+    0 40px 120px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(99, 102, 241, 0.08),
+    0 0 80px rgba(99, 102, 241, 0.18);
+  animation:
+    brand-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both,
+    brand-shell-breathe 8s ease-in-out infinite 0.7s;
+}
+
+@keyframes brand-rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes brand-shell-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.005); }
+}
+
+/* 顶部一条渐变高光线 */
+.brand-shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(129, 140, 248, 0.8), transparent);
+  z-index: 2;
+}
+
+/* 品牌栏 */
+.brand-side {
+  position: relative;
+  flex: 1 1 46%;
+  padding: 56px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.28), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.2), transparent 55%);
+}
+
+/* 左右分割光缝 */
+.brand-shell > .brand-side {
+  border-right: 1px solid transparent;
+  background-image:
+    radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.28), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.2), transparent 55%),
+    linear-gradient(180deg, transparent, rgba(129, 140, 248, 0.22) 30%, rgba(129, 140, 248, 0.22) 70%, transparent);
+  background-position: 0 0, 0 0, right center;
+  background-size: auto, auto, 1px 100%;
+  background-repeat: no-repeat;
+}
+
+/* 曲面反光:顶部大椭圆高光罩 */
+.brand-side::before,
+.brand-form-side::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 140% 55% at 50% -20%, rgba(255, 255, 255, 0.09), transparent 55%),
+    radial-gradient(ellipse 100% 40% at 50% 120%, rgba(255, 255, 255, 0.03), transparent 55%);
+}
+
+.brand-side > *,
+.brand-form-side > * {
+  position: relative;
+  z-index: 1;
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo-mark {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    0 8px 24px rgba(99, 102, 241, 0.55),
+    0 0 40px rgba(99, 102, 241, 0.35),
+    0 0 0 1px rgba(129, 140, 248, 0.35);
+}
+
+.brand-logo-mark::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  padding: 3px;
+  background: linear-gradient(135deg, rgba(129, 140, 248, 0.5), transparent 40%, rgba(168, 85, 247, 0.5));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.brand-logo-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: 0.4px;
+}
+
+.brand-headline {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 14px;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.brand-headline em {
+  font-style: normal;
+  background: linear-gradient(100deg, #a5b4fc 0%, #818cf8 40%, #c4b5fd 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 20px rgba(129, 140, 248, 0.35));
+}
+
+.brand-subline {
+  color: rgba(203, 213, 225, 0.66);
+  font-size: 14px;
+  line-height: 1.8;
+  margin: 0;
+}
+
+.brand-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.brand-features li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgba(203, 213, 225, 0.78);
+  font-size: 13.5px;
+  animation: brand-feature-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.brand-features li:nth-child(1) { animation-delay: 0.28s; }
+.brand-features li:nth-child(2) { animation-delay: 0.36s; }
+.brand-features li:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes brand-feature-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.brand-feature-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  backdrop-filter: blur(10px) saturate(1.4);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 4px 12px rgba(99, 102, 241, 0.18);
+}
+
+/* 表单栏 */
+.brand-form-side {
+  flex: 1 1 54%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 48px;
+  background: linear-gradient(180deg, rgba(8, 10, 24, 0.48), rgba(12, 14, 32, 0.68));
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.025);
+}
+
+.brand-form-inner {
+  width: 100%;
+  max-width: 340px;
+}
+
+.brand-form-title {
+  font-size: 24px;
+  font-weight: 650;
+  color: #fff;
+  margin: 0 0 6px;
+  letter-spacing: -0.3px;
+}
+
+.brand-form-sub {
+  color: rgba(203, 213, 225, 0.72);
+  font-size: 13.5px;
+  margin: 0 0 4px;
+}
+
+.brand-footer {
+  margin-top: 26px;
+  text-align: center;
+  color: rgba(148, 163, 184, 0.64);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ===== 深色玻璃输入框(作用域限定品牌页) =====
+   品牌页现处于 App 根 [data-glass] 作用域内,以下选择器带 [data-glass] 前缀提高优先级,
+   并补 [data-theme='light'] 变体,保证任意主题下覆盖 admin-glass.css 的全局 antd 玻璃规则,
+   品牌页视觉与升级前完全一致。 */
+[data-glass] .brand-page .ant-input-affix-wrapper,
+[data-glass] .brand-page .ant-input-outlined,
+[data-glass] .brand-page .ant-input,
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper,
+[data-glass][data-theme='light'] .brand-page .ant-input-outlined,
+[data-glass][data-theme='light'] .brand-page .ant-input {
+  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: rgba(148, 163, 184, 0.3) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  border-radius: 10px;
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease !important;
+}
+
+[data-glass] .brand-page .ant-input-affix-wrapper .ant-input,
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper .ant-input {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+[data-glass] .brand-page .ant-input-affix-wrapper:hover,
+[data-glass] .brand-page .ant-input-outlined:hover,
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper:hover,
+[data-glass][data-theme='light'] .brand-page .ant-input-outlined:hover {
+  border-color: rgba(165, 180, 252, 0.48) !important;
+  background: rgba(255, 255, 255, 0.095) !important;
+}
+
+[data-glass] .brand-page .ant-input::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+[data-glass] .brand-page .ant-input-prefix,
+[data-glass] .brand-page .ant-input-password-icon,
+[data-glass] .brand-page .ant-input-password-icon:hover {
+  color: rgba(165, 180, 252, 0.82);
+}
+
+[data-glass] .brand-page .ant-input-affix-wrapper-focused,
+[data-glass] .brand-page .ant-input-affix-wrapper:focus-within,
+[data-glass] .brand-page .ant-input:focus,
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper-focused,
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper:focus-within,
+[data-glass][data-theme='light'] .brand-page .ant-input:focus {
+  border-color: #a5b4fc !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 0 3px rgba(129, 140, 248, 0.24),
+    0 0 24px rgba(129, 140, 248, 0.28) !important;
+}
+
+/* 聚焦光波纹 */
+[data-glass] .brand-page .ant-input-affix-wrapper-focused,
+[data-glass] .brand-page .ant-input-affix-wrapper:focus-within {
+  animation: brand-focus-ripple 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes brand-focus-ripple {
+  0% {
+    outline: 2px solid rgba(129, 140, 248, 0.55);
+    outline-offset: 0;
+  }
+  100% {
+    outline: 2px solid rgba(129, 140, 248, 0);
+    outline-offset: 14px;
+  }
+}
+
+/* 主按钮:渐变玻璃药丸 + 慢柔渐变呼吸([data-glass] 前缀锁优先级,见上方说明) */
+[data-glass] .brand-page .ant-btn-primary:not(:disabled),
+[data-glass][data-theme='light'] .brand-page .ant-btn-primary:not(:disabled) {
+  position: relative;
+  overflow: hidden;
+  height: 44px;
+  border-radius: 10px;
+  font-weight: 550;
+  letter-spacing: 2px;
+  background: linear-gradient(100deg, #6366f1 0%, #7c3aed 100%) !important;
+  border: none;
+  /* 品牌页不走全局玻璃按钮的液态流动动画,保持原品牌静态渐变 */
+  animation: none !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22),
+    0 10px 28px rgba(99, 102, 241, 0.45),
+    0 0 40px rgba(168, 85, 247, 0.25) !important;
+  transition: box-shadow 0.25s, transform 0.15s, filter 0.25s;
+}
+
+[data-glass] .brand-page .ant-btn-primary:not(:disabled):hover,
+[data-glass][data-theme='light'] .brand-page .ant-btn-primary:not(:disabled):hover {
+  filter: brightness(1.1);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22),
+    0 16px 40px rgba(99, 102, 241, 0.6),
+    0 0 60px rgba(168, 85, 247, 0.4) !important;
+  transform: translateY(-2px);
+}
+
+[data-glass] .brand-page .ant-btn-primary:not(:disabled):active,
+[data-glass][data-theme='light'] .brand-page .ant-btn-primary:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.28),
+    0 4px 12px rgba(99, 102, 241, 0.35) !important;
+}
+
+[data-glass] .brand-page .ant-form-item-explain-error {
+  font-size: 12px;
+}
+
+/* SSO 次按钮:玻璃胶囊 */
+[data-glass] .brand-page .ant-btn-default {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(148, 163, 184, 0.3) !important;
+  color: rgba(226, 232, 240, 0.92) !important;
+  border-radius: 10px;
+  backdrop-filter: blur(10px) saturate(1.3);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+}
+
+[data-glass] .brand-page .ant-btn-default:hover {
+  border-color: rgba(165, 180, 252, 0.55) !important;
+  color: #fff !important;
+}
+
+.brand-form {
+  margin-top: 20px;
+}
+
+.brand-page .brand-form .ant-form-item {
+  margin-bottom: 15px;
+}
+
+.brand-page .brand-form .brand-submit-item {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+/* ===== 登录方式均不可用时的提示(brand-shell 单栏窄壳) ===== */
+.brand-shell-single {
+  width: 460px;
+  min-height: 0;
+}
+
+.brand-shell-single .brand-form-side {
+  flex: 1;
+}
+
+.brand-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.7;
+  color: rgba(251, 191, 36, 0.95);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+}
+
+.brand-notice .anticon {
+  font-size: 16px;
+  margin-top: 3px;
+}
+
+/* ===== 玻璃 403 结果卡 ===== */
+.brand-result {
+  position: relative;
+  z-index: 2;
+  width: min(560px, calc(100vw - 32px));
+  margin: auto;
+  padding: 48px 40px 40px;
+  border-radius: 24px;
+  text-align: center;
+  background: rgba(15, 16, 32, 0.42);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(36px) saturate(1.7) brightness(1.05);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7) brightness(1.05);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.14),
+    0 40px 120px rgba(0, 0, 0, 0.6),
+    0 0 80px rgba(99, 102, 241, 0.18);
+  animation: brand-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.brand-result-code {
+  font-size: 88px;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: -3px;
+  background: linear-gradient(100deg, #a5b4fc 0%, #818cf8 40%, #c4b5fd 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.brand-result-title {
+  margin-top: 18px;
+  font-size: 20px;
+  font-weight: 650;
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.brand-result-desc {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: rgba(203, 213, 225, 0.68);
+}
+
+.brand-result-actions {
+  margin-top: 26px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ===== 小屏适配 ===== */
+@media (max-width: 860px) {
+  .brand-side {
+    display: none;
+  }
+  .brand-shell {
+    width: 440px;
+    min-height: auto;
+  }
+}
+
+/* ===== 减少动效 ===== */
+@media (prefers-reduced-motion: reduce) {
+  .brand-shell,
+  .brand-page .ant-btn-primary,
+  .brand-aurora,
+  .brand-grid,
+  .brand-features li {
+    animation: none !important;
+  }
+}

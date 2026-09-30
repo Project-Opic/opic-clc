@@ -1,0 +1,85 @@
+# 应用栈:techbase 后端 + 前端(nginx)+ Traefik 网关(gopherforge 模式:label 路由,/ API 前缀分流)
+name: opic-techbase
+
+networks:
+  opic-techbase-net:
+    external: true
+
+services:
+  gateway:
+    image: traefik:v3.7.10
+    container_name: opic-techbase-gateway
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=opic-techbase-net
+      - --entryPoints.web.address=:${GATEWAY_PORT:-8000}
+      - --ping
+      - --accesslog
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [opic-techbase-net]
+
+  techbase:
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,postgres,redis}
+    image: ${IMAGE_PREFIX:-opic}-techbase:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-app
+    environment:
+      TZ: Asia/Shanghai
+      APP_PORT: "9680"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: ${POSTGRES_DB:-go_techbase}
+      DB_SSLMODE: disable
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_SECRET: ${JWT_SECRET:-go-techbase-dev-secret}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      ZITADEL_ISSUER: ${ZITADEL_ISSUER:-}
+      ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID:-}
+      ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET:-}
+      ZITADEL_REDIRECT_URL: ${ZITADEL_REDIRECT_URL:-}
+    # postgres/redis 位于数据栈(docker-compose.infra.yml),由 make compose-up 先行 --wait 拉起
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9680/health/live >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    ports:
+      - "127.0.0.1:9680:9680"   # 调试直连;生产仅走网关
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.techbase.rule=PathPrefix(`/api`) || PathPrefix(`/health`) || Path(`/metrics`)
+      - traefik.http.routers.techbase.priority=100
+      - traefik.http.services.techbase.loadbalancer.server.port=9680
+    networks: [opic-techbase-net]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
+    image: ${IMAGE_PREFIX:-opic}-techbase-frontend:${IMAGE_TAG:-latest}
+    container_name: opic-techbase-frontend
+    depends_on:
+      - techbase
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.techbase-web.rule=PathPrefix(`/`)
+      - traefik.http.routers.techbase-web.priority=1
+      - traefik.http.services.techbase-web.loadbalancer.server.port=80
+    networks: [opic-techbase-net]

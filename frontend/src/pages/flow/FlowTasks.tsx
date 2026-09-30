@@ -1,136 +1,197 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeftRight, BellRing } from 'lucide-react'
+import { Button, Card, Modal, Select, Space, Table, Tag, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
+import { SearchOutlined, SwapOutlined, BellOutlined } from '@ant-design/icons'
 import { flowApi, type FlowTask } from '../../api/flow'
-import { userApi } from '../../api/user'
-import Pagination from '../../components/Pagination'
-import Modal from '../../components/Modal'
-import { toast } from '../../components/toast'
+import { userApi, type SysUser } from '../../api/system'
+import { usePermission } from '../../hooks/usePermission'
+import TableToolbar from '../../admin/components/TableToolbar'
+import { TaskStatusPill } from '../../admin/components/StatusPill'
+import dayjs from 'dayjs'
+
+const TASK_STATUSES = ['TODO', 'DONE', 'CANCEL']
+
+const statusTag = (s: string) => <TaskStatusPill status={s} />
+
+const actionLabel: Record<string, string> = {
+  APPROVE: '通过',
+  REJECT: '驳回',
+  RETURN: '退回',
+  SUBMIT: '提交',
+}
+
+const fmt = (v?: string | null) => {
+  if (!v) return '-'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : v
+}
 
 export default function FlowTasks() {
-  const [page, setPage] = useState(1)
-  const [size] = useState(10)
+  const hasPerm = usePermission()
   const [data, setData] = useState<FlowTask[]>([])
   const [total, setTotal] = useState(0)
-  const [transferTarget, setTransferTarget] = useState<FlowTask | null>(null)
-  const [users, setUsers] = useState<{ id: number; name: string; code: string }[]>([])
-  const [assigneeId, setAssigneeId] = useState<number | null>(null)
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(10)
+  const [status, setStatus] = useState<string | undefined>()
+  const [loading, setLoading] = useState(false)
 
-  const load = async () => {
-    const res = await flowApi.listTasks({ page, size })
-    setData(res.list)
-    setTotal(res.total)
+  const [transferTarget, setTransferTarget] = useState<FlowTask | null>(null)
+  const [users, setUsers] = useState<SysUser[]>([])
+  const [assigneeId, setAssigneeId] = useState<number | undefined>()
+  const [transferring, setTransferring] = useState(false)
+
+  const load = async (p = page, s = size) => {
+    setLoading(true)
+    try {
+      const res = await flowApi.listTasks({ page: p, size: s, status })
+      setData(res.list || [])
+      setTotal(res.total || 0)
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
+  }, [page, size])
 
-  useEffect(() => {
-    userApi.roleOptions().then((opts) => setUsers(opts))
-  }, [])
-
+  // 转办目标用户:GET /api/users?page=1&size=50
   const openTransfer = (t: FlowTask) => {
     setTransferTarget(t)
-    setAssigneeId(null)
+    setAssigneeId(undefined)
+    if (users.length === 0) {
+      userApi
+        .list({ page: 1, size: 50 })
+        .then((r) => setUsers(r.list || []))
+        .catch(() => {})
+    }
   }
 
   const handleTransfer = async () => {
     if (!transferTarget || !assigneeId) {
-      toast('请选择目标用户', 'error')
+      message.warning('请选择目标用户')
       return
     }
+    setTransferring(true)
     try {
       await flowApi.transferTask(transferTarget.id, assigneeId)
-      toast('转办成功')
+      message.success('转办成功')
       setTransferTarget(null)
       load()
-    } catch (err: any) {
-      toast(err.message, 'error')
+    } catch {
+      // 拦截器已提示
+    } finally {
+      setTransferring(false)
     }
   }
 
   const handleUrge = async (t: FlowTask) => {
     try {
       await flowApi.urgeTask(t.id)
-      toast('催办成功')
-    } catch (err: any) {
-      toast(err.message, 'error')
+      message.success('催办成功')
+    } catch {
+      // 拦截器已提示
     }
   }
 
+  const columns: ColumnsType<FlowTask> = [
+    { title: '业务单号', dataIndex: 'business_key', key: 'business_key', width: 160, render: (v) => v || '-' },
+    { title: '任务节点', dataIndex: 'activity_name', key: 'activity_name' },
+    { title: '办理人', dataIndex: 'assignee_name', key: 'assignee_name', width: 110, render: (v) => v || '-' },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (v: string) => statusTag(v) },
+    {
+      title: '动作',
+      dataIndex: 'action',
+      key: 'action',
+      width: 90,
+      render: (v: string | null) => (v ? actionLabel[v] || v : '-'),
+    },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170, render: fmt },
+    {
+      title: '操作',
+      key: 'action_op',
+      width: 160,
+      render: (_, record) =>
+        record.status === 'TODO' ? (
+          <Space>
+            {hasPerm('flow:task:transfer') && (
+              <Button type="link" size="small" icon={<SwapOutlined />} onClick={() => openTransfer(record)}>
+                转办
+              </Button>
+            )}
+            {hasPerm('flow:task:urge') && (
+              <Button type="link" size="small" icon={<BellOutlined />} onClick={() => handleUrge(record)}>
+                催办
+              </Button>
+            )}
+          </Space>
+        ) : null,
+    },
+  ]
+
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--divider-color)' }}>
-        <h3 style={{ fontWeight: 700 }}>任务管理</h3>
-      </div>
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>业务单号</th>
-              <th>任务节点</th>
-              <th>办理人</th>
-              <th>状态</th>
-              <th>动作</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((t) => (
-              <tr key={t.id}>
-                <td>{t.business_key || '-'}</td>
-                <td>{t.activity_name}</td>
-                <td>{t.assignee_name || '-'}</td>
-                <td>{t.status}</td>
-                <td>{t.action || '-'}</td>
-                <td>{t.created_at}</td>
-                <td>
-                  {t.status === 'TODO' && (
-                    <>
-                      <button className="btn btn-secondary btn-sm" onClick={() => openTransfer(t)}>
-                        <ArrowLeftRight size={14} /> 转办
-                      </button>
-                      <button className="btn btn-secondary btn-sm" style={{ marginLeft: 8 }} onClick={() => handleUrge(t)}>
-                        <BellRing size={14} /> 催办
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination page={page} size={size} total={total} onChange={setPage} />
-      </div>
+    <Card>
+      <TableToolbar title="任务管理" total={total} />
+      <Space style={{ marginBottom: 16 }}>
+        <Select
+          placeholder="状态"
+          allowClear
+          style={{ width: 160 }}
+          value={status}
+          onChange={(v) => {
+            setStatus(v)
+            setPage(1)
+          }}
+          options={TASK_STATUSES.map((s) => ({ value: s, label: s }))}
+        />
+        <Button type="primary" icon={<SearchOutlined />} onClick={() => { setPage(1); load(1, size) }}>
+          查询
+        </Button>
+      </Space>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={data}
+        loading={loading}
+        pagination={{
+          current: page,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50],
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, s) => {
+            setPage(p)
+            setSize(s)
+          },
+        }}
+      />
 
       <Modal
-        title="任务转办"
+        title={`转办:${transferTarget?.activity_name || ''}`}
         open={!!transferTarget}
-        onClose={() => setTransferTarget(null)}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setTransferTarget(null)}>取消</button>
-            <button className="btn btn-primary" onClick={handleTransfer}>确认转办</button>
-          </>
-        }
+        onOk={handleTransfer}
+        onCancel={() => setTransferTarget(null)}
+        confirmLoading={transferring}
+        okText="确认转办"
+        destroyOnHidden
       >
-        <p className="text-secondary" style={{ marginBottom: 12 }}>
-          任务：{transferTarget?.activity_name}（当前办理人：{transferTarget?.assignee_name}）
-        </p>
-        <div className="prop-row">
-          <label>目标用户</label>
-          <select value={assigneeId ?? ''} onChange={(e) => setAssigneeId(Number(e.target.value))}>
-            <option value="">请选择</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}（{u.code}）</option>
-            ))}
-          </select>
-        </div>
+        <Select
+          showSearch
+          style={{ width: '100%' }}
+          placeholder="选择转办目标用户"
+          value={assigneeId}
+          onChange={setAssigneeId}
+          optionFilterProp="label"
+          options={users.map((u) => ({
+            value: u.id,
+            label: u.real_name ? `${u.real_name}（${u.username}）` : u.username,
+          }))}
+        />
       </Modal>
-    </div>
+    </Card>
   )
 }
