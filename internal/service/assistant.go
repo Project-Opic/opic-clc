@@ -41,7 +41,7 @@ func AssistantChat(uid int64, question string) (*AssistantReply, error) {
 			Hints: []string{"如何审批任务？", "我的客户申请进展？"}}, nil
 	case strings.Contains(q, "客户") || strings.Contains(lq, "customer"):
 		row, err := qOne(`SELECT COUNT(*) AS n, SUM(CASE WHEN status = '已通过' THEN 1 ELSE 0 END) AS passed
-			FROM customer_info WHERE applicant_id = ?`, uid)
+			FROM customer_application WHERE applicant_id = ?`, uid)
 		if err != nil {
 			return nil, err
 		}
