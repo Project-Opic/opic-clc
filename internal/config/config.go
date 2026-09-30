@@ -66,6 +66,8 @@ var Config struct {
 	Frontend struct {
 		// DistDir 前端构建产物目录(空则不托管)
 		DistDir string `yaml:"dist_dir"`
+		// BaseURL SSO 回调后 302 回前端的绝对基址(空则相对路径——仅前后端同域可用)
+		BaseURL string `yaml:"base_url"`
 	} `yaml:"frontend"`
 }
 

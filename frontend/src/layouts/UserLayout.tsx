@@ -39,6 +39,7 @@ import {
 } from '@ant-design/icons'
 import { useSelector } from 'react-redux'
 import { authApi, type MenuItem } from '../api/auth'
+import { assistantApi } from '../api/assistant'
 import { clearToken } from '../api/request'
 import { clearAuth } from '../store/slices/authSlice'
 import { store } from '../store'
@@ -235,6 +236,34 @@ function WorkbenchShell() {
 
   const toggleChat = () => setChatCollapsed((v) => !v)
 
+  // —— AI 智能助理（v3）：对话状态与发送 ——
+  type ChatMsg = { id: number; role: 'user' | 'assistant'; text: string; action?: string }
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatBusy, setChatBusy] = useState(false)
+  const [chatHints, setChatHints] = useState<string[]>([
+    '我有哪些待办？',
+    '我的客户申请进展？',
+    '审批怎么操作？',
+    '流程有哪些节点？',
+  ])
+  const sendChat = async (preset?: string) => {
+    const q = (preset ?? chatInput).trim()
+    if (!q || chatBusy) return
+    setChatInput('')
+    setChatMessages((m) => [...m, { id: Date.now(), role: 'user', text: q }])
+    setChatBusy(true)
+    try {
+      const reply = await assistantApi.chat(q)
+      setChatMessages((m) => [...m, { id: Date.now() + 1, role: 'assistant', text: reply.answer, action: reply.action }])
+      if (reply.hints?.length) setChatHints(reply.hints)
+    } catch {
+      setChatMessages((m) => [...m, { id: Date.now() + 1, role: 'assistant', text: '助理服务暂时不可用，请稍后重试。' }])
+    } finally {
+      setChatBusy(false)
+    }
+  }
+
   return (
     <Layout className="app-shell app-shell-user" hasSider>
       <Sider
@@ -369,7 +398,7 @@ function WorkbenchShell() {
               <RobotOutlined />
             </div>
             <span className="app-chat-title">AI 智能助理</span>
-            <span className="app-chat-chip">规划中</span>
+            <span className="app-chat-chip">在线</span>
             <span
               className="app-trigger app-chat-close"
               onClick={toggleChat}
@@ -385,14 +414,103 @@ function WorkbenchShell() {
               <DoubleRightOutlined />
             </span>
           </div>
-          <div className="app-chat-body">
-            <div className="app-chat-empty">
-              <div className="app-chat-empty-icon">
-                <RobotOutlined />
+          <div className="app-chat-body" style={{ display: 'flex', flexDirection: 'column', padding: 12, gap: 8, overflowY: 'auto' }}>
+            {chatMessages.map((m) => (
+              <div
+                key={m.id}
+                style={{
+                  maxWidth: '92%',
+                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                  background: m.role === 'user' ? 'rgba(90,140,255,.28)' : 'rgba(255,255,255,.10)',
+                  border: '1px solid rgba(255,255,255,.16)',
+                  borderRadius: 12,
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.6,
+                }}
+              >
+                {m.text}
+                {m.role === 'assistant' && m.action ? (
+                  <div style={{ marginTop: 6 }}>
+                    <a
+                      onClick={() => {
+                        navigate(m.action!)
+                        setChatCollapsed(true)
+                      }}
+                    >
+                      → 前往对应页面
+                    </a>
+                  </div>
+                ) : null}
               </div>
-              <p className="app-chat-empty-title">AI 对话能力暂未开放</p>
-              <p className="app-chat-empty-desc">后续将支持业务问答、功能导航与动态查询</p>
-            </div>
+            ))}
+            {chatBusy ? (
+              <div style={{ alignSelf: 'flex-start', fontSize: 12, opacity: 0.7 }}>助理思考中…</div>
+            ) : null}
+            {chatMessages.length === 0 && !chatBusy ? (
+              <div className="app-chat-empty">
+                <div className="app-chat-empty-icon">
+                  <RobotOutlined />
+                </div>
+                <p className="app-chat-empty-title">我是工作台 AI 助理</p>
+                <p className="app-chat-empty-desc">可以查待办、客户进展、审批指引——试试下方问题</p>
+              </div>
+            ) : null}
+            {chatHints.length > 0 && !chatBusy ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 'auto' }}>
+                {chatHints.map((h) => (
+                  <a
+                    key={h}
+                    onClick={() => void sendChat(h)}
+                    style={{
+                      fontSize: 12,
+                      padding: '3px 10px',
+                      borderRadius: 999,
+                      border: '1px solid rgba(255,255,255,.22)',
+                      background: 'rgba(255,255,255,.08)',
+                    }}
+                  >
+                    {h}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', gap: 8, padding: '0 12px 12px' }}>
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !chatBusy) void sendChat()
+              }}
+              placeholder="输入问题，如：我有哪些待办？"
+              style={{
+                flex: 1,
+                background: 'rgba(255,255,255,.10)',
+                border: '1px solid rgba(255,255,255,.2)',
+                borderRadius: 10,
+                color: 'inherit',
+                padding: '8px 12px',
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => void sendChat()}
+              disabled={chatBusy || !chatInput.trim()}
+              style={{
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,.24)',
+                background: 'rgba(90,140,255,.35)',
+                color: 'inherit',
+                padding: '8px 14px',
+                cursor: chatBusy || !chatInput.trim() ? 'not-allowed' : 'pointer',
+                fontSize: 13,
+              }}
+            >
+              发送
+            </button>
           </div>
         </div>
       </aside>

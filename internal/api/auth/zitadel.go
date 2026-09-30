@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -90,7 +91,10 @@ func ZitadelCallback(c *gin.Context) {
 		return
 	}
 	// 重定向回前端并携带令牌(#fragment,不经服务器日志)
-	c.Redirect(302, "/login#token="+tk)
+	// BaseURL 配置后为绝对地址——前端在独立域(nginx 容器)时,authorize 的 redirect_uri
+	// 落在后端域,相对 302 会把浏览器留在后端域造成死链(演示环境实测)。
+	base := strings.TrimRight(config.Config.Frontend.BaseURL, "/")
+	c.Redirect(302, base+"/login#token="+tk)
 }
 
 // ---------- ZITADEL 用户映射 ----------

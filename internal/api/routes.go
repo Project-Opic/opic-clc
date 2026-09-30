@@ -37,6 +37,7 @@ func SetupRoutes(r *gin.Engine) {
 		// 元数据(登录即可)
 		authed.GET("/meta/dictionaries", meta.Dictionaries)
 		authed.GET("/meta/customer-status", meta.CustomerStatus)
+		authed.POST("/assistant/chat", business.AssistantChat)
 		authed.GET("/meta/rules", meta.Rules)
 
 		// 客户申请(登录即可;业务校验在服务层)
