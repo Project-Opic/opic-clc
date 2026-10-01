@@ -80,23 +80,6 @@ func main() {
 	r.GET("/health/check", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().Format(time.RFC3339)}) })
 	r.GET("/metrics", metrics.Handler())
 
-	// 前端静态托管(dist 存在时;SPA fallback 到 index.html)
-	if dist := config.Config.Frontend.DistDir; dist != "" {
-		if st, err := os.Stat(dist); err == nil && st.IsDir() {
-			r.Static("/assets", dist+"/assets")
-			r.StaticFile("/favicon.ico", dist+"/favicon.ico")
-			r.NoRoute(func(c *gin.Context) {
-				p := c.Request.URL.Path
-				if strings.HasPrefix(p, "/api") || metrics.IsHealthProbePath(p) {
-					c.JSON(http.StatusNotFound, gin.H{"returnInfo": gin.H{"returnCode": "SYS1002", "errorMsg": "接口不存在"}, "data": nil})
-					return
-				}
-				c.File(dist + "/index.html")
-			})
-			logger.Infof("前端静态托管: %s", dist)
-		}
-	}
-
 	addr := ":" + config.Config.App.Port
 	logger.Infof("opic-techbase(v3) listening %s", addr)
 	srv := &http.Server{Addr: addr, Handler: r}

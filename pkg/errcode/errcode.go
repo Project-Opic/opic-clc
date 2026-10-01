@@ -99,3 +99,32 @@ func Error(code ErrCode, format string, args ...any) Envelope {
 	}
 	return New(code, msg, nil)
 }
+
+// NamedCode 供管理端展示的错误码条目。
+type NamedCode struct {
+	Code ErrCode `json:"code"`
+	Desc string  `json:"desc"`
+}
+
+// AllCodes 全量登记码（O-ARC 注册表的 Go 侧视图；新增码须同步本表——错误码注册纪律）。
+func AllCodes() []NamedCode {
+	return []NamedCode{
+		{ErrParam, "参数错误"},
+		{ErrNotFound, "对象不存在"},
+		{ErrDuplicate, "唯一性冲突"},
+		{ErrState, "状态不允许该操作"},
+		{ErrFlowState, "流程状态错误(已处理/已结束)"},
+		{ErrTaskNotOwner, "任务不属于当前用户"},
+		{ErrFlowNotPublished, "流程未发布"},
+		{ErrGraph, "流程图非法"},
+		{ErrRule, "规则校验未通过"},
+		{Success, "成功"},
+		{ErrAuthServer, "认证服务内部错误"},
+		{ErrDB, "数据库错误"},
+		{ErrConfig, "配置错误"},
+		{ErrUnAuth, "未登录或凭证失效"},
+		{ErrToken, "凭证无效"},
+		{ErrForbidden, "无权限"},
+		{ErrLogin, "用户名或密码错误/账号禁用"},
+	}
+}

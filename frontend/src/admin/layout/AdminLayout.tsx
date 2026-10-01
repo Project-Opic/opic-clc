@@ -24,6 +24,15 @@ import {
   SolutionOutlined,
   ControlOutlined,
   SwapOutlined,
+  FileTextOutlined,
+  LoginOutlined,
+  MonitorOutlined,
+  NotificationOutlined,
+  ToolOutlined,
+  WarningOutlined,
+  CloudServerOutlined,
+  CheckSquareOutlined,
+  UserOutlined as UserMenuIcon,
 } from '@ant-design/icons'
 import { useSelector } from 'react-redux'
 import { authApi } from '../../api/auth'
@@ -75,6 +84,43 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
         { key: '/admin/flow/definitions', label: '流程定义', icon: <PartitionOutlined /> },
         { key: '/admin/flow/instances', label: '流程实例', icon: <DesktopOutlined /> },
         { key: '/admin/flow/tasks', label: '任务管理', icon: <SolutionOutlined /> },
+      ],
+    })
+  }
+  if (hasSystem) {
+    defs.push({
+      key: 'dir-logs',
+      label: '日志审计',
+      icon: <FileTextOutlined />,
+      children: [
+        { key: '/admin/logs/operation', label: '操作日志', icon: <FileTextOutlined /> },
+        { key: '/admin/logs/login', label: '登录日志', icon: <LoginOutlined /> },
+        { key: '/admin/logs/audit', label: '审计日志', icon: <SafetyOutlined /> },
+        { key: '/admin/online-users', label: '在线用户', icon: <MonitorOutlined /> },
+      ],
+    })
+    defs.push({
+      key: 'dir-msg',
+      label: '消息中心',
+      icon: <NotificationOutlined />,
+      children: [{ key: '/admin/notice', label: '公告管理', icon: <NotificationOutlined /> }],
+    })
+    defs.push({
+      key: 'dir-tools',
+      label: '系统工具',
+      icon: <ToolOutlined />,
+      children: [
+        { key: '/admin/errcodes', label: '错误码管理', icon: <WarningOutlined /> },
+        { key: '/admin/monitor', label: '系统监控', icon: <CloudServerOutlined /> },
+      ],
+    })
+    defs.push({
+      key: 'dir-biz',
+      label: '业务管理',
+      icon: <CheckSquareOutlined />,
+      children: [
+        { key: '/admin/biz/customers', label: '客户管理', icon: <UserMenuIcon /> },
+        { key: '/admin/biz/approval', label: '审批工作台', icon: <CheckSquareOutlined /> },
       ],
     })
   }

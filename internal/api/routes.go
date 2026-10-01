@@ -6,6 +6,7 @@ package api
 import (
 	"github.com/gin-gonic/gin"
 
+	"gitcode.com/opic-ontology/opic-techbase/internal/api/adminconsole"
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/auth"
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/business"
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/flow"
@@ -63,6 +64,22 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/flow/instances", flow.InstanceList)
 		authed.GET("/flow/instances/:id", flow.InstanceGet)
 		authed.GET("/flow/tasks", flow.TaskList)
+
+		// ---- 管理控制台补齐(gopherforge 基准):日志审计/在线用户/公告/错误码/系统监控 ----
+		admin := api.Group("/admin", middleware.LoginRequired())
+		{
+			g := admin.Group("", middleware.RequirePermission("system:manage"))
+			g.GET("/logs/operation", adminconsole.OperationLogs)
+			g.GET("/logs/login", adminconsole.LoginLogs)
+			g.GET("/logs/audit", adminconsole.AuditLogs)
+			g.GET("/online-users", adminconsole.OnlineUsers)
+			g.GET("/notice", adminconsole.NoticeList)
+			g.POST("/notice", adminconsole.NoticeSave)
+			g.PUT("/notice/:id", adminconsole.NoticeSave)
+			g.DELETE("/notice/:id", adminconsole.NoticeDelete)
+			g.GET("/errcodes", adminconsole.ErrCodes)
+			g.GET("/system-stats", adminconsole.SystemStats)
+		}
 
 		// 系统查询(登录即可)
 		authed.GET("/users", system.UserList)

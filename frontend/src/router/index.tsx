@@ -11,6 +11,13 @@ import AdminLayout from '../admin/layout/AdminLayout'
 import Login from '../pages/login'
 import GlassForbidden from '../admin/pages/Forbidden'
 import AdminDashboard from '../admin/pages/Dashboard'
+import OperationLogs from '../admin/pages/logs/OperationLogs'
+import LoginLogs from '../admin/pages/logs/LoginLogs'
+import AuditLogs from '../admin/pages/logs/AuditLogs'
+import OnlineUsers from '../admin/pages/OnlineUsers'
+import NoticeManage from '../admin/pages/NoticeManage'
+import ErrCodes from '../admin/pages/ErrCodes'
+import ServerMonitor from '../admin/pages/ServerMonitor'
 import { isAdminPermissions } from '../admin/access'
 import CustomerApply from '../pages/customer/CustomerApply'
 import CustomerQuery from '../pages/customer/CustomerQuery'
@@ -141,6 +148,15 @@ export default function AppRoutes() {
         <Route path="flow/designer/:id" element={<FlowDesigner />} />
         <Route path="flow/instances" element={<FlowInstances />} />
         <Route path="flow/tasks" element={<FlowTasks />} />
+        <Route path="logs/operation" element={<OperationLogs />} />
+        <Route path="logs/login" element={<LoginLogs />} />
+        <Route path="logs/audit" element={<AuditLogs />} />
+        <Route path="online-users" element={<OnlineUsers />} />
+        <Route path="notice" element={<NoticeManage />} />
+        <Route path="errcodes" element={<ErrCodes />} />
+        <Route path="monitor" element={<ServerMonitor />} />
+        <Route path="biz/customers" element={<CustomerQuery />} />
+        <Route path="biz/approval" element={<Todo />} />
       </Route>
 
       {/* 旧路径书签兼容:重定向到 /admin 对应页面 */}
