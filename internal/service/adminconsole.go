@@ -79,9 +79,9 @@ func AdminNoticeSave(id int64, title, content string, status int, byUserID int64
 		return qExec(`INSERT INTO sys_notice (title, content, status, created_by, created_by_name)
 			VALUES (?, ?, ?, ?, ?)`, title, content, status, byUserID, byName)
 	}
-	return qExec(`UPDATE sys_notice SET title = ?, content = ?, status = ?, updated_by_name = ?,
+	return qExec(`UPDATE sys_notice SET title = ?, content = ?, status = ?,
 		updated_at = to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?`,
-		title, content, status, byName, id)
+		title, content, status, id)
 }
 
 // AdminNoticeDelete 删除公告。
