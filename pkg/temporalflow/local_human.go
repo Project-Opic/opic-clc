@@ -62,3 +62,13 @@ func ApproveLocalTask(id int64, o HumanOutcome) error {
 	t.ch <- o
 	return nil
 }
+
+// EmitCustom EMIT 节点：local 直发。
+func (l *LocalExecutor) EmitCustom(ctx context.Context, subject string, payload map[string]any) error {
+	return l.Emit(ctx, subject, payload)
+}
+
+// LoadSubflowGraph local：从运行变量注入的 loader 不可用时返回明确错误（测试以单层为主）。
+func (l *LocalExecutor) LoadSubflowGraph(_ context.Context, code string) ([]byte, error) {
+	return nil, fmt.Errorf("local 驱动不支持子流程加载（code=%s）；如需子流程请使用 temporal 驱动", code)
+}

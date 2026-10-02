@@ -132,6 +132,20 @@ func TFCompleteRun(_ context.Context, in TFCompleteRunInput) error {
 	return err
 }
 
+// TFLoadDefGraphByCode 按 code 加载已发布 TEMPORAL 定义的 DSL（子流程用）。
+func TFLoadDefGraphByCode(_ context.Context, code string) (string, error) {
+	r, err := store.One(nil, `SELECT node_graph FROM flow_definition
+		WHERE code=? AND flow_type='TEMPORAL' AND status=1 ORDER BY updated_at DESC LIMIT 1`, code)
+	if err != nil {
+		return "", err
+	}
+	if r == nil {
+		return "", fmt.Errorf("子流程定义不存在或未发布: %s", code)
+	}
+	g, _ := r["node_graph"].(string)
+	return g, nil
+}
+
 // ── 内部 ──
 
 func tfEventbus() eventbus.EventBus {

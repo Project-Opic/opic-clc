@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   Background,
   BackgroundVariant,
@@ -18,12 +19,23 @@ import {
   Handle,
   Position,
 } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import { Button, Drawer, Form, Input, InputNumber, message, Select, Space, Table, Tag } from 'antd'
 import { http } from '../../api/request'
+import { roleApi } from '../../api/system'
 
 /* ── DSL 类型（pkg/temporalflow 对应）────────────────────────────────────── */
 
-type TFNodeType = 'START' | 'STEP' | 'TIMER' | 'CONDITION' | 'HUMAN' | 'END'
+type TFNodeType =
+  | 'START'
+  | 'STEP'
+  | 'TIMER'
+  | 'CONDITION'
+  | 'HUMAN'
+  | 'EMIT'
+  | 'SET'
+  | 'SUBFLOW'
+  | 'END'
 
 interface TFNodeData extends Record<string, unknown> {
   label: string
@@ -33,6 +45,9 @@ interface TFNodeData extends Record<string, unknown> {
   webhook_url?: string
   role_ref?: string
   sla_hours?: number
+  subject?: string
+  set_json?: string
+  code?: string
 }
 
 type TFNode = Node<TFNodeData>
@@ -44,12 +59,25 @@ const NODE_TYPES: { type: TFNodeType; label: string; color: string }[] = [
   { type: 'STEP', label: '系统任务', color: '#2266e3' },
   { type: 'TIMER', label: '定时等待', color: '#8b5cf6' },
   { type: 'CONDITION', label: '条件网关', color: '#f43f5e' },
+  { type: 'EMIT', label: '事件发布', color: '#0ea5e9' },
+  { type: 'SET', label: '变量设置', color: '#14b8a6' },
+  { type: 'SUBFLOW', label: '子流程', color: '#6366f1' },
   { type: 'END', label: '结束', color: '#ef4444' },
 ]
 
 const LABEL: Record<string, string> = Object.fromEntries(NODE_TYPES.map((n) => [n.type, n.label]))
 const COLOR: Record<string, string> = Object.fromEntries(NODE_TYPES.map((n) => [n.type, n.color]))
 const MARKER = { type: MarkerType.ArrowClosed, width: 14, height: 14 } as const
+
+// safeParse JSON 容错解析（SET 节点 set 字段用）
+export function safeParse(v?: string): unknown {
+  if (!v) return {}
+  try {
+    return JSON.parse(v)
+  } catch {
+    return {}
+  }
+}
 
 /* ── 节点渲染 ────────────────────────────────────────────────────────────── */
 
@@ -79,8 +107,11 @@ function TFNodeView({ data, selected, type }: NodeProps<TFNode> & { type: TFNode
       {type === 'HUMAN' && data.role_ref && (
         <div style={{ fontSize: 11, opacity: 0.75 }}>{data.role_ref}</div>
       )}
-      {type === 'CONDITION' && data.expr && (
-        <div style={{ fontSize: 11, fontFamily: 'monospace' }}>{data.expr}</div>
+      {type === 'EMIT' && data.subject && (
+        <div style={{ fontSize: 11, fontFamily: 'monospace' }}>{data.subject}</div>
+      )}
+      {type === 'SUBFLOW' && data.code && (
+        <div style={{ fontSize: 11, opacity: 0.75 }}>{data.code}</div>
       )}
       {type !== 'END' && <Handle type="source" position={Position.Bottom} />}
       {type === 'CONDITION' && (
@@ -108,7 +139,12 @@ function serialize(nodes: TFNode[], edges: TFEdge[]) {
       ...(n.type === 'TIMER' ? { seconds: n.data.seconds ?? 1 } : {}),
       ...(n.type === 'CONDITION' ? { expr: n.data.expr ?? '' } : {}),
       ...(n.type === 'STEP' && n.data.webhook_url ? { webhook_url: n.data.webhook_url } : {}),
-      ...(n.type === 'HUMAN' ? { role_ref: n.data.role_ref, sla_hours: n.data.sla_hours ?? 48 } : {}),
+      ...(n.type === 'HUMAN'
+        ? { role_ref: n.data.role_ref, sla_hours: n.data.sla_hours ?? 48 }
+        : {}),
+      ...(n.type === 'EMIT' ? { subject: n.data.subject } : {}),
+      ...(n.type === 'SET' ? { set: safeParse(n.data.set_json) } : {}),
+      ...(n.type === 'SUBFLOW' ? { code: n.data.code } : {}),
       x: Math.round(n.position.x),
       y: Math.round(n.position.y),
     })),
@@ -125,8 +161,7 @@ function serialize(nodes: TFNode[], edges: TFEdge[]) {
 function DesignerInner() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const defId = id ? Number(id) : null
-  const isNew = !defId
+  const defId = id && id !== 'new' ? Number(id) : null
   const { screenToFlowPosition } = useReactFlow()
 
   const [nodes, setNodes, onNodesChange] = useNodesState<TFNode>([])
@@ -138,15 +173,16 @@ function DesignerInner() {
   const [savedId, setSavedId] = useState<number | null>(defId)
   const [sel, setSel] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null)
   const [roleOptions, setRoleOptions] = useState<{ value: string; label: string }[]>([])
+  const [runVars, setRunVars] = useState('{"amount": 500}')
+  const [runOpen, setRunOpen] = useState(false)
   const counter = useRef(0)
 
   useEffect(() => {
-    http
-      .get<Record<string, unknown>>('/api/roles', { page: 1, size: 100 })
-      .then((r) => {
-        const list = (r.list || []) as { code: string; name: string }[]
-        setRoleOptions(list.map((x) => ({ value: x.code, label: x.name ? `${x.name}（${x.code}）` : x.code })))
-      })
+    roleApi
+      .list({ page: 1, size: 100 })
+      .then((r) =>
+        setRoleOptions((r.list || []).map((x) => ({ value: x.code, label: x.name ? `${x.name}（${x.code}）` : x.code }))),
+      )
       .catch(() => setRoleOptions([]))
   }, [])
 
@@ -158,14 +194,28 @@ function DesignerInner() {
       setName(String(d.name || ''))
       setDescription(String(d.description || ''))
       const g = typeof d.node_graph === 'string' ? JSON.parse(d.node_graph) : d.node_graph
-      const gNodes = (g.nodes || []) as { id: string; type: TFNodeType; name?: string; x?: number; y?: number; seconds?: number; expr?: string; webhook_url?: string; role_ref?: string; sla_hours?: number }[]
+      const gNodes = (g.nodes || []) as {
+        id: string; type: TFNodeType; name?: string; x?: number; y?: number
+        seconds?: number; expr?: string; webhook_url?: string
+        role_ref?: string; sla_hours?: number; subject?: string; set_json?: string; code?: string
+      }[]
       const gEdges = (g.edges || []) as { source: string; target: string; source_handle?: string }[]
       setNodes(
-        gNodes.map((n) => ({
+        gNodes.map((n, i) => ({
           id: n.id,
           type: n.type,
-          position: { x: n.x ?? 100, y: n.y ?? 100 },
-          data: { label: n.name || LABEL[n.type], seconds: n.seconds, expr: n.expr, webhook_url: n.webhook_url, role_ref: n.role_ref, sla_hours: n.sla_hours },
+          position: { x: n.x ?? 100, y: n.y ?? 100 + i * 90 },
+          data: {
+            label: n.name || LABEL[n.type],
+            seconds: n.seconds,
+            expr: n.expr,
+            webhook_url: n.webhook_url,
+            role_ref: n.role_ref,
+            sla_hours: n.sla_hours,
+            subject: n.subject,
+            set_json: n.set_json,
+            code: n.code,
+          },
         })),
       )
       setEdges(
@@ -188,7 +238,7 @@ function DesignerInner() {
     load()
   }, [load])
 
-  const addNode = (type: TFNodeType) => {
+  const addNode = (type: TFNodeType, position?: { x: number; y: number }) => {
     counter.current += 1
     const nid = `${type.toLowerCase()}-${counter.current}`
     setNodes((ns) => [
@@ -196,8 +246,16 @@ function DesignerInner() {
       {
         id: nid,
         type,
-        position: screenToFlowPosition({ x: 260 + Math.random() * 120, y: 140 + Math.random() * 160 }),
-        data: { label: LABEL[type], ...(type === 'TIMER' ? { seconds: 30 } : {}), ...(type === 'CONDITION' ? { expr: 'amount > 100' } : {}), ...(type === 'HUMAN' ? { role_ref: roleOptions[0]?.value, sla_hours: 48 } : {}) },
+        position: position ?? screenToFlowPosition({ x: 260 + Math.random() * 120, y: 140 + Math.random() * 160 }),
+        data: {
+          label: LABEL[type],
+          ...(type === 'TIMER' ? { seconds: 30 } : {}),
+          ...(type === 'CONDITION' ? { expr: 'amount > 100' } : {}),
+          ...(type === 'HUMAN' ? { role_ref: roleOptions[0]?.value, sla_hours: 48 } : {}),
+          ...(type === 'EMIT' ? { subject: 'opic.demo.event' } : {}),
+          ...(type === 'SET' ? { set_json: '{}' } : {}),
+          ...(type === 'SUBFLOW' ? { code: '' } : {}),
+        },
       },
     ])
   }
@@ -216,7 +274,12 @@ function DesignerInner() {
             markerEnd: MARKER,
             data: { branch: c.sourceHandle === 'true' || c.sourceHandle === 'false' ? c.sourceHandle : undefined },
             label: c.sourceHandle === 'true' || c.sourceHandle === 'false' ? c.sourceHandle : undefined,
-            style: c.sourceHandle === 'true' ? { stroke: '#16a34a' } : c.sourceHandle === 'false' ? { stroke: '#ef4444' } : undefined,
+            style:
+              c.sourceHandle === 'true'
+                ? { stroke: '#16a34a' }
+                : c.sourceHandle === 'false'
+                  ? { stroke: '#ef4444' }
+                  : undefined,
           } as TFEdge,
           es,
         ),
@@ -240,7 +303,7 @@ function DesignerInner() {
       const body = { code, name, description, node_graph: serialize(nodes, edges) }
       let rid = savedId ?? defId
       if (rid) {
-        await http.put(`/api/admin/temporalflow/definitions/${rid}`, body as Record<string, unknown>)
+        await http.put(`/api/admin/temporalflow/definitions/${rid}`, body)
       } else {
         const r = await http.post<{ id: number }>('/api/admin/temporalflow/definitions', body)
         rid = r.id
@@ -260,19 +323,17 @@ function DesignerInner() {
     }
   }
 
-  const [runVars, setRunVars] = useState('{"amount": 500}')
-  const [runOpen, setRunOpen] = useState(false)
   const doRun = async () => {
     const rid = savedId ?? defId
     if (!rid) return
+    let vars: Record<string, unknown> = {}
     try {
-      let vars: Record<string, unknown> = {}
-      try {
-        vars = JSON.parse(runVars)
-      } catch {
-        message.warning('变量不是合法 JSON')
-        return
-      }
+      vars = JSON.parse(runVars)
+    } catch {
+      message.warning('变量不是合法 JSON')
+      return
+    }
+    try {
       await http.post(`/api/admin/temporalflow/definitions/${rid}/run`, { vars })
       message.success('试运行已启动（Temporal 命名空间 opic）')
       setRunOpen(false)
@@ -296,7 +357,6 @@ function DesignerInner() {
         <Button onClick={() => navigate('/admin/temporalflow')}>返回列表</Button>
       </Space>
       <div style={{ flex: 1, display: 'flex' }}>
-        {/* 左：节点面板 */}
         <div style={{ width: 130, borderRight: '1px solid #ddd', padding: 8 }}>
           {NODE_TYPES.map((n) => (
             <div
@@ -309,7 +369,6 @@ function DesignerInner() {
             </div>
           ))}
         </div>
-        {/* 中：画布 */}
         <div style={{ flex: 1 }}>
           <ReactFlow
             nodes={nodes}
@@ -328,7 +387,7 @@ function DesignerInner() {
             onDrop={(e) => {
               e.preventDefault()
               const type = e.dataTransfer.getData('application/opic-tf-node') as TFNodeType
-              if (type) addNode(type)
+              if (type) addNode(type, screenToFlowPosition({ x: e.clientX, y: e.clientY }))
             }}
             fitView
           >
@@ -337,7 +396,6 @@ function DesignerInner() {
             <MiniMap pannable />
           </ReactFlow>
         </div>
-        {/* 右：属性面板 */}
         <div style={{ width: 300, borderLeft: '1px solid #ddd', padding: 12 }}>
           {selNode && (
             <Form layout="vertical" size="small">
@@ -347,7 +405,7 @@ function DesignerInner() {
               </Form.Item>
               {(selNode.type as TFNodeType) === 'HUMAN' && (
                 <>
-                  <Form.Item label="审批角色（role code，按角色解析经办人）">
+                  <Form.Item label="审批角色（按角色解析经办人）">
                     <Select
                       value={selNode.data.role_ref || undefined}
                       onChange={(v) => updateSel({ role_ref: v })}
@@ -357,8 +415,13 @@ function DesignerInner() {
                     />
                   </Form.Item>
                   <Form.Item label="SLA 时限（小时，超时发催办事件）">
-                    <InputNumber value={selNode.data.sla_hours ?? 48} min={0.1} step={1}
-                      onChange={(v) => updateSel({ sla_hours: v ?? 48 })} style={{ width: '100%' }} />
+                    <InputNumber
+                      value={selNode.data.sla_hours ?? 48}
+                      min={0.1}
+                      step={1}
+                      onChange={(v) => updateSel({ sla_hours: v ?? 48 })}
+                      style={{ width: '100%' }}
+                    />
                   </Form.Item>
                 </>
               )}
@@ -377,6 +440,21 @@ function DesignerInner() {
                   <Input.TextArea rows={2} value={selNode.data.expr || ''} onChange={(e) => updateSel({ expr: e.target.value })} />
                 </Form.Item>
               )}
+              {(selNode.type as TFNodeType) === 'EMIT' && (
+                <Form.Item label="事件主题（opic.<域码>.<...>）">
+                  <Input value={selNode.data.subject || ''} onChange={(e) => updateSel({ subject: e.target.value })} placeholder="opic.demo.order.created" />
+                </Form.Item>
+              )}
+              {(selNode.type as TFNodeType) === 'SET' && (
+                <Form.Item label="变量设置（JSON 对象，合并进运行变量）">
+                  <Input.TextArea rows={3} value={selNode.data.set_json || '{}'} onChange={(e) => updateSel({ set_json: e.target.value })} />
+                </Form.Item>
+              )}
+              {(selNode.type as TFNodeType) === 'SUBFLOW' && (
+                <Form.Item label="子流程编码（已发布 TEMPORAL 定义的 code）">
+                  <Input value={selNode.data.code || ''} onChange={(e) => updateSel({ code: e.target.value })} />
+                </Form.Item>
+              )}
               {(selNode.type as TFNodeType) === 'CONDITION' && (
                 <div style={{ fontSize: 12, color: '#888' }}>
                   出边连线：从 <b>true</b>（绿）/ <b>false</b>（红）锚点连出
@@ -393,8 +471,17 @@ function DesignerInner() {
           {!selNode && !selEdge && <div style={{ color: '#999', fontSize: 13 }}>选中节点/连线后编辑属性</div>}
         </div>
       </div>
-      <Drawer title="试运行" open={runOpen} onClose={() => setRunOpen(false)} width={420}
-        extra={<Button type="primary" onClick={doRun}>启动</Button>}>
+      <Drawer
+        title="试运行"
+        open={runOpen}
+        onClose={() => setRunOpen(false)}
+        width={420}
+        extra={
+          <Button type="primary" onClick={doRun}>
+            启动
+          </Button>
+        }
+      >
         <p>以当前已保存图启动 Temporal 解释器工作流（命名空间 opic，TaskQueue techbase）。</p>
         <Form layout="vertical">
           <Form.Item label="启动变量（JSON）">
@@ -474,15 +561,6 @@ function ListInner() {
     </div>
   )
 }
-
-import { useNavigate, useParams } from 'react-router-dom'
-import { useRef } from 'react'
-import { useThemeMode } from '../../theme/ThemeContext'
-import { usePermission } from '../../hooks/usePermission'
-
-// useThemeMode/usePermission 保留引用（布局一致性；当前设计器为受控浅色画布）
-void useThemeMode
-void usePermission
 
 export default function TemporalFlowDesignerPage() {
   return (

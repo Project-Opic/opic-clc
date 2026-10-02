@@ -58,6 +58,10 @@ type StepExecutor interface {
 	CompleteHumanTask(ctx context.Context, ref HumanTaskRef, o HumanOutcome) error
 	// EmitSLAExceeded 发布 SLA 超时事件。
 	EmitSLAExceeded(ctx context.Context, payload map[string]any) error
+	// EmitCustom 向任意主题发事件（EMIT 节点）。
+	EmitCustom(ctx context.Context, subject string, payload map[string]any) error
+	// LoadSubflowGraph 按 code 加载子流程 DSL 图（SUBFLOW 节点）。
+	LoadSubflowGraph(ctx context.Context, code string) ([]byte, error)
 }
 
 // RunResult 运行结果摘要。
@@ -147,6 +151,46 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 					"steps": res.Steps, "outcome": "REJECTED",
 				})
 				return res, nil
+			}
+		case NodeEmit:
+			// 事件发布：subject 节点属性，payload 合并运行变量与节点 payload
+			subject := nodeStr(n, "subject")
+			if subject == "" {
+				return res, fmt.Errorf("EMIT %s 缺少 subject", nodeID(n))
+			}
+			payload := map[string]any{"run_id": in.RunID, "vars": in.Vars}
+			if raw, ok := n["payload"].(map[string]any); ok {
+				for k, v := range raw {
+					payload[k] = v
+				}
+			}
+			if err := ex.EmitCustom(ctx, subject, payload); err != nil {
+				return res, err
+			}
+		case NodeSet:
+			// 变量设置：set 为字面量对象，合并进运行变量（确定性）
+			raw, _ := n["set"].(map[string]any)
+			for k, v := range raw {
+				in.Vars[k] = v
+			}
+		case NodeSubflow:
+			code := nodeStr(n, "code")
+			if code == "" {
+				return res, fmt.Errorf("SUBFLOW %s 缺少 code", nodeID(n))
+			}
+			subData, err := ex.LoadSubflowGraph(ctx, code)
+			if err != nil {
+				return res, fmt.Errorf("子流程 %s 加载失败: %w", code, err)
+			}
+			subGraph, err := Parse(subData)
+			if err != nil {
+				return res, fmt.Errorf("子流程 %s DSL 解析失败: %w", code, err)
+			}
+			subIn := RunInput{DefID: in.DefID, Code: code,
+				RunID: fmt.Sprintf("%s-sub-%s", in.RunID, nodeID(n)),
+				Graph: subData, Vars: in.Vars}
+			if _, err := Run(ctx, subGraph, subIn, ex); err != nil {
+				return res, fmt.Errorf("子流程 %s 执行失败: %w", code, err)
 			}
 		}
 		res.Steps++

@@ -32,6 +32,9 @@ const (
 	NodeTimer     = "TIMER"
 	NodeCondition = "CONDITION"
 	NodeHuman     = "HUMAN" // 人工审批任务：创建待办并等待 Signal 审批结果
+	NodeEmit      = "EMIT"  // 事件发布：向指定主题发事件（行为调用的第 3 层实现）
+	NodeSet       = "SET"   // 变量设置：合并字面量到运行变量（纯函数，确定性）
+	NodeSubflow   = "SUBFLOW" // 子流程：按 code 加载另一 TEMPORAL 定义并执行
 	NodeEnd       = "END"
 )
 
@@ -71,7 +74,7 @@ func Parse(data []byte) (*Graph, error) {
 			starts++
 		case NodeEnd:
 			ends++
-		case NodeTimer, NodeStep, NodeCondition, NodeHuman:
+		case NodeTimer, NodeStep, NodeCondition, NodeHuman, NodeEmit, NodeSet, NodeSubflow:
 		default:
 			return nil, fmt.Errorf("未知节点类型: %v", nodeType(n))
 		}
@@ -152,6 +155,12 @@ func nextWithHandle(g *Graph, id, handle string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// nodeStr 取字符串字段。
+func nodeStr(n map[string]any, key string) string {
+	v, _ := n[key].(string)
+	return v
 }
 
 // startID 求 START 节点 ID。

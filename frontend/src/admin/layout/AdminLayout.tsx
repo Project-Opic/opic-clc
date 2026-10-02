@@ -82,7 +82,7 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
       icon: <PartitionOutlined />,
       children: [
         { key: '/admin/temporalflow', label: '流程设计', icon: <PartitionOutlined /> },
-        { key: '/admin/flow/definitions', label: 'V1 审批流定义', icon: <PartitionOutlined /> },
+        // V1 审批流定义菜单已隐藏（2026-10-02：流程设计已切 Temporal；V1 引擎保留运行兼容）
         { key: '/admin/flow/instances', label: '流程实例', icon: <DesktopOutlined /> },
         { key: '/admin/flow/tasks', label: '任务管理', icon: <SolutionOutlined /> },
       ],

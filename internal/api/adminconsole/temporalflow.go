@@ -14,13 +14,14 @@ package adminconsole
 
 import (
 	"encoding/json"
-	"strings"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/expr"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/temporalflow"
@@ -48,10 +49,13 @@ func list(c *gin.Context) {
 	rows, err := store.List(nil, `SELECT id, code, name, description, version, status, created_at, updated_at
 		FROM flow_definition WHERE flow_type=? ORDER BY updated_at DESC`, flowTypeTemporal)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, rows)
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	common.OKJSON(c, rows, "")
 }
 
 func get(c *gin.Context) {
@@ -63,14 +67,14 @@ func get(c *gin.Context) {
 	row, err := store.One(nil, `SELECT id, code, name, description, node_graph, version, status FROM flow_definition
 		WHERE id=? AND flow_type=?`, id, flowTypeTemporal)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
 	if row == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "不存在"})
+		common.FailJSON(c, fmt.Errorf("流程定义不存在"))
 		return
 	}
-	c.JSON(http.StatusOK, row)
+	common.OKJSON(c, row, "")
 }
 
 // save 新建或更新（body: {id?, code, name, description, node_graph(JSON 字符串或对象)}）。
@@ -83,16 +87,16 @@ func save(c *gin.Context) {
 		NodeGraph   json.RawMessage `json:"node_graph"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
 	if body.Code == "" || body.Name == "" || len(body.NodeGraph) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "code/name/node_graph 必填"})
+		common.FailJSON(c, fmt.Errorf("code/name/node_graph 必填"))
 		return
 	}
 	// 保存前强校验 DSL
 	if _, err := temporalflow.Parse(body.NodeGraph); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
 	var createdBy any
@@ -130,20 +134,24 @@ func publish(c *gin.Context) {
 		return
 	}
 	row, err := store.One(nil, `SELECT node_graph FROM flow_definition WHERE id=? AND flow_type=?`, id, flowTypeTemporal)
-	if err != nil || row == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "不存在"})
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if row == nil {
+		common.FailJSON(c, fmt.Errorf("流程定义不存在"))
 		return
 	}
 	graphJSON, _ := row["node_graph"].(string)
 	if _, err := temporalflow.Parse([]byte(graphJSON)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "DSL 校验失败: " + err.Error()})
+		common.FailJSON(c, fmt.Errorf("DSL 校验失败: %s", err.Error()))
 		return
 	}
 	if _, err := store.Exec(nil, `UPDATE flow_definition SET status=1, updated_at=? WHERE id=?`, time.Now().Format("2006-01-02 15:04:05"), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"published": true})
+	common.OKJSON(c, gin.H{"published": true}, "发布成功")
 }
 
 // run 试运行：启动 Temporal 解释器工作流（RUN_ID 用时间戳；变量可选）。
@@ -163,12 +171,16 @@ func run(c *gin.Context) {
 		address = envDefault("WORKFLOW_ADDRESS", "temporal:7233")
 	}
 	row, err := store.One(nil, `SELECT id, code, node_graph, status FROM flow_definition WHERE id=? AND flow_type=?`, id, flowTypeTemporal)
-	if err != nil || row == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "不存在"})
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if row == nil {
+		common.FailJSON(c, fmt.Errorf("流程定义不存在"))
 		return
 	}
 	if toI64(row["status"]) != 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "流程未发布，不能试运行"})
+		common.FailJSON(c, fmt.Errorf("流程未发布，不能试运行"))
 		return
 	}
 	graphJSON, _ := row["node_graph"].(string)
@@ -184,10 +196,10 @@ func run(c *gin.Context) {
 	}
 	runID, err := temporalflow.StartInterpreter(address, envDefault("WORKFLOW_NAMESPACE", "opic"), in)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"run_id": runID, "workflow_id": fmt.Sprintf("temporalflow-%s-%s", in.Code, in.RunID)})
+	common.OKJSON(c, gin.H{"run_id": runID, "workflow_id": fmt.Sprintf("temporalflow-%s-%s", in.Code, in.RunID)}, "试运行已启动")
 }
 
 // validate 设计器即时校验（不落库）：DSL 结构 + 表达式试算。
@@ -202,7 +214,7 @@ func validate(c *gin.Context) {
 	}
 	g, err := temporalflow.Parse(body.NodeGraph)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
 	// 条件表达式逐一试算（纯函数，无副作用）
@@ -220,15 +232,23 @@ func validate(c *gin.Context) {
 		}
 	}
 	if len(issues) > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "issues": issues})
+		common.FailJSON(c, fmt.Errorf("%s", strings.Join(issues, "；")))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"valid": true})
+	common.OKJSON(c, gin.H{"valid": true}, "校验通过")
 }
 
 // ── 内部 ──
 
 func osGetenv(k string) string { return os.Getenv(k) }
+
+// dupFriendly 唯一码冲突转友好错误。
+func dupFriendly(err error, code string) error {
+	if err != nil && (strings.Contains(err.Error(), "flow_definition_code_key") || strings.Contains(err.Error(), "duplicate key")) {
+		return fmt.Errorf("流程编码已存在: %s", code)
+	}
+	return err
+}
 
 func toI64(v any) int64 {
 	switch x := v.(type) {
@@ -272,10 +292,13 @@ func TaskList(c *gin.Context) {
 		WHERE (? = '' OR t.status = ?) AND (? = '' OR t.run_id = ?)
 		ORDER BY t.id DESC LIMIT 200`, status, status, runID, runID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, rows)
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	common.OKJSON(c, rows, "")
 }
 
 // RunList 运行列表。
@@ -285,10 +308,13 @@ func RunList(c *gin.Context) {
 		FROM temporalflow_run r LEFT JOIN flow_definition d ON d.id = r.def_id
 		ORDER BY r.id DESC LIMIT 200`)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, rows)
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	common.OKJSON(c, rows, "")
 }
 
 // taskAct 审批/驳回：向解释器工作流发 Signal（tf-task-<id>），工作流内 activity 回写 DB。
@@ -303,8 +329,12 @@ func taskAct(c *gin.Context, action string) {
 	}
 	_ = c.ShouldBindJSON(&body)
 	row, err := store.One(nil, `SELECT temporal_workflow_id FROM temporalflow_task WHERE id=?`, id)
-	if err != nil || row == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if row == nil {
+		common.FailJSON(c, fmt.Errorf("任务不存在"))
 		return
 	}
 	wfID := fmt.Sprint(row["temporal_workflow_id"])
@@ -316,10 +346,10 @@ func taskAct(c *gin.Context, action string) {
 		envDefault("WORKFLOW_NAMESPACE", "opic"), wfID, id, temporalflow.HumanOutcome{
 			Action: action, Comment: body.Comment, Operator: operator,
 		}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"signaled": true, "task_id": id, "action": action})
+	common.OKJSON(c, gin.H{"signaled": true, "task_id": id, "action": action}, "已提交")
 }
 
 // TaskApprove 审批通过。

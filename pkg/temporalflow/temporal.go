@@ -106,6 +106,23 @@ func (t *TemporalExecutor) EmitSLAExceeded(_ context.Context, payload map[string
 	return t.Emit(context.Background(), "opic.techbase.flow.sla.exceeded", payload)
 }
 
+// EmitCustom EMIT 节点：向任意主题发事件。
+func (t *TemporalExecutor) EmitCustom(_ context.Context, subject string, payload map[string]any) error {
+	b, _ := json.Marshal(payload)
+	actCtx := workflow.WithActivityOptions(t.Ctx, actOpts())
+	return workflow.ExecuteActivity(actCtx, "EmitEventActivity", subject, json.RawMessage(b)).Get(actCtx, nil)
+}
+
+// LoadSubflowGraph 按 code 加载子流程 DSL（activity 查库；发布后图稳定，重放安全）。
+func (t *TemporalExecutor) LoadSubflowGraph(_ context.Context, code string) ([]byte, error) {
+	actCtx := workflow.WithActivityOptions(t.Ctx, actOpts())
+	var graph string
+	if err := workflow.ExecuteActivity(actCtx, "tf.LoadDefGraphByCode", code).Get(actCtx, &graph); err != nil {
+		return nil, err
+	}
+	return []byte(graph), nil
+}
+
 // TemporalInterpreterWorkflow 通用解释器工作流（注册名 "temporalInterpreter"）。
 // 输入 = RunInput（含 DSL 图 + 运行变量）；重放安全：图/变量来自工作流参数，
 // expr 求值为纯函数，IO 全部走 activity。
