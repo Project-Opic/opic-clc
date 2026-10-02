@@ -164,3 +164,36 @@ sales 登录 → 建草稿 → 提交(启动 FLOW-CUSTOMER-APPROVAL,状态「待
 已落地：仪表盘｜系统管理(用户/角色/权限/资源≈菜单)｜日志审计(操作/登录/审计/在线用户)｜消息中心(公告管理)｜系统工具(错误码登记表/系统监控)｜审批中心(待办/我发起/流程定义)｜业务管理(v1 融合：客户管理)。
 
 暂缓项（基准超集，需对应后端服务先行，记录为后续迭代）：部门管理/岗位管理/租户管理/租户套餐/系统设置/短信管理/代码生成/OAuth2 应用/Webhook 订阅/文件管理/定时任务/告警规则/Redis·MySQL 独立监控页。
+
+---
+
+## 九、step1 基础设施集成（2026-10-02 重构）
+
+脚手架深度接入 opic-ai 生产环境（192.168.3.200，`*.opic-ai.ccoe.tech`，见 opic-deploy 仓与 118 号生产方案）：
+
+| 基础设施 | 集成点 | 生产入口 |
+|---|---|---|
+| PostgreSQL（Pigsty） | `internal/store`（GORM 连接 + goose 迁移）；`database.schema` 落中心专属 schema（OPIC-DB-SCHEMA-01） | haproxy `:5433`(rw)/`:5434`(ro)，库 `opicdb` |
+| Redis | `pkg/redisx`（登出令牌吊销黑名单） | opic-net 内 `opic-redis:6379`（宿主回环 26379） |
+| NATS（事件总线） | **`pkg/eventbus`**：`driver=inproc`（默认，零依赖）/`driver=nats`（JetStream at-least-once）；主题域约定 `opic.<域码>.<...>` | opic-net 内 `opic-nats:4222`（宿主 14222），stream `OPIC`（`opic.>` 捕获） |
+| Temporal（工作流） | **`pkg/workflowx`**：`driver=local`（默认）/`driver=temporal`（含 `NewWorkerWorker` worker 路由）；业务命名空间 `opic` | opic-net 内 `temporal:7233` |
+| ZITADEL（零信任） | `internal/api/auth/zitadel.go`（OIDC+PKCE，JWKS 验签，角色声明映射） | `https://auth.opic-ai.ccoe.tech` |
+| Harbor（镜像仓） | `make harbor-push`（镜像推 `192.168.3.200:18700/opic/techbase`；需 daemon insecure-registries 加 18700，变更窗口执行） | `http://192.168.3.200:18700` |
+| Traefik（入口） | compose 只声明 labels（`opic.stack=techbase` + 子域路由），不自起网关 | 子域 `techbase.opic-ai.ccoe.tech` |
+
+**中心仓复制改造三步**（以域码 `osys` 为例）：
+
+1. `configs/config.yml`：`database.schema: osys`；`eventbus.driver: nats`；`workflow.driver: temporal`；`auth.issuer: https://auth.opic-ai.ccoe.tech`；
+2. `migrations/`：本中心 DDL（goose 000NNN 序号，禁 AutoMigrate），首启自动落在 `osys` schema；
+3. `docker-compose.yml`：`BASE_DOMAIN` 环境已全局注入，子域随域名自动生效。
+
+**事件总线驱动切换语义**：`inproc` 为进程内直调（开发/降级兜底）；`nats` 为 JetStream durable 订阅，at-least-once——消费方必须幂等（115 号 §4.2）。接口契约两实现一致（`pkg/eventbus/contract_test.go`）。
+
+**验证**：`cmd/smoke` 为 live 冒烟（pg/redis/nats/temporal 四项），生产实测四项全绿：
+
+```bash
+CGO_ENABLED=0 GOOS=linux go build -o smoke ./cmd/smoke
+./smoke   # 需要 DB_PASSWORD(或PG_ADMIN_PASSWORD)/REDIS_PASSWORD/NATS_PASSWORD 等环境变量
+```
+
+> ⚠ pgx DSN 两个实测坑：空 `password=` 会吞掉后续 `dbname`；`search_path` 值不能含逗号（只设中心单 schema）。

@@ -36,6 +36,11 @@ func Open() error {
 		dsn = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 			cfg.Host, cfg.Port, cfg.UserName, cfg.Password, cfg.DBName, cfg.SSLMode)
 	}
+	if cfg.Schema != "" {
+		// ⚠ pgx DSN 的 search_path 值不能含逗号（解析会失效），只设中心单 schema；
+		// 跨 schema 访问本就被 OPIC-DB-SCHEMA-01 禁止，public 无需在路径内
+		dsn = fmt.Sprintf("%s search_path=%s", dsn, cfg.Schema)
+	}
 	if env := os.Getenv("GO_TECHBASE_DSN"); env != "" {
 		dsn = env
 	}
@@ -65,7 +70,7 @@ func Open() error {
 	if err := migrate(); err != nil {
 		return err
 	}
-	log.Printf("[store] PostgreSQL(%s:%d/%s) 就绪", cfg.Host, cfg.Port, cfg.DBName)
+	log.Printf("[store] PostgreSQL(%s:%d/%s schema=%s) 就绪", cfg.Host, cfg.Port, cfg.DBName, cfg.Schema)
 	return nil
 }
 

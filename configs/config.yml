@@ -8,24 +8,43 @@ log:
   output: std    # std|file(file 时写 dir/opic-techbase.log,按大小轮转)
   dir: ./log
 
-# 数据库:PostgreSQL 16(OPIC-DBS 集成 Pigsty 部署;连接串经数据服务域自助申请)
+# 数据库:PostgreSQL 16(Pigsty 生产集群 haproxy 5433 rw;库=opicdb,中心专属 schema 见 OPIC-DB-SCHEMA-01)
+# 本仓为脚手架:复制到中心仓后 schema 改为 o<域码小写>(如 osys);本地开发可连 docker-compose.infra.yml 栈
 database:
-  host: localhost
-  port: 5432
+  host: 192.168.3.200
+  port: 5433
   username: postgres
   password: postgres
-  dbname: go_techbase
+  dbname: opicdb
+  schema: otechbase
   sslmode: disable
   maxconns: 20
   minconns: 5
 
-# Redis(可选,对齐 gopherforge):启用后登出令牌写入吊销黑名单;未启用功能静默降级
+# Redis(step1 生产:opic-redis 容器,宿主回环 26379;口令见生产 .env)
 redis:
-  enabled: false
-  host: localhost
-  port: 6379
+  enabled: true
+  host: 192.168.3.200
+  port: 26379
   password: ""
   db: 0
+
+# 事件总线(step1 NATS JetStream;容器网 nats:4222 / 宿主 14222;口令见生产 .env)
+# driver=inproc 为零依赖默认(开发/降级);生产切 nats
+eventbus:
+  driver: inproc
+  url: nats://192.168.3.200:14222
+  username: opic
+  password: ""
+  stream_name: OPIC
+  max_age_days: 7
+
+# 工作流(step1 Temporal;容器网 temporal:7233 / 宿主 7233;业务命名空间 opic)
+# driver=local 为零依赖默认;生产切 temporal
+workflow:
+  driver: local
+  address: 192.168.3.200:7233
+  namespace: opic
 
 # Prometheus 指标(/metrics;env METRICS_ENABLED 可覆盖)
 metrics:

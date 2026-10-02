@@ -31,6 +31,7 @@ var Config struct {
 		UserName string `yaml:"username"`
 		Password string `yaml:"password"`
 		DBName   string `yaml:"dbname"`
+		Schema   string `yaml:"schema"` // 中心专属 schema(OPIC-DB-SCHEMA-01:o<域码小写>);空=public
 		SSLMode  string `yaml:"sslmode"`
 		MinConns int    `yaml:"minconns"`
 		MaxConns int    `yaml:"maxconns"`
@@ -42,6 +43,19 @@ var Config struct {
 		Password string `yaml:"password"`
 		DB       int    `yaml:"db"`
 	} `yaml:"redis"`
+	EventBus struct {
+		Driver     string `yaml:"driver"`     // inproc|nats
+		URL        string `yaml:"url"`        // nats://host:port
+		Username   string `yaml:"username"`
+		Password   string `yaml:"password"`
+		StreamName string `yaml:"stream_name"` // JetStream stream,默认 OPIC
+		MaxAgeDays int    `yaml:"max_age_days"` // 事件保留天数,默认 7
+	} `yaml:"eventbus"`
+	Workflow struct {
+		Driver    string `yaml:"driver"`    // local|temporal
+		Address   string `yaml:"address"`   // temporal frontend host:port
+		Namespace string `yaml:"namespace"` // 默认 opic
+	} `yaml:"workflow"`
 	Metrics struct {
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"metrics"`
@@ -145,7 +159,7 @@ func applyDefaults() {
 		Config.Database.Port = 5432
 	}
 	if Config.Database.DBName == "" {
-		Config.Database.DBName = "go_techbase"
+		Config.Database.DBName = "opicdb"
 	}
 	if Config.Database.SSLMode == "" {
 		Config.Database.SSLMode = "disable"
@@ -205,6 +219,30 @@ func applyEnvOverrides() {
 	}
 	if v := os.Getenv("DB_NAME"); v != "" {
 		Config.Database.DBName = v
+	}
+	if v := os.Getenv("DB_SCHEMA"); v != "" {
+		Config.Database.Schema = v
+	}
+	if v := os.Getenv("EVENTBUS_DRIVER"); v != "" {
+		Config.EventBus.Driver = v
+	}
+	if v := os.Getenv("EVENTBUS_URL"); v != "" {
+		Config.EventBus.URL = v
+	}
+	if v := os.Getenv("EVENTBUS_USERNAME"); v != "" {
+		Config.EventBus.Username = v
+	}
+	if v := os.Getenv("EVENTBUS_PASSWORD"); v != "" {
+		Config.EventBus.Password = v
+	}
+	if v := os.Getenv("WORKFLOW_DRIVER"); v != "" {
+		Config.Workflow.Driver = v
+	}
+	if v := os.Getenv("WORKFLOW_ADDRESS"); v != "" {
+		Config.Workflow.Address = v
+	}
+	if v := os.Getenv("WORKFLOW_NAMESPACE"); v != "" {
+		Config.Workflow.Namespace = v
 	}
 	if v := os.Getenv("DB_SSLMODE"); v != "" {
 		Config.Database.SSLMode = v
