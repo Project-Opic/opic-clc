@@ -197,3 +197,17 @@ CGO_ENABLED=0 GOOS=linux go build -o smoke ./cmd/smoke
 ```
 
 > ⚠ pgx DSN 两个实测坑：空 `password=` 会吞掉后续 `dbname`；`search_path` 值不能含逗号（只设中心单 schema）。
+
+### 九·一、流程引擎接线（2026-10-02，v1 语义 + step1 运行时）
+
+`/api/flow` 与客户申请流程的执行架构为**语义/运行时分离**（对齐 115 号 §4.2 判据）：
+
+| 层 | 承担 | 实现 |
+|---|---|---|
+| **流程语义**（不变） | 审批流转：Start/Approve/Reject/ReturnTo、网关路由、规则求值 | `internal/service/engine`（v1 状态机，flow_definition/instance/task） |
+| **事件总线**（新增） | `opic.techbase.flow.{instance.started,task.created,instance.completed,sla.exceeded}` 四事件旁路发布 | `pkg/eventbus`（生产 driver=nats，stream `OPIC`） |
+| **运行时看护**（新增） | 任务 SLA 看护工作流 `flowGuardian-task-<id>`：到期未处理 → sla.exceeded | `pkg/workflowx`（生产 driver=temporal：服务端持久化定时器，**进程重启不丢**；local 降级为 goroutine） |
+
+- 装配：`internal/infra`（Init/EB/WF/Close，任一不可用降级 nil = 纯 v1 行为）；temporal worker 在 `cmd/techbase` 启动（TaskQueue `techbase`，workflow 名 `flowGuardian`）。
+- 发布/看护全部**旁路化**：失败仅记日志，绝不阻塞审批主流程。
+- 端到端实测（生产 192.168.3.200）：客户申请提交 → NATS 收到 `instance.started`/`task.created` + Temporal 出现 `flowGuardian-task-1`(Running)。

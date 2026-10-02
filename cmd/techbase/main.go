@@ -20,6 +20,7 @@ import (
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api"
 	"gitcode.com/opic-ontology/opic-techbase/internal/config"
+	"gitcode.com/opic-ontology/opic-techbase/internal/infra"
 	"gitcode.com/opic-ontology/opic-techbase/internal/middleware"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/ontology"
 	"gitcode.com/opic-ontology/opic-techbase/internal/service"
@@ -77,7 +78,9 @@ func main() {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
-	r.GET("/health/check", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().Format(time.RFC3339)}) })
+	r.GET("/health/check", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().Format(time.RFC3339)})
+	})
 	r.GET("/metrics", metrics.Handler())
 
 	addr := ":" + config.Config.App.Port
@@ -85,8 +88,23 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: r}
 
 	sd := graceful.New(15 * time.Second)
+	// step1 基础设施客户端（eventbus/workflow；失败降级 nil = 纯 v1 行为）
+	infra.Init()
+	if infra.TemporalDriver() {
+		// temporal worker：承载 flowGuardian 看护工作流（阻塞运行，随 graceful 停止）
+		if runner, err := infra.NewTemporalWorker(config.Config.Workflow.Address, config.Config.Workflow.Namespace); err == nil {
+			runner.RegisterNamed("flowGuardian", infra.TemporalGuardianWorkflow)
+			wctx, wcancel := context.WithCancel(context.Background())
+			go func() { _ = runner.Run(wctx) }()
+			sd.Register("workflow-worker", func(ctx context.Context) error { wcancel(); time.Sleep(500 * time.Millisecond); return nil })
+		} else {
+			logger.Warnf("temporal worker 启动失败，SLA 看护降级为无")
+		}
+	}
+
 	sd.Register("http", func(ctx context.Context) error { return srv.Shutdown(ctx) })
 	sd.Register("redis", func(ctx context.Context) error { redisx.Close(); return nil })
+	sd.Register("infra", func(ctx context.Context) error { infra.Close(); return nil })
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

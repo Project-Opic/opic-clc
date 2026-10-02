@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitcode.com/opic-ontology/opic-techbase/internal/infra"
 	"gitcode.com/opic-ontology/opic-techbase/internal/service/engine"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
@@ -205,7 +206,7 @@ func doTaskAction(taskID int64, user UserInfo, action, comment, targetActivityID
 				return Fail(errcode.ErrTaskNotOwner, "该任务不属于当前用户")
 			}
 		}
-		eng := engine.New(db)
+		eng := engine.NewWithInfra(db, infra.EB(), infra.WF(), infra.SLAHours(), infra.TemporalDriver())
 		_ = action
 		_ = comment
 		_ = targetActivityID

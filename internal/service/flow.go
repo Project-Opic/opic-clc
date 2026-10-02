@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"gitcode.com/opic-ontology/opic-techbase/internal/infra"
 	"gitcode.com/opic-ontology/opic-techbase/internal/service/engine"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
@@ -510,7 +511,7 @@ func SubmitCustomer(customerID int64, user UserInfo) (map[string]any, error) {
 		if definition == nil {
 			return Fail(errcode.ErrFlowNotPublished, "客户申请审批流程未发布")
 		}
-		eng := engine.New(db)
+		eng := engine.NewWithInfra(db, infra.EB(), infra.WF(), infra.SLAHours(), infra.TemporalDriver())
 		instanceID, err = eng.Start(toInt(definition["id"]), Str(customer["customer_no"]),
 			[]any{"AGG-CUSTOMER-001"}, map[string]any{"customer_id": customerID}, user.ID)
 		if err != nil {

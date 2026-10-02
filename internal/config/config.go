@@ -44,11 +44,11 @@ var Config struct {
 		DB       int    `yaml:"db"`
 	} `yaml:"redis"`
 	EventBus struct {
-		Driver     string `yaml:"driver"`     // inproc|nats
-		URL        string `yaml:"url"`        // nats://host:port
+		Driver     string `yaml:"driver"` // inproc|nats
+		URL        string `yaml:"url"`    // nats://host:port
 		Username   string `yaml:"username"`
 		Password   string `yaml:"password"`
-		StreamName string `yaml:"stream_name"` // JetStream stream,默认 OPIC
+		StreamName string `yaml:"stream_name"`  // JetStream stream,默认 OPIC
 		MaxAgeDays int    `yaml:"max_age_days"` // 事件保留天数,默认 7
 	} `yaml:"eventbus"`
 	Workflow struct {

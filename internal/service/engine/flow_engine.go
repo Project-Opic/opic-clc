@@ -3,6 +3,8 @@
 package engine
 
 import (
+	"log"
+	"time"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -15,15 +17,53 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/expr"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/ontology"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
+	"gitcode.com/opic-ontology/opic-techbase/pkg/eventbus"
+	"gitcode.com/opic-ontology/opic-techbase/pkg/workflowx"
 )
 
 // Engine 流程引擎(绑定事务或默认连接)。
 type Engine struct {
 	DB *gorm.DB
+	// ── step1 基础设施集成（可空：nil 时降级为纯 v1 行为）──
+	EB            eventbus.EventBus  // 流程事件总线（instance/task/sla 四事件）
+	WF            workflowx.Client   // SLA 看护工作流（local|temporal）
+	SLAHours      float64            // 任务处理时限（默认 48h）
+	TemporalDriver bool              // driver=temporal（拉长状态轮询间隔）
+	PollInterval  time.Duration      // 看护状态轮询间隔（0=按驱动默认）
 }
 
-// New 构造。
+// New 构造（v1 兼容：无事件/无看护）。
 func New(db *gorm.DB) *Engine { return &Engine{DB: db} }
+
+// NewWithInfra 构造并接入 step1（事件总线 + SLA 看护工作流）。
+func NewWithInfra(db *gorm.DB, eb eventbus.EventBus, wf workflowx.Client, slaHours float64, temporalDriver bool) *Engine {
+	if slaHours <= 0 {
+		slaHours = 48
+	}
+	return &Engine{DB: db, EB: eb, WF: wf, SLAHours: slaHours, TemporalDriver: temporalDriver}
+}
+
+// watchCreatedTasks 为新建 TODO 任务挂 SLA 看护并发布 task.created（旁路）。
+func (e *Engine) watchCreatedTasks(instanceID int64) {
+	if e.WF == nil && e.EB == nil {
+		return
+	}
+	tasks, err := store.List(e.DB, `SELECT id, activity_name FROM flow_task WHERE instance_id=? AND status='TODO'`, instanceID)
+	if err != nil {
+		log.Printf("[flow-events] 查询新任务失败 instance=%d: %v", instanceID, err)
+		return
+	}
+	for _, t := range tasks {
+		taskID := toInt64(t["id"])
+		title := s(t["activity_name"])
+		if e.WF != nil {
+			e.startGuardian(instanceID, taskID, title)
+		}
+		if e.EB != nil {
+			e.publish(TopicTaskCreated, map[string]any{"instance_id": instanceID, "task_id": taskID, "task_title": title})
+		}
+	}
+}
 
 // GetDefinition 按ID取定义。
 func (e *Engine) GetDefinition(defID int64) (map[string]any, error) {
@@ -165,7 +205,15 @@ func (e *Engine) Start(defID int64, businessKey string, businessObjectRefs []any
 	if err != nil {
 		return 0, err
 	}
-	return instID, e.setCurrent(instID, current)
+	if err := e.setCurrent(instID, current); err != nil {
+		return 0, err
+	}
+	// ── step1 接线：实例启动事件 + 任务 SLA 看护（旁路，失败不回滚审批）──
+	e.publish(TopicInstanceStarted, map[string]any{
+		"instance_id": instID, "def_id": defID, "business_key": businessKey, "creator_id": creatorID,
+	})
+	e.watchCreatedTasks(instID)
+	return instID, nil
 }
 
 func marshal(v any) string {
@@ -271,6 +319,7 @@ func (e *Engine) complete(taskID int64, action, comment string, operatorID int64
 	if _, err := e.advance(inst, graph, s(task["activity_id"]), action, operatorID); err != nil {
 		return nil, err
 	}
+	e.cancelGuardian(taskID) // 任务已处理，看护退出（旁路）
 	return e.Result(toInt64(inst["id"]))
 }
 

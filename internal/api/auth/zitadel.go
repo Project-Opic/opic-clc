@@ -14,7 +14,7 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
 )
 
-func authMode() string     { return config.Config.Auth.Mode }
+func authMode() string      { return config.Config.Auth.Mode }
 func allowLocalLogin() bool { return config.Config.Auth.AllowLocalLogin }
 
 // ---------- OIDC state→verifier 暂存(PKCE) ----------

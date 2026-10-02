@@ -88,9 +88,8 @@ func (t *temporalClient) Cancel(ctx context.Context, id string) error {
 
 func (t *temporalClient) Close() error { t.c.Close(); return nil }
 
-// NewWorkerWorker 构造 Temporal worker（中心应用注册工作流函数后 Run()）。
-// 返回 *worker.Worker 以便中心调用 RegisterWorkflow/RegisterActivity。
-func NewWorkerWorker(opts Options, taskQueue string) (WorkerRunner, error) {
+// NewWorkerRunner 构造 Temporal worker（中心应用注册工作流函数后 Run()）。
+func NewWorkerRunner(opts Options, taskQueue string) (WorkerRunner, error) {
 	ns := opts.Namespace
 	if ns == "" {
 		ns = "opic"
@@ -109,6 +108,8 @@ func NewWorkerWorker(opts Options, taskQueue string) (WorkerRunner, error) {
 type WorkerRunner interface {
 	// Register 注册工作流函数（temporal worker 原生语义，fn 由应用用 sdk workflow 装饰器定义）。
 	Register(fn any)
+	// RegisterNamed 以显式名称注册（client 按 name 字符串调度时使用）。
+	RegisterNamed(name string, fn any)
 	// Run 阻塞运行 worker（graceful 停止经 ctx）。
 	Run(ctx context.Context) error
 	Close()
