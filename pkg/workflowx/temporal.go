@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/client"
+	sdkworker "go.temporal.io/sdk/worker"
 )
 
 // temporalClient Temporal 生产实现（step1 stacks/temporal，业务命名空间 opic）。
 //
-// 工作流**函数**在中心应用侧注册进 worker（NewWorkerWorker 路由到本包提供配置）；
+// 工作流**函数**在中心应用侧注册进 worker（NewWorkerRunner 路由到本包提供配置）；
 // 本客户端只承担启动（按 workflow name + 单参数 []byte 输入）、状态查询与取消。
 type temporalClient struct {
 	c   client.Client
@@ -101,7 +102,7 @@ func NewWorkerRunner(opts Options, taskQueue string) (WorkerRunner, error) {
 	if taskQueue == "" {
 		taskQueue = "techbase"
 	}
-	return &workerRunner{c: c, taskQueue: taskQueue}, nil
+	return &workerRunner{c: c, w: sdkworker.New(c, taskQueue, sdkworker.Options{}), taskQueue: taskQueue}, nil
 }
 
 // WorkerRunner worker 运行句柄。
@@ -110,6 +111,10 @@ type WorkerRunner interface {
 	Register(fn any)
 	// RegisterNamed 以显式名称注册（client 按 name 字符串调度时使用）。
 	RegisterNamed(name string, fn any)
+	// RegisterActivity 注册 activity（工作流内的 IO 原语）。
+	RegisterActivity(fn any)
+	// RegisterActivityNamed 以显式名称注册 activity。
+	RegisterActivityNamed(name string, fn any)
 	// Run 阻塞运行 worker（graceful 停止经 ctx）。
 	Run(ctx context.Context) error
 	Close()

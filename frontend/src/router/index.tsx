@@ -26,6 +26,7 @@ import Done from '../pages/workbench/Done'
 import Requested from '../pages/workbench/Requested'
 import FlowDefinitions from '../pages/flow/FlowDefinitions'
 import FlowDesigner from '../pages/flow/FlowDesigner'
+import TemporalFlowDesignerPage, { TemporalFlowListPage } from '../pages/flow/TemporalFlowDesigner'
 import FlowInstances from '../pages/flow/FlowInstances'
 import FlowTasks from '../pages/flow/FlowTasks'
 import UserManage from '../pages/system/UserManage'
@@ -146,6 +147,9 @@ export default function AppRoutes() {
         <Route path="system/resources" element={<ResourceManage />} />
         <Route path="flow/definitions" element={<FlowDefinitions />} />
         <Route path="flow/designer/:id" element={<FlowDesigner />} />
+        <Route path="temporalflow" element={<TemporalFlowListPage />} />
+        <Route path="temporalflow/designer/:id" element={<TemporalFlowDesignerPage />} />
+        <Route path="temporalflow/designer/new" element={<TemporalFlowDesignerPage />} />
         <Route path="flow/instances" element={<FlowInstances />} />
         <Route path="flow/tasks" element={<FlowTasks />} />
         <Route path="logs/operation" element={<OperationLogs />} />

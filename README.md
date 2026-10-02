@@ -211,3 +211,17 @@ CGO_ENABLED=0 GOOS=linux go build -o smoke ./cmd/smoke
 - 装配：`internal/infra`（Init/EB/WF/Close，任一不可用降级 nil = 纯 v1 行为）；temporal worker 在 `cmd/techbase` 启动（TaskQueue `techbase`，workflow 名 `flowGuardian`）。
 - 发布/看护全部**旁路化**：失败仅记日志，绝不阻塞审批主流程。
 - 端到端实测（生产 192.168.3.200）：客户申请提交 → NATS 收到 `instance.started`/`task.created` + Temporal 出现 `flowGuardian-task-1`(Running)。
+
+### 九·二、Temporal 流程设计器（2026-10-02，流程设计入口已切 Temporal）
+
+管理控制台「流程设计」菜单现已指向 **Temporal 流程设计器**（`/admin/temporalflow`）：
+xyflow 画布设计 **编排 DSL**（START/STEP/TIMER/CONDITION/END 五类节点；CONDITION 双出边 true/false 对启动变量表达式求值；STEP 可挂 Webhook；TIMER 秒级等待）→ 保存/发布（存 `flow_definition`，`flow_type='TEMPORAL'`，与 V1 审批流同表分流）→ 试运行启动 **通用解释器工作流**。
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| DSL 解析/校验/解释执行 | `pkg/temporalflow`（Parse/Run + 契约测试：顺序/条件真假/定时/缺分支/死循环护栏 MaxSteps=1000） | 解释器骨架驱动无关，Sleep/Emit/Webhook 原语由驱动提供 |
+| temporal 驱动 | `pkg/temporalflow/temporal.go`：`TemporalExecutor`（workflow.Sleep **服务端持久化定时器**）+ Activities（EmitEvent→NATS / Webhook→HTTP）+ `StartInterpreter` | workflow 名 `temporalInterpreter`，activities `EmitEventActivity`/`WebhookActivity` |
+| API | `/api/admin/temporalflow/*`（list/get/save/publish/run/validate；system:manage 权限） | run 接受启动变量（条件求值输入） |
+| 执行证据 | Temporal UI 可见 `temporalflow-<code>-<run>`：COMPLETED `{"finished":true,"steps":4}`；NATS stream `OPIC` 收 step.started/completed/run.completed | 生产端到端已实测 |
+
+V1 审批流设计器（FlowDesigner）保留在「V1 审批流定义」，两套语义互不影响。

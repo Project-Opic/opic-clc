@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/workflow"
+
+	"gitcode.com/opic-ontology/opic-techbase/pkg/temporalflow"
 )
 
 // TemporalGuardianWorkflow flowGuardian 的 temporal 实现（装配层经 RegisterNamed("flowGuardian", ...) 注册）。
@@ -21,4 +23,12 @@ func TemporalGuardianWorkflow(ctx workflow.Context, input []byte) error {
 		sla = 48 * time.Hour
 	}
 	return workflow.Sleep(ctx, sla)
+}
+
+// RegisterTemporalFlows 把全部工作流/活动注册到 runner（flowGuardian + 解释器 + IO 原语）。
+func RegisterTemporalFlows(runner WorkerRunner) {
+	runner.RegisterNamed("flowGuardian", TemporalGuardianWorkflow)
+	runner.RegisterNamed("temporalInterpreter", temporalflow.TemporalInterpreterWorkflow)
+	runner.RegisterActivityNamed("EmitEventActivity", temporalflow.EmitEventActivity)
+	runner.RegisterActivityNamed("WebhookActivity", temporalflow.WebhookActivity)
 }

@@ -93,7 +93,7 @@ func main() {
 	if infra.TemporalDriver() {
 		// temporal worker：承载 flowGuardian 看护工作流（阻塞运行，随 graceful 停止）
 		if runner, err := infra.NewTemporalWorker(config.Config.Workflow.Address, config.Config.Workflow.Namespace); err == nil {
-			runner.RegisterNamed("flowGuardian", infra.TemporalGuardianWorkflow)
+			infra.RegisterTemporalFlows(runner)
 			wctx, wcancel := context.WithCancel(context.Background())
 			go func() { _ = runner.Run(wctx) }()
 			sd.Register("workflow-worker", func(ctx context.Context) error { wcancel(); time.Sleep(500 * time.Millisecond); return nil })

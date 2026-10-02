@@ -81,7 +81,8 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
       label: '流程管理',
       icon: <PartitionOutlined />,
       children: [
-        { key: '/admin/flow/definitions', label: '流程定义', icon: <PartitionOutlined /> },
+        { key: '/admin/temporalflow', label: '流程设计', icon: <PartitionOutlined /> },
+        { key: '/admin/flow/definitions', label: 'V1 审批流定义', icon: <PartitionOutlined /> },
         { key: '/admin/flow/instances', label: '流程实例', icon: <DesktopOutlined /> },
         { key: '/admin/flow/tasks', label: '任务管理', icon: <SolutionOutlined /> },
       ],
