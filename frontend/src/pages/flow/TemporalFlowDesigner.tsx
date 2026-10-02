@@ -23,7 +23,7 @@ import { http } from '../../api/request'
 
 /* ── DSL 类型（pkg/temporalflow 对应）────────────────────────────────────── */
 
-type TFNodeType = 'START' | 'STEP' | 'TIMER' | 'CONDITION' | 'END'
+type TFNodeType = 'START' | 'STEP' | 'TIMER' | 'CONDITION' | 'HUMAN' | 'END'
 
 interface TFNodeData extends Record<string, unknown> {
   label: string
@@ -31,6 +31,8 @@ interface TFNodeData extends Record<string, unknown> {
   seconds?: number
   expr?: string
   webhook_url?: string
+  role_ref?: string
+  sla_hours?: number
 }
 
 type TFNode = Node<TFNodeData>
@@ -38,9 +40,10 @@ type TFEdge = Edge<{ branch?: 'true' | 'false' }>
 
 const NODE_TYPES: { type: TFNodeType; label: string; color: string }[] = [
   { type: 'START', label: '开始', color: '#16a34a' },
-  { type: 'STEP', label: '步骤', color: '#2266e3' },
-  { type: 'TIMER', label: '定时', color: '#8b5cf6' },
-  { type: 'CONDITION', label: '条件', color: '#f43f5e' },
+  { type: 'HUMAN', label: '审批任务', color: '#f59e0b' },
+  { type: 'STEP', label: '系统任务', color: '#2266e3' },
+  { type: 'TIMER', label: '定时等待', color: '#8b5cf6' },
+  { type: 'CONDITION', label: '条件网关', color: '#f43f5e' },
   { type: 'END', label: '结束', color: '#ef4444' },
 ]
 
@@ -73,6 +76,9 @@ function TFNodeView({ data, selected, type }: NodeProps<TFNode> & { type: TFNode
       {type === 'TIMER' && data.seconds != null && (
         <div style={{ fontSize: 11, opacity: 0.6 }}>{data.seconds}s</div>
       )}
+      {type === 'HUMAN' && data.role_ref && (
+        <div style={{ fontSize: 11, opacity: 0.75 }}>{data.role_ref}</div>
+      )}
       {type === 'CONDITION' && data.expr && (
         <div style={{ fontSize: 11, fontFamily: 'monospace' }}>{data.expr}</div>
       )}
@@ -102,6 +108,7 @@ function serialize(nodes: TFNode[], edges: TFEdge[]) {
       ...(n.type === 'TIMER' ? { seconds: n.data.seconds ?? 1 } : {}),
       ...(n.type === 'CONDITION' ? { expr: n.data.expr ?? '' } : {}),
       ...(n.type === 'STEP' && n.data.webhook_url ? { webhook_url: n.data.webhook_url } : {}),
+      ...(n.type === 'HUMAN' ? { role_ref: n.data.role_ref, sla_hours: n.data.sla_hours ?? 48 } : {}),
       x: Math.round(n.position.x),
       y: Math.round(n.position.y),
     })),
@@ -130,7 +137,18 @@ function DesignerInner() {
   const [saving, setSaving] = useState(false)
   const [savedId, setSavedId] = useState<number | null>(defId)
   const [sel, setSel] = useState<{ kind: 'node' | 'edge'; id: string } | null>(null)
+  const [roleOptions, setRoleOptions] = useState<{ value: string; label: string }[]>([])
   const counter = useRef(0)
+
+  useEffect(() => {
+    http
+      .get<Record<string, unknown>>('/api/roles', { page: 1, size: 100 })
+      .then((r) => {
+        const list = (r.list || []) as { code: string; name: string }[]
+        setRoleOptions(list.map((x) => ({ value: x.code, label: x.name ? `${x.name}（${x.code}）` : x.code })))
+      })
+      .catch(() => setRoleOptions([]))
+  }, [])
 
   const load = useCallback(async () => {
     if (!defId) return
@@ -140,14 +158,14 @@ function DesignerInner() {
       setName(String(d.name || ''))
       setDescription(String(d.description || ''))
       const g = typeof d.node_graph === 'string' ? JSON.parse(d.node_graph) : d.node_graph
-      const gNodes = (g.nodes || []) as { id: string; type: TFNodeType; name?: string; x?: number; y?: number; seconds?: number; expr?: string; webhook_url?: string }[]
+      const gNodes = (g.nodes || []) as { id: string; type: TFNodeType; name?: string; x?: number; y?: number; seconds?: number; expr?: string; webhook_url?: string; role_ref?: string; sla_hours?: number }[]
       const gEdges = (g.edges || []) as { source: string; target: string; source_handle?: string }[]
       setNodes(
         gNodes.map((n) => ({
           id: n.id,
           type: n.type,
           position: { x: n.x ?? 100, y: n.y ?? 100 },
-          data: { label: n.name || LABEL[n.type], seconds: n.seconds, expr: n.expr, webhook_url: n.webhook_url },
+          data: { label: n.name || LABEL[n.type], seconds: n.seconds, expr: n.expr, webhook_url: n.webhook_url, role_ref: n.role_ref, sla_hours: n.sla_hours },
         })),
       )
       setEdges(
@@ -179,7 +197,7 @@ function DesignerInner() {
         id: nid,
         type,
         position: screenToFlowPosition({ x: 260 + Math.random() * 120, y: 140 + Math.random() * 160 }),
-        data: { label: LABEL[type], ...(type === 'TIMER' ? { seconds: 30 } : {}), ...(type === 'CONDITION' ? { expr: 'amount > 100' } : {}) },
+        data: { label: LABEL[type], ...(type === 'TIMER' ? { seconds: 30 } : {}), ...(type === 'CONDITION' ? { expr: 'amount > 100' } : {}), ...(type === 'HUMAN' ? { role_ref: roleOptions[0]?.value, sla_hours: 48 } : {}) },
       },
     ])
   }
@@ -327,6 +345,23 @@ function DesignerInner() {
               <Form.Item label="名称">
                 <Input value={selNode.data.label} onChange={(e) => updateSel({ label: e.target.value })} />
               </Form.Item>
+              {(selNode.type as TFNodeType) === 'HUMAN' && (
+                <>
+                  <Form.Item label="审批角色（role code，按角色解析经办人）">
+                    <Select
+                      value={selNode.data.role_ref || undefined}
+                      onChange={(v) => updateSel({ role_ref: v })}
+                      options={roleOptions}
+                      showSearch
+                      placeholder="选择审批角色"
+                    />
+                  </Form.Item>
+                  <Form.Item label="SLA 时限（小时，超时发催办事件）">
+                    <InputNumber value={selNode.data.sla_hours ?? 48} min={0.1} step={1}
+                      onChange={(v) => updateSel({ sla_hours: v ?? 48 })} style={{ width: '100%' }} />
+                  </Form.Item>
+                </>
+              )}
               {(selNode.type as TFNodeType) === 'STEP' && (
                 <Form.Item label="Webhook URL（可选，执行时 POST）">
                   <Input value={selNode.data.webhook_url || ''} onChange={(e) => updateSel({ webhook_url: e.target.value })} />

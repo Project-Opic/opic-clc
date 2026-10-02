@@ -14,6 +14,7 @@ package adminconsole
 
 import (
 	"encoding/json"
+	"strings"
 	"fmt"
 	"net/http"
 	"os"
@@ -37,6 +38,10 @@ func RegisterTemporalFlow(g *gin.RouterGroup) {
 	g.POST("/temporalflow/definitions/:id/publish", publish)
 	g.POST("/temporalflow/definitions/:id/run", run)
 	g.POST("/temporalflow/validate", validate) // 设计器即时校验（不落库）
+	g.GET("/temporalflow/tasks", TaskList)
+	g.POST("/temporalflow/tasks/:id/approve", TaskApprove)
+	g.POST("/temporalflow/tasks/:id/reject", TaskReject)
+	g.GET("/temporalflow/runs", RunList)
 }
 
 func list(c *gin.Context) {
@@ -90,6 +95,10 @@ func save(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	var createdBy any
+	if v, ok := c.Get("userID"); ok {
+		createdBy = v
+	}
 	now := time.Now().Format("2006-01-02 15:04:05")
 	if body.ID > 0 {
 		if _, err := store.Exec(nil, `UPDATE flow_definition SET code=?, name=?, description=?, node_graph=?, updated_at=? WHERE id=? AND flow_type=?`,
@@ -100,9 +109,13 @@ func save(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"id": body.ID})
 		return
 	}
-	row, err := store.One(nil, `INSERT INTO flow_definition (code, name, flow_type, description, node_graph, version, status, created_at, updated_at)
-		VALUES (?,?,?,?,?,0,0,?,?) RETURNING id`, body.Code, body.Name, flowTypeTemporal, body.Description, string(body.NodeGraph), now, now)
+	row, err := store.One(nil, `INSERT INTO flow_definition (code, name, flow_type, description, node_graph, version, status, created_by, created_at, updated_at)
+		VALUES (?,?,?,?,?,0,0,?,?,?) RETURNING id`, body.Code, body.Name, flowTypeTemporal, body.Description, string(body.NodeGraph), createdBy, now, now)
 	if err != nil {
+		if strings.Contains(err.Error(), "flow_definition_code_key") || strings.Contains(err.Error(), "duplicate key") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "流程编码已存在: " + body.Code})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -246,3 +259,71 @@ func envDefault(k, def string) string {
 	}
 	return def
 }
+
+// ── 运行与任务 ──────────────────────────────────────────────────────────────
+
+// TaskList 人工待办列表（?status=TODO|DONE|SLA&run_id=）。
+func TaskList(c *gin.Context) {
+	status := c.DefaultQuery("status", "TODO")
+	runID := c.Query("run_id")
+	rows, err := store.List(nil, `SELECT t.id, t.temporal_workflow_id, t.def_id, t.run_id, t.node_id,
+		t.name, t.role_ref, t.assignee_id, t.assignee_name, t.status, t.action, t.comment, t.created_at, d.name AS def_name
+		FROM temporalflow_task t LEFT JOIN flow_definition d ON d.id = t.def_id
+		WHERE (? = '' OR t.status = ?) AND (? = '' OR t.run_id = ?)
+		ORDER BY t.id DESC LIMIT 200`, status, status, runID, runID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+// RunList 运行列表。
+func RunList(c *gin.Context) {
+	rows, err := store.List(nil, `SELECT r.id, r.def_id, r.code, r.run_id, r.temporal_workflow_id,
+		r.status, r.outcome, r.created_at, r.ended_at, d.name AS def_name
+		FROM temporalflow_run r LEFT JOIN flow_definition d ON d.id = r.def_id
+		ORDER BY r.id DESC LIMIT 200`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+// taskAct 审批/驳回：向解释器工作流发 Signal（tf-task-<id>），工作流内 activity 回写 DB。
+func taskAct(c *gin.Context, action string) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 非法"})
+		return
+	}
+	var body struct {
+		Comment string `json:"comment"`
+	}
+	_ = c.ShouldBindJSON(&body)
+	row, err := store.One(nil, `SELECT temporal_workflow_id FROM temporalflow_task WHERE id=?`, id)
+	if err != nil || row == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在"})
+		return
+	}
+	wfID := fmt.Sprint(row["temporal_workflow_id"])
+	operator := "admin"
+	if v, ok := c.Get("username"); ok {
+		operator = fmt.Sprint(v)
+	}
+	if err := temporalflow.SignalTask(envDefault("WORKFLOW_ADDRESS", "temporal:7233"),
+		envDefault("WORKFLOW_NAMESPACE", "opic"), wfID, id, temporalflow.HumanOutcome{
+			Action: action, Comment: body.Comment, Operator: operator,
+		}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"signaled": true, "task_id": id, "action": action})
+}
+
+// TaskApprove 审批通过。
+func TaskApprove(c *gin.Context) { taskAct(c, "APPROVE") }
+
+// TaskReject 驳回。
+func TaskReject(c *gin.Context) { taskAct(c, "REJECT") }

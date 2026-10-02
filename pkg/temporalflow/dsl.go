@@ -31,6 +31,7 @@ const (
 	NodeStep      = "STEP"
 	NodeTimer     = "TIMER"
 	NodeCondition = "CONDITION"
+	NodeHuman     = "HUMAN" // 人工审批任务：创建待办并等待 Signal 审批结果
 	NodeEnd       = "END"
 )
 
@@ -70,7 +71,7 @@ func Parse(data []byte) (*Graph, error) {
 			starts++
 		case NodeEnd:
 			ends++
-		case NodeTimer, NodeStep, NodeCondition:
+		case NodeTimer, NodeStep, NodeCondition, NodeHuman:
 		default:
 			return nil, fmt.Errorf("未知节点类型: %v", nodeType(n))
 		}
@@ -141,6 +142,16 @@ func nextID(g *Graph, id string, evalBool func(expr string) bool) (string, error
 		}
 		return "", fmt.Errorf("节点 %s 无出边（流程中断）", id)
 	}
+}
+
+// nextWithHandle 按显式 handle 取后继（HUMAN 驳回分支用）。无该边返回 ("", false)。
+func nextWithHandle(g *Graph, id, handle string) (string, bool) {
+	for _, e := range g.Edges {
+		if e.Source == id && e.SourceHandle == handle {
+			return e.Target, true
+		}
+	}
+	return "", false
 }
 
 // startID 求 START 节点 ID。

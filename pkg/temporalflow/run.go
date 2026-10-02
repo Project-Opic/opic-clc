@@ -12,6 +12,7 @@ import (
 
 // 事件主题（step 执行轨迹进事件总线，供观测/审计/联动）。
 const (
+	TopicSLAExceeded   = "opic.techbase.flow.sla.exceeded"
 	TopicStepStarted   = "opic.techbase.temporalflow.step.started"
 	TopicStepCompleted = "opic.techbase.temporalflow.step.completed"
 	TopicRunCompleted  = "opic.techbase.temporalflow.run.completed"
@@ -26,7 +27,22 @@ type RunInput struct {
 	Vars     map[string]any `json:"vars"`
 }
 
-// StepExecutor 步骤执行 + 计时原语（双驱动各自的实现面）。
+// HumanOutcome 人工审批结果。
+type HumanOutcome struct {
+	Action   string `json:"action"`   // APPROVE | REJECT
+	Comment  string `json:"comment,omitempty"`
+	Operator string `json:"operator,omitempty"`
+}
+
+// HumanTaskRef 人工任务引用（创建后返回；等待/完成凭它定位）。
+type HumanTaskRef struct {
+	ID           int64  `json:"id"`
+	SignalName   string `json:"signal_name"` // temporal Signal 通道名
+	AssigneeID   int64  `json:"assignee_id"`
+	AssigneeName string `json:"assignee_name"`
+}
+
+// StepExecutor 步骤执行 + 计时 + 人工任务原语（双驱动各自的实现面）。
 type StepExecutor interface {
 	// Emit 发布步骤事件（step.started/completed）。
 	Emit(ctx context.Context, topic string, payload map[string]any) error
@@ -34,12 +50,21 @@ type StepExecutor interface {
 	Webhook(ctx context.Context, url string, payload map[string]any) error
 	// Sleep 计时（temporal: workflow.Sleep 服务端持久化；local: time.After）。
 	Sleep(ctx context.Context, d time.Duration) error
+	// CreateHumanTask 创建人工审批待办（DB 落表 + SLA/事件由驱动内处理），返回任务引用。
+	CreateHumanTask(ctx context.Context, n map[string]any, in RunInput) (HumanTaskRef, error)
+	// WaitHumanTask 阻塞等待审批 Signal（temporal: GetSignalChannel；local: channel）。
+	WaitHumanTask(ctx context.Context, ref HumanTaskRef) (HumanOutcome, error)
+	// CompleteHumanTask 回写任务结果（DB 状态/意见/操作人）。
+	CompleteHumanTask(ctx context.Context, ref HumanTaskRef, o HumanOutcome) error
+	// EmitSLAExceeded 发布 SLA 超时事件。
+	EmitSLAExceeded(ctx context.Context, payload map[string]any) error
 }
 
 // RunResult 运行结果摘要。
 type RunResult struct {
 	Steps    int    `json:"steps"`
 	Finished bool   `json:"finished"`
+	Outcome  string `json:"outcome,omitempty"` // APPROVED | REJECTED（含 HUMAN 驳回终态）
 	Error    string `json:"error,omitempty"`
 }
 
@@ -59,8 +84,12 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 		switch nodeType(n) {
 		case NodeEnd:
 			res.Finished = true
+			if res.Outcome == "" {
+				res.Outcome = "APPROVED"
+			}
 			_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
-				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code, "steps": res.Steps,
+				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
+				"steps": res.Steps, "outcome": res.Outcome,
 			})
 			return res, nil
 		case NodeTimer:
@@ -91,6 +120,34 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 			_ = ex.Emit(ctx, TopicStepCompleted, stepPayload(in, n, res.Steps))
 		case NodeCondition:
 			// 条件节点零副作用：只求值选路（确定性——expr 纯函数 + vars 为工作流参数）
+		case NodeHuman:
+			ref, err := ex.CreateHumanTask(ctx, n, in)
+			if err != nil {
+				return res, err
+			}
+			outcome, err := ex.WaitHumanTask(ctx, ref)
+			if err != nil {
+				return res, err
+			}
+			if err := ex.CompleteHumanTask(ctx, ref, outcome); err != nil {
+				return res, err
+			}
+			if outcome.Action == "REJECT" {
+				// 驳回：优先走 source_handle=reject 出边；否则流程以 REJECTED 终止
+				if nid, ok := nextWithHandle(g, cur, "reject"); ok {
+					res.Outcome = "REJECTED"
+					cur = nid
+					res.Steps++
+					continue
+				}
+				res.Finished = true
+				res.Outcome = "REJECTED"
+				_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
+					"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
+					"steps": res.Steps, "outcome": "REJECTED",
+				})
+				return res, nil
+			}
 		}
 		res.Steps++
 		next, err := nextID(g, cur, func(e string) bool { return expr.EvalBool(e, in.Vars) })
@@ -100,8 +157,12 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 		if next == "" {
 			// 无 END 直达终点（设计缺陷宽容：视为结束）
 			res.Finished = true
+			if res.Outcome == "" {
+				res.Outcome = "APPROVED"
+			}
 			_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
-				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code, "steps": res.Steps,
+				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
+				"steps": res.Steps, "outcome": res.Outcome,
 			})
 			return res, nil
 		}

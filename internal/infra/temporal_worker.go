@@ -6,6 +6,7 @@
 package infra
 
 import (
+	"os"
 	"encoding/json"
 	"time"
 
@@ -31,4 +32,44 @@ func RegisterTemporalFlows(runner WorkerRunner) {
 	runner.RegisterNamed("temporalInterpreter", temporalflow.TemporalInterpreterWorkflow)
 	runner.RegisterActivityNamed("EmitEventActivity", temporalflow.EmitEventActivity)
 	runner.RegisterActivityNamed("WebhookActivity", temporalflow.WebhookActivity)
+	runner.RegisterActivityNamed("tf.CreateHumanTask", TFCreateHumanTask)
+	runner.RegisterActivityNamed("tf.CompleteHumanTask", TFCompleteHumanTask)
+	runner.RegisterActivityNamed("tf.EmitSLAExceededActivity", TFEmitSLAExceededActivity)
+	runner.RegisterActivityNamed("tf.CreateRun", TFCreateRun)
+	runner.RegisterActivityNamed("tf.CompleteRun", TFCompleteRun)
+}
+
+// ── 内部辅助（tf 活动用）─────────────────────────────────────────────────────
+
+func toI64Any(v any) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int32:
+		return int64(x)
+	case int16:
+		return int64(x)
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	}
+	return 0
+}
+
+func trimSpaceAny(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b)
+	}
+	return ""
+}
+
+func envOrInf(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }
