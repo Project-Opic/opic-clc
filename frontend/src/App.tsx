@@ -28,9 +28,10 @@ dayjs.locale('zh-cn')
 function GlassApp() {
   const [mode, setMode] = useState<ThemeMode>(() => {
     try {
-      return localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark'
+      // 默认白蓝亮色（用户规则 2026-10-02）；仅显式选过暗色者保留暗色
+      return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
     } catch {
-      return 'dark'
+      return 'light'
     }
   })
 

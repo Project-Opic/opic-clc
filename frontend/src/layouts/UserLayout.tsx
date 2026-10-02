@@ -78,11 +78,11 @@ function renderIcon(name: string | null | undefined, isDir: boolean) {
 
 type AntdMenuItem = Required<MenuProps>['items'][number]
 
-/** 工作台菜单过滤:移除 path 以 /flow 或 /system 开头的分组与叶子(这些已移入管理控制台) */
+/** 工作台菜单过滤:移除 path 以 /flow /system /admin 开头的分组与叶子(这些已移入管理控制台) */
 function filterWorkbenchMenus(menus: MenuItem[]): MenuItem[] {
   const out: MenuItem[] = []
   for (const m of menus) {
-    if (m.path && (m.path.startsWith('/flow') || m.path.startsWith('/system'))) continue
+    if (m.path && (m.path.startsWith('/flow') || m.path.startsWith('/system') || m.path.startsWith('/admin'))) continue
     if (m.children?.length) {
       const kids = filterWorkbenchMenus(m.children)
       // 原是分组且过滤后无子项 → 整组移除
