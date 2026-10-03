@@ -31,6 +31,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [ssoMode, setSsoMode] = useState(false)
   const [userSso, setUserSso] = useState(false) // OPIC-SSO-01:工作台 Casdoor SSO
+  // 双入口（用户规则 2026-10-03）：admin→管理控制台(/admin)；user→用户工作台(/)
+  const [entry, setEntry] = useState<'admin' | 'user'>('user')
   /** allow_local_login;null = /auth/mode 检测失败(兜底显示密码表单,维持旧行为) */
   const [localAllowed, setLocalAllowed] = useState<boolean | null>(null)
 
@@ -103,7 +105,12 @@ export default function Login() {
       setToken(payload.token)
       dispatch(setAuth({ token: payload.token, info: payload }))
       message.success('登录成功')
-      navigate(resolveHomePath(payload.permissions), { replace: true })
+      // 管理员入口 → 管理控制台；用户入口 → 用户工作台
+      if (entry === 'admin') {
+        navigate('/admin', { replace: true })
+      } else {
+        navigate(resolveHomePath(payload.permissions), { replace: true })
+      }
     } catch {
       // 统一拦截器已提示
     } finally {
@@ -195,12 +202,31 @@ export default function Login() {
         {/* 右表单栏 */}
         <div className="brand-form-side">
           <div className="brand-form-inner">
+            {/* 双入口 Tab（用户规则 2026-10-03）：管理员→管理控制台；用户→工作台 */}
+            <div className="brand-entry-tabs" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <button
+                style={{ flex: 1, padding: '8px 0', cursor: 'pointer', fontWeight: 600,
+                  border: entry === 'user' ? '2px solid #2266e3' : '1px solid #d9d9d9',
+                  background: entry === 'user' ? '#e8f1ff' : '#fff', borderRadius: 6 }}
+                onClick={() => setEntry('user')}
+              >
+                用户登录
+              </button>
+              <button
+                style={{ flex: 1, padding: '8px 0', cursor: 'pointer', fontWeight: 600,
+                  border: entry === 'admin' ? '2px solid #f59e0b' : '1px solid #d9d9d9',
+                  background: entry === 'admin' ? '#fff7e8' : '#fff', borderRadius: 6 }}
+                onClick={() => setEntry('admin')}
+              >
+                管理员登录
+              </button>
+            </div>
             {!showLocal ? (
               <>
                 <h2 className="brand-form-title">欢迎回来</h2>
                 <p className="brand-form-sub">请使用企业统一身份继续</p>
                 <div className="brand-form">
-                  {userSso ? (
+                  {entry === 'user' && userSso ? (
                     <Button type="primary" block size="large" loading={casdoorLoading} onClick={handleCasdoorSso}>
                       使用 Casdoor 单点登录
                     </Button>
@@ -235,20 +261,20 @@ export default function Login() {
                   </Form.Item>
                   <Form.Item className="brand-submit-item">
                     <Button type="primary" htmlType="submit" block loading={loading}>
-                      立即登录
+                      {entry === 'admin' ? '登录管理控制台' : '登录工作台'}
                     </Button>
                   </Form.Item>
-                  {showSso && (
+                  {entry === 'admin' && ssoMode && (
                     <Form.Item style={{ marginBottom: 0 }}>
                       <Button block onClick={handleSso}>
-                        使用 ZITADEL 单点登录
+                        使用 ZITADEL 单点登录（管理员）
                       </Button>
                     </Form.Item>
                   )}
-                  {userSso && (
+                  {entry === 'user' && userSso && (
                     <Form.Item style={{ marginBottom: 0 }}>
                       <Button block loading={casdoorLoading} onClick={handleCasdoorSso}>
-                        使用 Casdoor 单点登录（工作台）
+                        使用 Casdoor 单点登录
                       </Button>
                     </Form.Item>
                   )}
