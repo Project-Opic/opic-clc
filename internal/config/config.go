@@ -59,7 +59,7 @@ var Config struct {
 		TaskQueue string `yaml:"task_queue"` // 默认 = CENTER_CODE（中心级隔离）
 	} `yaml:"workflow"`
 	CenterCode string `yaml:"center_code"` // 中心域码(小写,如 techbase/osec);隔离三件套的根
-	Metrics struct {
+	Metrics    struct {
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"metrics"`
 	Auth struct {
@@ -76,6 +76,17 @@ var Config struct {
 		AutoProvision    bool   `yaml:"auto_provision"`     // 按 userinfo 自动建用户并映射角色
 		DefaultRoleCodes string `yaml:"default_role_codes"` // 自动 provisioning 时授予的本地角色编码,逗号分隔
 	} `yaml:"auth"`
+	// 用户工作台 SSO（OPIC-SSO-01：工作台↔Casdoor；与控制台 ZITADEL 相互独立）
+	UserAuth struct {
+		Mode             string `yaml:"mode"` // local|casdoor
+		Issuer           string `yaml:"issuer"`
+		ClientID         string `yaml:"client_id"`
+		ClientSecret     string `yaml:"client_secret"`
+		RedirectURL      string `yaml:"redirect_url"`
+		RoleClaim        string `yaml:"role_claim"`
+		AutoProvision    bool   `yaml:"auto_provision"`
+		DefaultRoleCodes string `yaml:"default_role_codes"`
+	} `yaml:"user_auth"`
 	Ontology struct {
 		// ModelsDir 七模型 YAML 目录(默认随底座的 models/,可指向应用的 models/)
 		ModelsDir string `yaml:"models_dir"`
@@ -255,6 +266,21 @@ func applyEnvOverrides() {
 	}
 	if v := os.Getenv("CENTER_CODE"); v != "" {
 		Config.CenterCode = v
+	}
+	if v := os.Getenv("USER_AUTH_MODE"); v != "" {
+		Config.UserAuth.Mode = v
+	}
+	if v := os.Getenv("CASDOOR_ISSUER"); v != "" {
+		Config.UserAuth.Issuer = v
+	}
+	if v := os.Getenv("CASDOOR_CLIENT_ID"); v != "" {
+		Config.UserAuth.ClientID = v
+	}
+	if v := os.Getenv("CASDOOR_CLIENT_SECRET"); v != "" {
+		Config.UserAuth.ClientSecret = v
+	}
+	if v := os.Getenv("CASDOOR_REDIRECT_URL"); v != "" {
+		Config.UserAuth.RedirectURL = v
 	}
 	if v := os.Getenv("NATS_STREAM"); v != "" {
 		Config.EventBus.StreamName = v

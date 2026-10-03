@@ -30,6 +30,7 @@ export default function Login() {
   const dispatch = useDispatch<AppDispatch>()
   const [loading, setLoading] = useState(false)
   const [ssoMode, setSsoMode] = useState(false)
+  const [userSso, setUserSso] = useState(false) // OPIC-SSO-01:工作台 Casdoor SSO
   /** allow_local_login;null = /auth/mode 检测失败(兜底显示密码表单,维持旧行为) */
   const [localAllowed, setLocalAllowed] = useState<boolean | null>(null)
 
@@ -60,9 +61,11 @@ export default function Login() {
     }
     authApi
       .mode()
-      .then((r) => {
+      .then((r: any) => {
         setSsoMode(r.mode === 'zitadel')
         setLocalAllowed(!!r.allow_local_login)
+        // 工作台端（OPIC-SSO-01）：user.mode=casdoor → 显示 Casdoor SSO
+        if (r.user?.mode === 'casdoor') setUserSso(true)
       })
       .catch(() => {
         // 检测失败:维持旧行为,显示本地密码表单
@@ -77,6 +80,19 @@ export default function Login() {
       window.location.href = url
     } catch (err: any) {
       message.error(err.message || '跳转 ZITADEL 失败')
+    }
+  }
+
+  // 工作台 Casdoor SSO（OPIC-SSO-01）
+  const [casdoorLoading, setCasdoorLoading] = useState(false)
+  const handleCasdoorSso = async () => {
+    setCasdoorLoading(true)
+    try {
+      const r = await authApi.casdoorLoginUrl()
+      window.location.href = (r as { url: string }).url
+    } catch (err: any) {
+      setCasdoorLoading(false)
+      message.error(err.message || '跳转 Casdoor 失败')
     }
   }
 
@@ -184,9 +200,15 @@ export default function Login() {
                 <h2 className="brand-form-title">欢迎回来</h2>
                 <p className="brand-form-sub">请使用企业统一身份继续</p>
                 <div className="brand-form">
-                  <Button type="primary" block size="large" onClick={handleSso}>
-                    使用 ZITADEL 单点登录
-                  </Button>
+                  {userSso ? (
+                    <Button type="primary" block size="large" loading={casdoorLoading} onClick={handleCasdoorSso}>
+                      使用 Casdoor 单点登录
+                    </Button>
+                  ) : (
+                    <Button type="primary" block size="large" onClick={handleSso}>
+                      使用 ZITADEL 单点登录
+                    </Button>
+                  )}
                 </div>
               </>
             ) : (
@@ -220,6 +242,13 @@ export default function Login() {
                     <Form.Item style={{ marginBottom: 0 }}>
                       <Button block onClick={handleSso}>
                         使用 ZITADEL 单点登录
+                      </Button>
+                    </Form.Item>
+                  )}
+                  {userSso && (
+                    <Form.Item style={{ marginBottom: 0 }}>
+                      <Button block loading={casdoorLoading} onClick={handleCasdoorSso}>
+                        使用 Casdoor 单点登录（工作台）
                       </Button>
                     </Form.Item>
                   )}

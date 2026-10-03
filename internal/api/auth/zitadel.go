@@ -80,7 +80,7 @@ func ZitadelCallback(c *gin.Context) {
 	if username == "" {
 		username = ui.Sub
 	}
-	uid := ensureUserFromZitadel(ui)
+	uid := ensureUserFromOIDC(ui, config.Config.Auth.RoleClaim, config.Config.Auth.AutoProvision, config.Config.Auth.DefaultRoleCodes)
 	if uid == 0 {
 		c.JSON(200, errcode.New(errcode.ErrToken, "用户未注册且未开启自动 provisioning", nil))
 		return
@@ -101,7 +101,9 @@ func ZitadelCallback(c *gin.Context) {
 
 // ensureUserFromZitadel 按 userinfo 取/建本地用户(claim 角色 + 默认角色)。
 // 已存在用户且本次声明携带角色时,重新同步角色(ZITADEL 角色变更在下次登录生效)。
-func ensureUserFromZitadel(ui *auth.UserInfo) int64 {
+// ensureUserFromOIDC 按 userinfo 取/建本地用户（claim 角色 + 默认角色）——ZITADEL/Casdoor 共用。
+// 已存在用户且本次声明携带角色时,重新同步角色（IdP 角色变更在下次登录生效）。
+func ensureUserFromOIDC(ui *auth.UserInfo, roleClaim string, autoProvision bool, defaultRoleCodes string) int64 {
 	username := ui.PreferredUsername
 	if username == "" {
 		username = ui.Sub
@@ -114,8 +116,7 @@ func ensureUserFromZitadel(ui *auth.UserInfo) int64 {
 		}
 		return uid
 	}
-	cfg := config.Config.Auth
-	if !cfg.AutoProvision {
+	if !autoProvision {
 		return 0
 	}
 	uid, err := service.CreateUser(map[string]any{
@@ -145,7 +146,7 @@ func ensureUserFromZitadel(ui *auth.UserInfo) int64 {
 	}
 	// 默认角色兜底(仅新用户且声明未携带角色)
 	if len(roleIDs) == 0 {
-		for _, code := range splitCSV(cfg.DefaultRoleCodes) {
+		for _, code := range splitCSV(defaultRoleCodes) {
 			appendRole(code)
 		}
 	}

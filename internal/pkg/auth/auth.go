@@ -94,8 +94,28 @@ type OIDCDiscovery struct {
 }
 
 // Discover 拉取 OIDC 发现文档(5 分钟缓存)。
+// ScopeConf 单端 OIDC 配置（管理控制台=Auth/ZITADEL；用户工作台=UserAuth/Casdoor）。
+type ScopeConf struct {
+	Issuer      string
+	ClientID    string
+	ClientSecret string
+	RedirectURL string
+}
+
+// AdminConf 管理控制台端配置（ZITADEL）。
+func AdminConf() ScopeConf {
+	c := config.Config.Auth
+	return ScopeConf{Issuer: c.Issuer, ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURL: c.RedirectURL}
+}
+
+// Discover 按端配置做 OIDC 发现（5 分钟缓存，key=issuer）。
 func Discover(ctx context.Context) (*OIDCDiscovery, error) {
-	issuer := strings.TrimRight(config.Config.Auth.Issuer, "/")
+	return DiscoverWith(ctx, AdminConf())
+}
+
+// DiscoverWith 泛化发现。
+func DiscoverWith(ctx context.Context, sc ScopeConf) (*OIDCDiscovery, error) {
+	issuer := strings.TrimRight(sc.Issuer, "/")
 	cacheMu.Lock()
 	if cached != nil && time.Since(cachedAt) < 5*time.Minute && cached.issuer == issuer {
 		d := cached.discovery
@@ -137,11 +157,16 @@ var (
 
 // AuthorizeURL 构造 ZITADEL 授权地址(Authorization Code + PKCE)。
 func AuthorizeURL(state, codeChallenge string) (string, error) {
-	d, err := Discover(context.Background())
+	return AuthorizeURLWith(context.Background(), AdminConf(), state, codeChallenge)
+}
+
+// AuthorizeURLWith 泛化授权端点。
+func AuthorizeURLWith(_ context.Context, sc ScopeConf, state, codeChallenge string) (string, error) {
+	d, err := DiscoverWith(context.Background(), sc)
 	if err != nil {
 		return "", err
 	}
-	cfg := config.Config.Auth
+	cfg := sc
 	q := url.Values{}
 	q.Set("client_id", cfg.ClientID)
 	q.Set("redirect_uri", cfg.RedirectURL)
@@ -164,11 +189,16 @@ type TokenResult struct {
 
 // ExchangeCode 用授权码换 token(verifier 为 PKCE 码验证器,与 authorize 的 code_challenge 配对)。
 func ExchangeCode(ctx context.Context, code, verifier string) (*TokenResult, error) {
-	d, err := Discover(ctx)
+	return ExchangeCodeWith(ctx, AdminConf(), code, verifier)
+}
+
+// ExchangeCodeWith 泛化换码。
+func ExchangeCodeWith(ctx context.Context, sc ScopeConf, code, verifier string) (*TokenResult, error) {
+	d, err := DiscoverWith(ctx, sc)
 	if err != nil {
 		return nil, err
 	}
-	cfg := config.Config.Auth
+	cfg := sc
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -207,6 +237,11 @@ type UserInfo struct {
 
 // FetchUserinfo 调用 userinfo 端点。
 func FetchUserinfo(ctx context.Context, accessToken string) (*UserInfo, error) {
+	return FetchUserinfoWith(ctx, AdminConf(), accessToken)
+}
+
+// FetchUserinfoWith 泛化 userinfo。
+func FetchUserinfoWith(ctx context.Context, sc ScopeConf, accessToken string) (*UserInfo, error) {
 	d, err := Discover(ctx)
 	if err != nil {
 		return nil, err

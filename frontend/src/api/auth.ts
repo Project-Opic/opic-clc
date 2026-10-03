@@ -29,6 +29,9 @@ export interface LoginPayload {
 export type AuthInfo = Omit<LoginPayload, 'token'>
 
 export const authApi = {
+  casdoorLoginUrl() {
+    return http.get<{ url: string }>('/api/auth/casdoor/login-url')
+  },
   login(username: string, password: string) {
     return http.post<LoginPayload>('/api/auth/login', { username, password })
   },

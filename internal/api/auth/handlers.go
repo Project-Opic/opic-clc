@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
+	"gitcode.com/opic-ontology/opic-techbase/internal/config"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/auth"
 	"gitcode.com/opic-ontology/opic-techbase/internal/service"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
@@ -74,5 +75,16 @@ func Info(c *gin.Context) {
 func AuthMode(c *gin.Context) {
 	mode := authMode()
 	localAllowed := mode == "local" || allowLocalLogin()
-	c.JSON(200, errcode.OK(gin.H{"mode": mode, "allow_local_login": localAllowed}))
+	// 用户工作台端（OPIC-SSO-01：casdoor）
+	ua := config.Config.UserAuth
+	userMode := ua.Mode
+	if userMode == "" {
+		userMode = "local"
+	}
+	userLocalAllowed := userMode == "local"
+	c.JSON(200, errcode.OK(gin.H{
+		"mode": mode, "allow_local_login": localAllowed, // 兼容旧前端（管理控制台端）
+		"admin": gin.H{"mode": mode, "allow_local_login": localAllowed, "sso": mode == "zitadel"},
+		"user":  gin.H{"mode": userMode, "allow_local_login": userLocalAllowed, "sso": userMode == "casdoor"},
+	}))
 }
