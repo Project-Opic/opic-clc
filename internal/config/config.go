@@ -270,6 +270,15 @@ func applyEnvOverrides() {
 	if v := os.Getenv("USER_AUTH_MODE"); v != "" {
 		Config.UserAuth.Mode = v
 	}
+	if v := os.Getenv("USER_AUTH_ROLE_CLAIM"); v != "" {
+		Config.UserAuth.RoleClaim = v
+	}
+	if v := os.Getenv("USER_AUTH_AUTO_PROVISION"); v != "" {
+		Config.UserAuth.AutoProvision = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("USER_AUTH_DEFAULT_ROLE_CODES"); v != "" {
+		Config.UserAuth.DefaultRoleCodes = v
+	}
 	if v := os.Getenv("CASDOOR_ISSUER"); v != "" {
 		Config.UserAuth.Issuer = v
 	}

@@ -242,7 +242,9 @@ func FetchUserinfo(ctx context.Context, accessToken string) (*UserInfo, error) {
 
 // FetchUserinfoWith 泛化 userinfo。
 func FetchUserinfoWith(ctx context.Context, sc ScopeConf, accessToken string) (*UserInfo, error) {
-	d, err := Discover(ctx)
+	// 必须用 sc 对应的 discovery(修复:原先误用默认 AdminConf 的 discovery,
+	// 导致 Casdoor token 被打到 ZITADEL 的 userinfo 端点而 401)
+	d, err := DiscoverWith(ctx, sc)
 	if err != nil {
 		return nil, err
 	}
@@ -257,13 +259,22 @@ func FetchUserinfoWith(ctx context.Context, sc ScopeConf, accessToken string) (*
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	// IdP 的 userinfo 失败时也会返回 200+{"error":...}(或 401),必须显式透出,
+	// 否则会被静默解析成"空用户"难排查(2026-10-03 Casdoor 实测坑)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("userinfo 请求失败(%d): %s", resp.StatusCode, string(raw))
+	}
+	var probe map[string]any
+	_ = json.Unmarshal(raw, &probe)
+	if e, _ := probe["error"].(string); e != "" {
+		desc, _ := probe["error_description"].(string)
+		return nil, fmt.Errorf("userinfo 返回错误: %s: %s", e, desc)
+	}
 	var ui UserInfo
 	if err := json.Unmarshal(raw, &ui); err != nil {
 		return nil, fmt.Errorf("userinfo 解析失败: %w", err)
 	}
-	var everything map[string]any
-	_ = json.Unmarshal(raw, &everything)
-	ui.Everything = everything
+	ui.Everything = probe
 	return &ui, nil
 }
 

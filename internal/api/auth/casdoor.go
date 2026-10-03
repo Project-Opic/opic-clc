@@ -7,6 +7,7 @@
 package auth
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -55,13 +56,16 @@ func CasdoorCallback(c *gin.Context) {
 		c.JSON(http.StatusOK, errcode.New(errcode.ErrToken, err.Error(), nil))
 		return
 	}
-	username := ui.PreferredUsername
-	if username == "" {
-		username = ui.Sub
-	}
+	username := oidcUsername(ui)
 	uid := ensureUserFromOIDC(ui, config.Config.UserAuth.RoleClaim,
 		config.Config.UserAuth.AutoProvision, config.Config.UserAuth.DefaultRoleCodes)
 	if uid == 0 {
+		keys := make([]string, 0, len(ui.Everything))
+		for k := range ui.Everything {
+			keys = append(keys, k)
+		}
+		log.Printf("[casdoor-callback] 用户定位失败 username=%q sub=%q preferred=%q claims=%v auto_provision=%v",
+			username, ui.Sub, ui.PreferredUsername, keys, config.Config.UserAuth.AutoProvision)
 		c.JSON(http.StatusOK, errcode.New(errcode.ErrToken, "用户未注册且未开启自动 provisioning", nil))
 		return
 	}

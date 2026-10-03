@@ -76,10 +76,7 @@ func ZitadelCallback(c *gin.Context) {
 		c.JSON(200, errcode.New(errcode.ErrToken, err.Error(), nil))
 		return
 	}
-	username := ui.PreferredUsername
-	if username == "" {
-		username = ui.Sub
-	}
+	username := oidcUsername(ui)
 	uid := ensureUserFromOIDC(ui, config.Config.Auth.RoleClaim, config.Config.Auth.AutoProvision, config.Config.Auth.DefaultRoleCodes)
 	if uid == 0 {
 		c.JSON(200, errcode.New(errcode.ErrToken, "用户未注册且未开启自动 provisioning", nil))
@@ -101,13 +98,37 @@ func ZitadelCallback(c *gin.Context) {
 
 // ensureUserFromZitadel 按 userinfo 取/建本地用户(claim 角色 + 默认角色)。
 // 已存在用户且本次声明携带角色时,重新同步角色(ZITADEL 角色变更在下次登录生效)。
+// oidcUsername 从 userinfo 提取本地用户名(多级兜底)。
+// Casdoor 的 sub 是 "owner/name" 形态且 preferred_username 可能缺失,
+// 依次取:preferred_username → name → email 本地段 → sub 的 name 段。
+func oidcUsername(ui *auth.UserInfo) string {
+	if s := strings.TrimSpace(ui.PreferredUsername); s != "" && !strings.Contains(s, "/") {
+		return s
+	}
+	if v, ok := ui.Everything["name"].(string); ok {
+		if s := strings.TrimSpace(v); s != "" && !strings.Contains(s, "/") {
+			return s
+		}
+	}
+	if v, ok := ui.Everything["email"].(string); ok {
+		if s := strings.TrimSpace(v); strings.Contains(s, "@") {
+			if lp := strings.SplitN(s, "@", 2)[0]; lp != "" {
+				return lp
+			}
+		}
+	}
+	if s := strings.TrimSpace(ui.Sub); strings.Contains(s, "/") {
+		if seg := strings.SplitN(s, "/", 2)[1]; seg != "" {
+			return seg
+		}
+	}
+	return strings.TrimSpace(ui.Sub)
+}
+
 // ensureUserFromOIDC 按 userinfo 取/建本地用户（claim 角色 + 默认角色）——ZITADEL/Casdoor 共用。
 // 已存在用户且本次声明携带角色时,重新同步角色（IdP 角色变更在下次登录生效）。
 func ensureUserFromOIDC(ui *auth.UserInfo, roleClaim string, autoProvision bool, defaultRoleCodes string) int64 {
-	username := ui.PreferredUsername
-	if username == "" {
-		username = ui.Sub
-	}
+	username := oidcUsername(ui)
 	claimRoles := auth.RoleClaims(ui)
 	if user, err := service.GetUserByUsername(username); err == nil && user != nil {
 		uid := service.Int(user["id"])
