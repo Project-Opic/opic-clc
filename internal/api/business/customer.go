@@ -2,6 +2,8 @@
 package business
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
@@ -62,6 +64,8 @@ func CustomerSubmit(c *gin.Context) {
 		common.FailJSON(c, err)
 		return
 	}
+	u := common.UserOf(c)
+	service.WriteAudit(nil, u.ID, u.Username, "SUBMIT", fmt.Sprintf("提交客户申请 #%d %s", common.PathID(c, "id"), service.Str(row["customer_no"])))
 	common.OKJSON(c, row, "提交成功")
 }
 

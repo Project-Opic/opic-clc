@@ -1,6 +1,8 @@
 package business
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
@@ -50,6 +52,8 @@ func WorkbenchApprove(c *gin.Context) {
 		common.FailJSON(c, err)
 		return
 	}
+	u := common.UserOf(c)
+	service.WriteAudit(nil, u.ID, u.Username, "APPROVE", fmt.Sprintf("审批任务 #%d %s", common.PathID(c, "id"), service.Str(body["comment"])))
 	common.OKJSON(c, out, "审批通过")
 }
 
@@ -61,6 +65,8 @@ func WorkbenchReject(c *gin.Context) {
 		common.FailJSON(c, err)
 		return
 	}
+	u := common.UserOf(c)
+	service.WriteAudit(nil, u.ID, u.Username, "REJECT", fmt.Sprintf("驳回任务 #%d %s", common.PathID(c, "id"), service.Str(body["comment"])))
 	common.OKJSON(c, out, "已驳回")
 }
 
@@ -73,5 +79,7 @@ func WorkbenchReturn(c *gin.Context) {
 		common.FailJSON(c, err)
 		return
 	}
+	u := common.UserOf(c)
+	service.WriteAudit(nil, u.ID, u.Username, "RETURN", fmt.Sprintf("退回任务 #%d %s", common.PathID(c, "id"), service.Str(body["comment"])))
 	common.OKJSON(c, out, "已退回")
 }

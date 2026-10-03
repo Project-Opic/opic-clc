@@ -23,6 +23,7 @@ import (
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/expr"
+	"gitcode.com/opic-ontology/opic-techbase/internal/service"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/llmcfg"
@@ -358,6 +359,15 @@ func taskAct(c *gin.Context, action string) {
 		common.FailJSON(c, err)
 		return
 	}
+	// 业务审计(审计日志页数据源)
+	uid, uname := int64(0), operator
+	if v, ok := c.Get("userID"); ok {
+		if n, ok2 := v.(int64); ok2 {
+			uid = n
+		}
+	}
+	_ = uname
+	service.WriteAudit(nil, uid, operator, action, fmt.Sprintf("Temporal 审批任务 #%d %s", id, body.Comment))
 	common.OKJSON(c, gin.H{"signaled": true, "task_id": id, "action": action}, "已提交")
 }
 

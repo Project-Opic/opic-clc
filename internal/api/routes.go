@@ -71,7 +71,7 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/flow/tasks", flow.TaskList)
 
 		// ---- 管理控制台补齐(gopherforge 基准):日志审计/在线用户/公告/错误码/系统监控 ----
-		admin := api.Group("/admin", middleware.LoginRequired())
+		admin := api.Group("/admin", middleware.LoginRequired(), middleware.OperationAudit())
 		{
 			g := admin.Group("", middleware.RequirePermission("system:manage"))
 			adminconsole.RegisterTemporalFlow(g)
