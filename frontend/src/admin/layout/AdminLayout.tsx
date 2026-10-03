@@ -4,8 +4,9 @@
 // 主题作用域:[data-glass][data-theme] 已统一挂在 App 根节点(见 App.tsx)并镜像到 body,
 // 控制台不再重复挂载;antd 双主题通过 GlassConfigProvider 子树注入。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Layout, Menu, Avatar, Dropdown, Space, Breadcrumb } from 'antd'
+import {FloatButton,  Layout, Menu, Avatar, Dropdown, Space, Breadcrumb } from 'antd'
 import type { MenuProps } from 'antd'
+import AIAssistantPanel from '../../components/AIAssistantPanel'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {SunOutlined,MoonOutlined,UserOutlined,DashboardOutlined,TeamOutlined,SafetyOutlined,ApartmentOutlined,DesktopOutlined,SolutionOutlined,PartitionOutlined,CloudServerOutlined,WarningOutlined,ToolOutlined,MenuFoldOutlined,MenuUnfoldOutlined,NotificationOutlined,ControlOutlined,CheckSquareOutlined,FileTextOutlined,FolderOutlined,HomeOutlined,LoginOutlined,LogoutOutlined,MonitorOutlined,RobotOutlined,SwapOutlined} from '@ant-design/icons'
 import { useSelector } from 'react-redux'
@@ -124,6 +125,7 @@ function ConsoleShell() {
   const location = useLocation()
   const { mode, toggle: toggleTheme } = useThemeMode()
   const [collapsed, setCollapsed] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
@@ -304,6 +306,15 @@ function ConsoleShell() {
           </div>
         </Content>
       </Layout>
+      {/* AI 智能助理（OPIC-SSO-01/模型配置：双端可用） */}
+      <FloatButton
+        icon={<RobotOutlined />}
+        type="primary"
+        style={{ right: 24, bottom: 24, width: 44, height: 44 }}
+        tooltip="AI 智能助理"
+        onClick={() => setAiOpen(true)}
+      />
+      <AIAssistantPanel open={aiOpen} onClose={() => setAiOpen(false)} />
     </Layout>
   )
 }

@@ -54,7 +54,7 @@ export default function AIModelConfigPage() {
         用户工作台与管理控制台的 AI 智能助理共用此配置（OpenAI 兼容协议：deepseek/qwen/vllm 等）。
         未启用时 AI 助理降级为内置规则问答。
       </p>
-      <Form form={form} layout="vertical" initialValues={{ provider: 'openai', temperature: 0.3 }}>
+      <Form form={form} layout="vertical" initialValues={{ provider: 'openai', temperature: 0 }}>
         <Form.Item name="provider" label="协议类型" rules={[{ required: true }]}>
           <Select
             options={[
@@ -75,7 +75,11 @@ export default function AIModelConfigPage() {
         >
           <Input.Password placeholder={hasKey ? '••••••（已保存）' : 'sk-...'} autoComplete="new-password" />
         </Form.Item>
-        <Form.Item name="temperature" label="Temperature">
+        <Form.Item
+          name="temperature"
+          label="Temperature（0=使用模型默认；部分模型如 kimi-for-coding 仅允许默认温度）"
+          initialValue={0}
+        >
           <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item name="enabled" label="启用 LLM" valuePropName="checked" extra="关闭时 AI 助理降级为内置规则问答">

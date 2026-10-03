@@ -608,3 +608,61 @@
     animation: none !important;
   }
 }
+
+/* ── 亮色主题（用户规则 2026-10-03：登录页白底蓝字亮色）────────────────────
+   [data-theme='light'] 时覆盖品牌页暗色样式；暗色主题行为不变。 */
+[data-theme='light'] .brand-page {
+  background: #f4f8ff;
+}
+[data-theme='light'] .brand-page::before,
+[data-theme='light'] .brand-grid {
+  display: none;
+}
+[data-theme='light'] .brand-aurora-1 {
+  background: radial-gradient(circle at 30% 30%, #bfdbfe 0%, transparent 60%);
+  opacity: 0.9;
+}
+[data-theme='light'] .brand-aurora-2 {
+  background: radial-gradient(circle at 70% 40%, #dbeafe 0%, transparent 55%);
+  opacity: 0.9;
+}
+[data-theme='light'] .brand-aurora-3 {
+  background: radial-gradient(circle at 55% 70%, #e0eaff 0%, transparent 60%);
+  opacity: 0.9;
+}
+[data-theme='light'] .brand-shell {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e3ecfa;
+  box-shadow: 0 8px 40px rgba(34, 102, 227, 0.12);
+}
+[data-theme='light'] .brand-logo-name,
+[data-theme='light'] .brand-headline,
+[data-theme='light'] .brand-form-title {
+  color: #1a56c4;
+}
+[data-theme='light'] .brand-headline em,
+[data-theme='light'] .brand-subline {
+  color: #2266e3;
+}
+[data-theme='light'] .brand-subline,
+[data-theme='light'] .brand-feature-icon,
+[data-theme='light'] .brand-features li {
+  color: #4a6fa5;
+}
+[data-theme='light'] .brand-feature-icon {
+  background: #e8f1ff;
+  border: 1px solid #cfe0fb;
+}
+[data-theme='light'] .brand-form-side {
+  background: rgba(255, 255, 255, 0.96);
+  border-left: 1px solid #eef3fb;
+}
+[data-theme='light'] .brand-form input,
+[data-theme='light'] .brand-form textarea {
+  background: #fff;
+  border: 1px solid #d9e4f5;
+  color: #1f2d4d;
+}
+[data-theme='light'] .brand-footer {
+  color: #9ab0d0;
+}

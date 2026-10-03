@@ -25,9 +25,12 @@ func Chat(ctx context.Context, cfg *Config, messages []Message) (string, error) 
 		return "", ErrDisabled
 	}
 	body := map[string]any{
-		"model":       cfg.Model,
-		"messages":    messages,
-		"temperature": cfg.Temperature,
+		"model":    cfg.Model,
+		"messages": messages,
+	}
+	// temperature 仅在 >0 时发送（部分模型如 kimi-for-coding 只允许默认温度，0.3 会被拒）
+	if cfg.Temperature > 0 {
+		body["temperature"] = cfg.Temperature
 	}
 	b, _ := json.Marshal(body)
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
