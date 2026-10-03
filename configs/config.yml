@@ -29,22 +29,29 @@ redis:
   password: ""
   db: 0
 
+# ── 中心标识（隔离三件套的根，OPIC-TECH-01 v1.1）──────────────────────────────
+# fork 后改为本中心域码（小写，如 osec）——picdb schema/Temporal TaskQueue/NATS stream+主题全部随之隔离
+center_code: techbase
+
 # 事件总线(step1 NATS JetStream;容器网 nats:4222 / 宿主 14222;口令见生产 .env)
 # driver=inproc 为零依赖默认(开发/降级);生产切 nats
+# stream_name/subject_prefix 留空 = 按 center_code 派生（OPIC_<CODE> / opic.<code>.>）
 eventbus:
   driver: inproc
   url: nats://192.168.3.200:14222
   username: opic
   password: ""
-  stream_name: OPIC
+  stream_name: ""
+  subject_prefix: ""
   max_age_days: 7
 
 # 工作流(step1 Temporal;容器网 temporal:7233 / 宿主 7233;业务命名空间 opic)
-# driver=local 为零依赖默认;生产切 temporal
+# driver=local 为零依赖默认;生产切 temporal;task_queue 留空 = center_code
 workflow:
   driver: local
   address: 192.168.3.200:7233
   namespace: opic
+  task_queue: ""
 
 # Prometheus 指标(/metrics;env METRICS_ENABLED 可覆盖)
 metrics:

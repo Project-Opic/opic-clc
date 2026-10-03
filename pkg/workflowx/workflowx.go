@@ -64,6 +64,7 @@ type Options struct {
 	Driver    string // local | temporal
 	Address   string // temporal frontend（host:port）
 	Namespace string // 默认 opic
+	TaskQueue string // 默认 = CENTER_CODE（中心级隔离）
 }
 
 var ErrNotFound = errors.New("workflowx: 执行不存在")

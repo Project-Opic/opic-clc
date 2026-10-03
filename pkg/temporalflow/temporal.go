@@ -2,6 +2,7 @@ package temporalflow
 
 import (
 	"context"
+	"strings"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -103,7 +104,7 @@ func (t *TemporalExecutor) CompleteHumanTask(_ context.Context, ref HumanTaskRef
 
 // EmitSLAExceeded SLA 事件。
 func (t *TemporalExecutor) EmitSLAExceeded(_ context.Context, payload map[string]any) error {
-	return t.Emit(context.Background(), "opic.techbase.flow.sla.exceeded", payload)
+	return t.Emit(context.Background(), TopicPrefix()+".flow.sla.exceeded", payload)
 }
 
 // EmitCustom EMIT 节点：向任意主题发事件。
@@ -170,7 +171,7 @@ func EmitEventActivity(topic string, payload json.RawMessage) error {
 		URL:        envOr("EVENTBUS_URL", "nats://opic-nats:4222"),
 		Username:   envOr("EVENTBUS_USERNAME", "opic"),
 		Password:   envOr("EVENTBUS_PASSWORD", ""),
-		StreamName: "OPIC",
+		StreamName: streamOrCenter(),
 	})
 	if err != nil {
 		return err
@@ -199,9 +200,16 @@ func StartInterpreter(address, namespace string, in RunInput) (runID string, err
 	defer c.Close()
 	wctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	tq := os.Getenv("WORKFLOW_TASK_QUEUE")
+	if tq == "" {
+		tq = os.Getenv("CENTER_CODE")
+	}
+	if tq == "" {
+		tq = "techbase"
+	}
 	co := client.StartWorkflowOptions{
 		ID:                       fmt.Sprintf("temporalflow-%s-%s", in.Code, in.RunID),
-		TaskQueue:                "techbase",
+		TaskQueue:                tq,
 		WorkflowExecutionTimeout: 24 * time.Hour,
 	}
 	run, err := c.ExecuteWorkflow(wctx, co, TemporalInterpreterWorkflow, in)
@@ -228,4 +236,26 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// streamOrCenter stream 名中心化：NATS_STREAM 优先，否则 OPIC_<CENTER_CODE>。
+func streamOrCenter() string {
+	if v := os.Getenv("NATS_STREAM"); v != "" {
+		return v
+	}
+	if cc := os.Getenv("CENTER_CODE"); cc != "" {
+		return "OPIC_" + strings.ToUpper(cc)
+	}
+	return "OPIC"
+}
+
+// TopicPrefix 事件主题前缀中心化：opic.<CENTER_CODE>.<...>（默认 techbase 兼容存量）。
+func TopicPrefix() string {
+	if v := os.Getenv("NATS_SUBJECT_PREFIX"); v != "" {
+		return strings.TrimSuffix(v, ".")
+	}
+	if cc := os.Getenv("CENTER_CODE"); cc != "" {
+		return "opic." + cc
+	}
+	return "opic.techbase"
 }

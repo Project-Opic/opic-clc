@@ -60,7 +60,7 @@ func (e *Engine) watchCreatedTasks(instanceID int64) {
 			e.startGuardian(instanceID, taskID, title)
 		}
 		if e.EB != nil {
-			e.publish(TopicTaskCreated, map[string]any{"instance_id": instanceID, "task_id": taskID, "task_title": title})
+			e.publish(TopicTaskCreated(), map[string]any{"instance_id": instanceID, "task_id": taskID, "task_title": title})
 		}
 	}
 }
@@ -209,7 +209,7 @@ func (e *Engine) Start(defID int64, businessKey string, businessObjectRefs []any
 		return 0, err
 	}
 	// ── step1 接线：实例启动事件 + 任务 SLA 看护（旁路，失败不回滚审批）──
-	e.publish(TopicInstanceStarted, map[string]any{
+	e.publish(TopicInstanceStarted(), map[string]any{
 		"instance_id": instID, "def_id": defID, "business_key": businessKey, "creator_id": creatorID,
 	})
 	e.watchCreatedTasks(instID)

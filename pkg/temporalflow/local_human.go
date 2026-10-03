@@ -48,7 +48,7 @@ func (l *LocalExecutor) CompleteHumanTask(_ context.Context, ref HumanTaskRef, o
 }
 
 func (l *LocalExecutor) EmitSLAExceeded(ctx context.Context, payload map[string]any) error {
-	return l.Emit(ctx, TopicSLAExceeded, payload)
+	return l.Emit(ctx, TopicSLAExceeded(), payload)
 }
 
 // ApproveLocalTask 测试辅助：向内存任务投递审批结果。

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/eventbus"
@@ -61,7 +63,7 @@ func TFCreateHumanTask(ctx context.Context, in TFCreateHumanTaskInput) (map[stri
 	}
 	if eb := tfEventbus(); eb != nil {
 		if b, err := json.Marshal(out); err == nil {
-			_ = eb.Publish(ctx, "opic.techbase.flow.task.created", b)
+			_ = eb.Publish(ctx, tfTopic("flow.task.created"), b)
 		}
 	}
 	return out, nil
@@ -90,7 +92,7 @@ func TFEmitSLAExceededActivity(ctx context.Context, in map[string]any) error {
 	}
 	if eb := tfEventbus(); eb != nil {
 		if b, err := json.Marshal(in); err == nil {
-			_ = eb.Publish(ctx, "opic.techbase.flow.sla.exceeded", b)
+			_ = eb.Publish(ctx, tfTopic("flow.sla.exceeded"), b)
 		}
 	}
 	return nil
@@ -148,11 +150,40 @@ func TFLoadDefGraphByCode(_ context.Context, code string) (string, error) {
 
 // ── 内部 ──
 
+// tfTopic 事件主题中心化：opic.<CENTER_CODE>.<suffix>。
+func tfTopic(suffix string) string {
+	cc := os.Getenv("CENTER_CODE")
+	if cc == "" {
+		cc = "techbase"
+	}
+	return "opic." + cc + "." + suffix
+}
+
+// streamOrCenter stream 名中心化。
+func streamOrCenter() string {
+	if v := os.Getenv("NATS_STREAM"); v != "" {
+		return v
+	}
+	if cc := os.Getenv("CENTER_CODE"); cc != "" {
+		return "OPIC_" + strings.ToUpper(cc)
+	}
+	return "OPIC"
+}
+
 func tfEventbus() eventbus.EventBus {
+	cc := os.Getenv("CENTER_CODE")
+	if cc == "" {
+		cc = "techbase"
+	}
+	subjects := []string{"opic." + cc + ".>"}
+	if p := os.Getenv("NATS_SUBJECT_PREFIX"); p != "" {
+		subjects = []string{strings.TrimSuffix(p, ".") + ".>"}
+	}
+	// Subjects 必须与主连接建 stream 时一致——不一致会 10058（stream already in use）
 	eb, err := eventbus.New(eventbus.Options{
 		Driver: "nats", URL: envOrInf("EVENTBUS_URL", "nats://opic-nats:4222"),
 		Username: envOrInf("EVENTBUS_USERNAME", "opic"), Password: envOrInf("EVENTBUS_PASSWORD", ""),
-		StreamName: "OPIC",
+		StreamName: streamOrCenter(), Subjects: subjects,
 	})
 	if err != nil {
 		log.Printf("[infra] tf 活动事件发布降级: %v", err)

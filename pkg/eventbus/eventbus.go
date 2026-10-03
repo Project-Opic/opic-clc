@@ -49,7 +49,8 @@ type Options struct {
 	Username string
 	Password string
 	// NATS JetStream 参数
-	StreamName  string // 默认 OPIC
+	StreamName  string // 默认 OPIC_<CenterCode>（中心级隔离，经 internal/config 派生）
+	Subjects    []string // stream 捕获的主题域，默认 ["opic.<CenterCode>.>"]
 	MaxAgeDays  int    // 事件保留天数，默认 7
 	ConnectWait time.Duration
 }

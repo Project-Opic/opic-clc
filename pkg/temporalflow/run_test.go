@@ -15,7 +15,7 @@ func contractRun(t *testing.T, dsl string, vars map[string]any) ([]eventbus.Mess
 	t.Helper()
 	eb := eventbus.NewInproc()
 	got := make(chan eventbus.Message, 32)
-	for _, topic := range []string{TopicStepStarted, TopicStepCompleted, TopicRunCompleted} {
+	for _, topic := range []string{TopicStepStarted(), TopicStepCompleted(), TopicRunCompleted()} {
 		topic := topic
 		if _, err := eb.Subscribe(context.Background(), topic, "ct-"+topic, func(_ context.Context, m eventbus.Message) error {
 			got <- m
@@ -56,7 +56,7 @@ func TestSequentialSteps(t *testing.T) {
 	for _, m := range msgs {
 		topics[m.Subject]++
 	}
-	if topics[TopicStepStarted] != 2 || topics[TopicStepCompleted] != 2 || topics[TopicRunCompleted] != 1 {
+	if topics[TopicStepStarted()] != 2 || topics[TopicStepCompleted()] != 2 || topics[TopicRunCompleted()] != 1 {
 		t.Fatalf("事件计数不符: %v", topics)
 	}
 }

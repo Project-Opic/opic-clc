@@ -11,12 +11,11 @@ import (
 )
 
 // 事件主题（step 执行轨迹进事件总线，供观测/审计/联动）。
-const (
-	TopicSLAExceeded   = "opic.techbase.flow.sla.exceeded"
-	TopicStepStarted   = "opic.techbase.temporalflow.step.started"
-	TopicStepCompleted = "opic.techbase.temporalflow.step.completed"
-	TopicRunCompleted  = "opic.techbase.temporalflow.run.completed"
-)
+// 事件主题按 CENTER_CODE 派生（中心级隔离；默认前缀 opic.techbase 兼容存量）。
+func TopicSLAExceeded() string   { return TopicPrefix() + ".flow.sla.exceeded" }
+func TopicStepStarted() string   { return TopicPrefix() + ".temporalflow.step.started" }
+func TopicStepCompleted() string { return TopicPrefix() + ".temporalflow.step.completed" }
+func TopicRunCompleted() string  { return TopicPrefix() + ".temporalflow.run.completed" }
 
 // RunInput 解释器工作流输入（Start 时经 StartOptions.Input 传入）。
 type RunInput struct {
@@ -91,7 +90,7 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 			if res.Outcome == "" {
 				res.Outcome = "APPROVED"
 			}
-			_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
+			_ = ex.Emit(ctx, TopicRunCompleted(), map[string]any{
 				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
 				"steps": res.Steps, "outcome": res.Outcome,
 			})
@@ -101,17 +100,17 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 			if sec <= 0 {
 				sec = 1
 			}
-			if err := ex.Emit(ctx, TopicStepStarted, stepPayload(in, n, res.Steps)); err != nil {
+			if err := ex.Emit(ctx, TopicStepStarted(), stepPayload(in, n, res.Steps)); err != nil {
 				return res, err
 			}
 			if err := ex.Sleep(ctx, time.Duration(sec)*time.Second); err != nil {
 				return res, err
 			}
-			_ = ex.Emit(ctx, TopicStepCompleted, stepPayload(in, n, res.Steps))
+			_ = ex.Emit(ctx, TopicStepCompleted(), stepPayload(in, n, res.Steps))
 		case NodeStep:
 			name, _ := n["name"].(string)
 			webhook, _ := n["webhook_url"].(string)
-			if err := ex.Emit(ctx, TopicStepStarted, stepPayload(in, n, res.Steps)); err != nil {
+			if err := ex.Emit(ctx, TopicStepStarted(), stepPayload(in, n, res.Steps)); err != nil {
 				return res, err
 			}
 			if webhook != "" {
@@ -121,7 +120,7 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 					return res, fmt.Errorf("step %s webhook 失败: %w", name, err)
 				}
 			}
-			_ = ex.Emit(ctx, TopicStepCompleted, stepPayload(in, n, res.Steps))
+			_ = ex.Emit(ctx, TopicStepCompleted(), stepPayload(in, n, res.Steps))
 		case NodeCondition:
 			// 条件节点零副作用：只求值选路（确定性——expr 纯函数 + vars 为工作流参数）
 		case NodeHuman:
@@ -146,7 +145,7 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 				}
 				res.Finished = true
 				res.Outcome = "REJECTED"
-				_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
+				_ = ex.Emit(ctx, TopicRunCompleted(), map[string]any{
 					"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
 					"steps": res.Steps, "outcome": "REJECTED",
 				})
@@ -204,7 +203,7 @@ func Run(ctx context.Context, g *Graph, in RunInput, ex StepExecutor) (*RunResul
 			if res.Outcome == "" {
 				res.Outcome = "APPROVED"
 			}
-			_ = ex.Emit(ctx, TopicRunCompleted, map[string]any{
+			_ = ex.Emit(ctx, TopicRunCompleted(), map[string]any{
 				"run_id": in.RunID, "def_id": in.DefID, "code": in.Code,
 				"steps": res.Steps, "outcome": res.Outcome,
 			})

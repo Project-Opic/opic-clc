@@ -6,6 +6,7 @@
 package infra
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -30,9 +31,17 @@ func Init() {
 	defer mu.Unlock()
 	if eb == nil {
 		c := config.Config.EventBus
+		streamName := c.StreamName
+		if streamName == "" {
+			streamName = "OPIC_" + strings.ToUpper(config.Config.CenterCode)
+		}
+		subjects := []string{fmt.Sprintf("opic.%s.>", config.Config.CenterCode)}
+		if c.SubjectPrefix != "" {
+			subjects = []string{strings.TrimSuffix(c.SubjectPrefix, ".") + ".>"}
+		}
 		client, err := eventbus.New(eventbus.Options{
 			Driver: c.Driver, URL: c.URL, Username: c.Username, Password: c.Password,
-			StreamName: c.StreamName, MaxAgeDays: c.MaxAgeDays,
+			StreamName: streamName, Subjects: subjects, MaxAgeDays: c.MaxAgeDays,
 		})
 		if err != nil {
 			log.Printf("[infra] eventbus(%s) 初始化失败，事件发布降级为无: %v", c.Driver, err)
@@ -43,7 +52,11 @@ func Init() {
 	}
 	if wf == nil {
 		c := config.Config.Workflow
-		client, err := workflowx.New(workflowx.Options{Driver: c.Driver, Address: c.Address, Namespace: c.Namespace})
+		tq := c.TaskQueue
+		if tq == "" {
+			tq = config.Config.CenterCode
+		}
+		client, err := workflowx.New(workflowx.Options{Driver: c.Driver, Address: c.Address, Namespace: c.Namespace, TaskQueue: tq})
 		if err != nil {
 			log.Printf("[infra] workflow(%s) 初始化失败，看护降级为无: %v", c.Driver, err)
 		} else {
@@ -89,7 +102,11 @@ func Close() {
 
 // NewTemporalWorker 构造 flowGuardian 的 temporal worker 运行句柄。
 func NewTemporalWorker(address, namespace string) (WorkerRunner, error) {
-	return workflowx.NewWorkerRunner(workflowx.Options{Driver: "temporal", Address: address, Namespace: namespace}, "techbase")
+	tq := config.Config.Workflow.TaskQueue
+	if tq == "" {
+		tq = config.Config.CenterCode
+	}
+	return workflowx.NewWorkerRunner(workflowx.Options{Driver: "temporal", Address: address, Namespace: namespace, TaskQueue: tq}, tq)
 }
 
 // WorkerRunner worker 运行句柄（透传 workflowx）。

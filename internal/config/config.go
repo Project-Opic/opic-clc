@@ -44,18 +44,21 @@ var Config struct {
 		DB       int    `yaml:"db"`
 	} `yaml:"redis"`
 	EventBus struct {
-		Driver     string `yaml:"driver"` // inproc|nats
-		URL        string `yaml:"url"`    // nats://host:port
-		Username   string `yaml:"username"`
-		Password   string `yaml:"password"`
-		StreamName string `yaml:"stream_name"`  // JetStream stream,默认 OPIC
-		MaxAgeDays int    `yaml:"max_age_days"` // 事件保留天数,默认 7
+		Driver        string `yaml:"driver"` // inproc|nats
+		URL           string `yaml:"url"`    // nats://host:port
+		Username      string `yaml:"username"`
+		Password      string `yaml:"password"`
+		StreamName    string `yaml:"stream_name"`    // JetStream stream,默认 OPIC_<CENTER_CODE>（中心级隔离）
+		SubjectPrefix string `yaml:"subject_prefix"` // 主题域,默认 opic.<CENTER_CODE>（fork 后按中心隔离）
+		MaxAgeDays    int    `yaml:"max_age_days"`   // 事件保留天数,默认 7
 	} `yaml:"eventbus"`
 	Workflow struct {
-		Driver    string `yaml:"driver"`    // local|temporal
-		Address   string `yaml:"address"`   // temporal frontend host:port
-		Namespace string `yaml:"namespace"` // 默认 opic
+		Driver    string `yaml:"driver"`     // local|temporal
+		Address   string `yaml:"address"`    // temporal frontend host:port
+		Namespace string `yaml:"namespace"`  // 默认 opic（中心级隔离可切独立 ns）
+		TaskQueue string `yaml:"task_queue"` // 默认 = CENTER_CODE（中心级隔离）
 	} `yaml:"workflow"`
+	CenterCode string `yaml:"center_code"` // 中心域码(小写,如 techbase/osec);隔离三件套的根
 	Metrics struct {
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"metrics"`
@@ -161,6 +164,9 @@ func applyDefaults() {
 	if Config.Database.DBName == "" {
 		Config.Database.DBName = "opicdb"
 	}
+	if Config.CenterCode == "" {
+		Config.CenterCode = "techbase"
+	}
 	if Config.Database.SSLMode == "" {
 		Config.Database.SSLMode = "disable"
 	}
@@ -243,6 +249,18 @@ func applyEnvOverrides() {
 	}
 	if v := os.Getenv("WORKFLOW_NAMESPACE"); v != "" {
 		Config.Workflow.Namespace = v
+	}
+	if v := os.Getenv("WORKFLOW_TASK_QUEUE"); v != "" {
+		Config.Workflow.TaskQueue = v
+	}
+	if v := os.Getenv("CENTER_CODE"); v != "" {
+		Config.CenterCode = v
+	}
+	if v := os.Getenv("NATS_STREAM"); v != "" {
+		Config.EventBus.StreamName = v
+	}
+	if v := os.Getenv("NATS_SUBJECT_PREFIX"); v != "" {
+		Config.EventBus.SubjectPrefix = v
 	}
 	if v := os.Getenv("DB_SSLMODE"); v != "" {
 		Config.Database.SSLMode = v

@@ -53,9 +53,13 @@ func NewNATS(opts Options) (EventBus, error) {
 		maxAge = 7 * 24 * time.Hour
 	}
 	// 主题域约定：OPIC 平台事件一律 opic.<域码>.<...>（避免 `>` 全捕获 JetStream 系统主题报 10052）
+	subjects := opts.Subjects
+	if len(subjects) == 0 {
+		subjects = []string{"opic.>"} // 兜底：未指定前缀时保持全平台捕获（兼容旧部署）
+	}
 	stream, err := js.CreateStream(context.Background(), jetstream.StreamConfig{
 		Name:      name,
-		Subjects:  []string{"opic.>"},
+		Subjects:  subjects,
 		Retention: jetstream.LimitsPolicy,
 		MaxAge:    maxAge,
 	})

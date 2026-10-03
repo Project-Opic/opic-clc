@@ -68,7 +68,7 @@ func (e *Engine) startGuardian(instanceID, taskID int64, title string) {
 			}
 			switch st.Status {
 			case workflowx.StatusDone:
-				e.publish(TopicSLAExceeded, map[string]any{
+				e.publish(TopicSLAExceeded(), map[string]any{
 					"instance_id": instanceID, "task_id": taskID,
 					"task_title": title, "sla_hours": e.SLAHours,
 				})

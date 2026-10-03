@@ -14,7 +14,7 @@ import (
 func TestFlowEventsPublish(t *testing.T) {
 	eb := eventbus.NewInproc()
 	got := make(chan eventbus.Message, 4)
-	for _, topic := range []string{TopicInstanceStarted, TopicTaskCreated, TopicInstanceDone, TopicSLAExceeded} {
+	for _, topic := range []string{TopicInstanceStarted(), TopicTaskCreated(), TopicInstanceDone(), TopicSLAExceeded()} {
 		topic := topic
 		if _, err := eb.Subscribe(context.Background(), topic, "t-"+topic, func(_ context.Context, m eventbus.Message) error {
 			got <- m
@@ -24,10 +24,10 @@ func TestFlowEventsPublish(t *testing.T) {
 		}
 	}
 	e := &Engine{EB: eb}
-	e.publish(TopicInstanceStarted, map[string]any{"instance_id": int64(7)})
+	e.publish(TopicInstanceStarted(), map[string]any{"instance_id": int64(7)})
 	select {
 	case m := <-got:
-		if m.Subject != TopicInstanceStarted {
+		if m.Subject != TopicInstanceStarted() {
 			t.Fatalf("主题不符: %s", m.Subject)
 		}
 		var p map[string]any
@@ -38,14 +38,14 @@ func TestFlowEventsPublish(t *testing.T) {
 		t.Fatal("未收到事件")
 	}
 	// nil EB 不 panic
-	(&Engine{}).publish(TopicTaskCreated, nil)
+	(&Engine{}).publish(TopicTaskCreated(), nil)
 }
 
 // TestGuardianLocalLifecycle local 看护：SLA 到期 → sla.exceeded 事件；取消 → 不事件化。
 func TestGuardianLocalLifecycle(t *testing.T) {
 	eb := eventbus.NewInproc()
 	slaGot := make(chan eventbus.Message, 4)
-	if _, err := eb.Subscribe(context.Background(), TopicSLAExceeded, "t-sla", func(_ context.Context, m eventbus.Message) error {
+	if _, err := eb.Subscribe(context.Background(), TopicSLAExceeded(), "t-sla", func(_ context.Context, m eventbus.Message) error {
 		slaGot <- m
 		return nil
 	}); err != nil {
@@ -87,5 +87,5 @@ func TestGuardianNilDeps(t *testing.T) {
 	e := &Engine{}
 	e.startGuardian(1, 1, "x")
 	e.cancelGuardian(1)
-	e.publish(TopicInstanceDone, nil)
+	e.publish(TopicInstanceDone(), nil)
 }

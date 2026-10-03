@@ -28,7 +28,10 @@ func NewTemporal(opts Options) (Client, error) {
 	if ns == "" {
 		ns = "opic"
 	}
-	tq := "techbase"
+	tq := opts.TaskQueue
+	if tq == "" {
+		tq = "techbase"
+	}
 	c, err := client.Dial(client.Options{
 		HostPort:  opts.Address,
 		Namespace: ns,
@@ -98,6 +101,9 @@ func NewWorkerRunner(opts Options, taskQueue string) (WorkerRunner, error) {
 	c, err := client.Dial(client.Options{HostPort: opts.Address, Namespace: ns})
 	if err != nil {
 		return nil, fmt.Errorf("workflowx: worker 连接失败: %w", err)
+	}
+	if taskQueue == "" {
+		taskQueue = opts.TaskQueue
 	}
 	if taskQueue == "" {
 		taskQueue = "techbase"
