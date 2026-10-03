@@ -62,10 +62,16 @@ func WorkbenchTodo(userID int64, page, size int) (*Page, error) {
 	var args []any
 	if !IsSuperAdmin(userID) {
 		roleCodes := userRoleCodes(userID)
-		where = "t.status='TODO' AND (t.assignee_id=? OR t.role_ref IN (" + placeholders(len(roleCodes)) + "))"
 		args = append(args, userID)
-		for _, c := range roleCodes {
-			args = append(args, c)
+		if len(roleCodes) > 0 {
+			// 组任务按角色匹配;个人任务按经办人
+			where += " AND (t.assignee_id=? OR t.role_ref IN (" + placeholders(len(roleCodes)) + "))"
+			for _, c := range roleCodes {
+				args = append(args, c)
+			}
+		} else {
+			// 无角色用户只看个人任务(避免拼出 IN () 语法错误)
+			where += " AND t.assignee_id=?"
 		}
 	}
 	total, err := qCount(`SELECT COUNT(*) FROM flow_task t WHERE `+where, args...)
@@ -95,10 +101,14 @@ func WorkbenchDone(userID int64, page, size int) (*Page, error) {
 	var args []any
 	if !IsSuperAdmin(userID) {
 		roleCodes := userRoleCodes(userID)
-		where = "t.status IN ('DONE','CANCEL') AND (t.assignee_id=? OR t.role_ref IN (" + placeholders(len(roleCodes)) + "))"
 		args = append(args, userID)
-		for _, c := range roleCodes {
-			args = append(args, c)
+		if len(roleCodes) > 0 {
+			where += " AND (t.assignee_id=? OR t.role_ref IN (" + placeholders(len(roleCodes)) + "))"
+			for _, c := range roleCodes {
+				args = append(args, c)
+			}
+		} else {
+			where += " AND t.assignee_id=?"
 		}
 	}
 	total, err := qCount(`SELECT COUNT(*) FROM flow_task t WHERE `+where, args...)
