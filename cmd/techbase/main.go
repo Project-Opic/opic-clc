@@ -69,13 +69,21 @@ func main() {
 
 	// metrics
 	metrics.SetEnabled(config.Config.Metrics.Enabled)
-	metrics.SetDBStats(func() (open, idle, inUse, wait, waitMS uint64) { return 0, 0, 0, 0, 0 })
+	// 接真实 DB 连接池统计(GORM→database/sql Stats;对齐 gopherforge 连接池指标)
+	if sqlDB, err := store.DB.DB(); err == nil {
+		metrics.SetDBStats(func() (open, idle, inUse, wait, waitMS uint64) {
+			s := sqlDB.Stats()
+			return uint64(s.OpenConnections), uint64(s.Idle), uint64(s.InUse),
+				uint64(s.WaitCount), uint64(s.WaitDuration.Milliseconds())
+		})
+	}
 
 	if !strings.EqualFold(os.Getenv("APP_ENV"), "development") {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(metrics.Middleware()) // HTTP 指标采集(请求计数/延迟直方图;须先于路由注册)
 	api.SetupRoutes(r)
 
 	// /health 系列(存活/就绪/检查)
