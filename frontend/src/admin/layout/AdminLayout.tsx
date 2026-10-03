@@ -7,33 +7,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Layout, Menu, Avatar, Dropdown, Space, Breadcrumb } from 'antd'
 import type { MenuProps } from 'antd'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import {
-  UserOutlined,
-  LogoutOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  SunOutlined,
-  MoonOutlined,
-  HomeOutlined,
-  DashboardOutlined,
-  TeamOutlined,
-  SafetyOutlined,
-  FolderOutlined,
-  PartitionOutlined,
-  DesktopOutlined,
-  SolutionOutlined,
-  ControlOutlined,
-  SwapOutlined,
-  FileTextOutlined,
-  LoginOutlined,
-  MonitorOutlined,
-  NotificationOutlined,
-  ToolOutlined,
-  WarningOutlined,
-  CloudServerOutlined,
-  CheckSquareOutlined,
-  UserOutlined as UserMenuIcon,
-} from '@ant-design/icons'
+import {SunOutlined,MoonOutlined,UserOutlined,DashboardOutlined,TeamOutlined,SafetyOutlined,ApartmentOutlined,DesktopOutlined,SolutionOutlined,PartitionOutlined,CloudServerOutlined,WarningOutlined,ToolOutlined,MenuFoldOutlined,MenuUnfoldOutlined,NotificationOutlined,ControlOutlined,CheckSquareOutlined,FileTextOutlined,FolderOutlined,HomeOutlined,LoginOutlined,LogoutOutlined,MonitorOutlined,RobotOutlined,SwapOutlined} from '@ant-design/icons'
 import { useSelector } from 'react-redux'
 import { authApi } from '../../api/auth'
 import { clearToken } from '../../api/request'
@@ -113,6 +87,7 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
       children: [
         { key: '/admin/errcodes', label: '错误码管理', icon: <WarningOutlined /> },
         { key: '/admin/monitor', label: '系统监控', icon: <CloudServerOutlined /> },
+        { key: '/admin/ai-model-config', label: 'AI 模型配置', icon: <RobotOutlined /> },
       ],
     })
     defs.push({
@@ -120,7 +95,7 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
       label: '业务管理',
       icon: <CheckSquareOutlined />,
       children: [
-        { key: '/admin/biz/customers', label: '客户管理', icon: <UserMenuIcon /> },
+        { key: '/admin/biz/customers', label: '客户管理', icon: <UserOutlined /> },
         { key: '/admin/biz/approval', label: '审批工作台', icon: <CheckSquareOutlined /> },
       ],
     })

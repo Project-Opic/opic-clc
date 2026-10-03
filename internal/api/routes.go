@@ -72,7 +72,9 @@ func SetupRoutes(r *gin.Engine) {
 		admin := api.Group("/admin", middleware.LoginRequired())
 		{
 			g := admin.Group("", middleware.RequirePermission("system:manage"))
-		adminconsole.RegisterTemporalFlow(g)
+			adminconsole.RegisterTemporalFlow(g)
+			g.GET("/llm-config", adminconsole.LLMConfigGet)
+			g.PUT("/llm-config", adminconsole.LLMConfigSave)
 			g.GET("/logs/operation", adminconsole.OperationLogs)
 			g.GET("/logs/login", adminconsole.LoginLogs)
 			g.GET("/logs/audit", adminconsole.AuditLogs)

@@ -24,6 +24,7 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/expr"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
+	"gitcode.com/opic-ontology/opic-techbase/pkg/llmcfg"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/temporalflow"
 
 	"github.com/gin-gonic/gin"
@@ -350,6 +351,48 @@ func taskAct(c *gin.Context, action string) {
 		return
 	}
 	common.OKJSON(c, gin.H{"signaled": true, "task_id": id, "action": action}, "已提交")
+}
+
+// LLMConfigGet 读取 AI 模型配置（api_key 打码）。
+func LLMConfigGet(c *gin.Context) {
+	cfg, has := llmcfg.Get()
+	if !has {
+		cfg = &llmcfg.Config{Provider: "openai", Temperature: 0.3}
+	}
+	hasKey := cfg.APIKey != ""
+	cfg.APIKey = ""
+	c.JSON(http.StatusOK, gin.H{"config": cfg, "has_key": hasKey})
+}
+
+// LLMConfigSaveBody 保存入参。
+type LLMConfigSaveBody struct {
+	Provider    string  `json:"provider"`
+	BaseURL     string  `json:"base_url"`
+	Model       string  `json:"model"`
+	APIKey      string  `json:"api_key"`
+	Temperature float64 `json:"temperature"`
+	Enabled     bool    `json:"enabled"`
+}
+
+// LLMConfigSave 保存 AI 模型配置（api_key 空则保留原值）。
+func LLMConfigSave(c *gin.Context) {
+	var body LLMConfigSaveBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	cfg, _ := llmcfg.Get()
+	if body.APIKey == "" && cfg != nil {
+		body.APIKey = cfg.APIKey // 留空=保留旧密钥
+	}
+	if err := llmcfg.Save(&llmcfg.Config{
+		Provider: body.Provider, BaseURL: body.BaseURL, Model: body.Model,
+		APIKey: body.APIKey, Temperature: body.Temperature, Enabled: body.Enabled,
+	}); err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	common.OKJSON(c, gin.H{"saved": true}, "AI 模型配置已保存")
 }
 
 // TaskApprove 审批通过。

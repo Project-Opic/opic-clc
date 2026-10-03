@@ -1,12 +1,16 @@
 // Package service —— AI 智能助理（v3 补齐：工作台业务问答与操作指引）。
 //
-// 口径：基于登录用户可见业务数据的规则式应答（待办/客户/流程/指引），全部走既有
-// 只读查询；无外部 LLM 依赖（第 3 层可后接，请求/响应形态不变）。
+// 口径：LLM 优先（管理控制台配置启用时，OpenAI 兼容协议），失败/未配置降级为
+// 规则式应答（待办/客户/流程/指引，全部走既有只读查询）。
 package service
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"strings"
+
+	"gitcode.com/opic-ontology/opic-techbase/pkg/llmcfg"
 )
 
 // AssistantReply 助理应答。
@@ -19,6 +23,21 @@ type AssistantReply struct {
 // AssistantChat 助理问答入口。
 func AssistantChat(uid int64, question string) (*AssistantReply, error) {
 	q := strings.TrimSpace(question)
+
+	// LLM 优先（管理控制台配置启用时）：系统提示词声明只读边界与角色
+	if cfg := llmcfg.Current(); cfg != nil {
+		answer, err := llmcfg.Chat(context.Background(), cfg, []llmcfg.Message{
+			{Role: "system", Content: "你是 OPIC 技术底座的 AI 智能助理。只回答与本系统相关的问题" +
+				"（待办/客户/审批/流程/操作指引）。你只能给出文字指引，不能执行任何写操作。" +
+				"与系统无关的问题请礼貌拒绝。用中文简洁回答。"},
+			{Role: "user", Content: q},
+		})
+		if err == nil {
+			return &AssistantReply{Answer: answer, Hints: []string{"我有哪些待办？", "我的客户申请进展？"}}, nil
+		}
+		log.Printf("[assistant] LLM 调用失败,降级规则匹配: %v", err)
+	}
+
 	lq := strings.ToLower(q)
 	switch {
 	case strings.Contains(q, "待办") || strings.Contains(lq, "todo"):
@@ -73,7 +92,7 @@ func AssistantChat(uid int64, question string) (*AssistantReply, error) {
 		return &AssistantReply{
 			Answer: "我是 OPIC 工作台助理，可以帮您查询待办任务、客户申请进展、解释审批流程、" +
 				"指引管理控制台使用。试试下方建议问题。",
-			Hints:  []string{"我有哪些待办？", "我的客户申请进展？", "审批怎么操作？", "流程有哪些节点？"},
+			Hints: []string{"我有哪些待办？", "我的客户申请进展？", "审批怎么操作？", "流程有哪些节点？"},
 		}, nil
 	}
 }

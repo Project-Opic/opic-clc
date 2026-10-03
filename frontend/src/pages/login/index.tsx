@@ -202,24 +202,28 @@ export default function Login() {
         {/* 右表单栏 */}
         <div className="brand-form-side">
           <div className="brand-form-inner">
-            {/* 双入口 Tab（用户规则 2026-10-03）：管理员→管理控制台；用户→工作台 */}
-            <div className="brand-entry-tabs" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <button
-                style={{ flex: 1, padding: '8px 0', cursor: 'pointer', fontWeight: 600,
-                  border: entry === 'user' ? '2px solid #2266e3' : '1px solid #d9d9d9',
-                  background: entry === 'user' ? '#e8f1ff' : '#fff', borderRadius: 6 }}
-                onClick={() => setEntry('user')}
-              >
-                用户登录
-              </button>
-              <button
-                style={{ flex: 1, padding: '8px 0', cursor: 'pointer', fontWeight: 600,
-                  border: entry === 'admin' ? '2px solid #f59e0b' : '1px solid #d9d9d9',
-                  background: entry === 'admin' ? '#fff7e8' : '#fff', borderRadius: 6 }}
-                onClick={() => setEntry('admin')}
-              >
-                管理员登录
-              </button>
+            {/* 双入口（用户规则 2026-10-03/10-02）：卡片式，选中高亮+角标，明确「登录后进入哪个系统」 */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+              {([
+                { key: 'user', title: '用户登录', desc: '进入用户工作台', color: '#2266e3', bg: '#e8f1ff' },
+                { key: 'admin', title: '管理员登录', desc: '进入管理控制台', color: '#f59e0b', bg: '#fff7e8' },
+              ] as const).map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setEntry(t.key)}
+                  style={{
+                    flex: 1, cursor: 'pointer', textAlign: 'left', borderRadius: 10, padding: '10px 12px',
+                    border: entry === t.key ? `2px solid ${t.color}` : '1px solid #d9d9d9',
+                    background: entry === t.key ? t.bg : '#fff',
+                    boxShadow: entry === t.key ? `0 2px 8px ${t.color}33` : 'none',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: entry === t.key ? t.color : '#555' }}>
+                    {t.title}{entry === t.key ? ' ✓' : ''}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{t.desc}</div>
+                </button>
+              ))}
             </div>
             {!showLocal ? (
               <>

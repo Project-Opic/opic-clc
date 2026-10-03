@@ -26,6 +26,7 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/internal/service"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/graceful"
+	"gitcode.com/opic-ontology/opic-techbase/pkg/llmcfg"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/logger"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/metrics"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/redisx"
@@ -49,6 +50,11 @@ func main() {
 	// PostgreSQL(含 goose 迁移)
 	if err := store.Open(); err != nil {
 		logger.Fatalf("[致命] %v", err)
+	}
+
+	// AI 模型配置表（管理控制台可配；幂等）
+	if err := llmcfg.EnsureTable(); err != nil {
+		logger.Warnf("ai_model_config 建表失败: %v", err)
 	}
 
 	// 本体注册表 + 种子
