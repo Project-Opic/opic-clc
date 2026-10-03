@@ -666,3 +666,28 @@
 [data-theme='light'] .brand-footer {
   color: #9ab0d0;
 }
+
+/* 认证源提示标签（用户规则 2026-10：凭据输入区明确标注 Casdoor/ZITADEL/本地） */
+.brand-idp-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #dbe6f8;
+  background: #f5f8ff;
+  color: #3b5a8f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* 管理员入口主按钮:琥珀渐变(与入口主题带同色;须与上方 .ant-btn-primary 规则同优先级写法) */
+[data-glass] .brand-page .ant-btn-primary.btn-entry-admin:not(:disabled),
+[data-glass][data-theme='light'] .brand-page .ant-btn-primary.btn-entry-admin:not(:disabled) {
+  background: linear-gradient(100deg, #d97706 0%, #ea8a2c 100%) !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22),
+    0 10px 28px rgba(217, 119, 6, 0.4),
+    0 0 40px rgba(234, 138, 44, 0.22) !important;
+}

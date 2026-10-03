@@ -14,9 +14,13 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/pkg/token"
 )
 
-// Login 本地账号登录(local 模式)。
+// Login 本地账号登录(local 模式)。须先通过图形验证码(安控加强)。
 func Login(c *gin.Context) {
 	body := common.BindJSON(c)
+	if !VerifyCaptcha(common.Trim(body["captcha_id"]), common.Trim(body["captcha_code"])) {
+		c.JSON(200, errcode.New(errcode.ErrLogin, "验证码错误或已过期", nil))
+		return
+	}
 	username := common.Trim(body["username"])
 	password := common.Trim(body["password"])
 	if username == "" || password == "" {

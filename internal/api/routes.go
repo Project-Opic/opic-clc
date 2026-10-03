@@ -24,6 +24,7 @@ func SetupRoutes(r *gin.Engine) {
 	{
 		pub.POST("/auth/login", auth.Login)
 		pub.GET("/auth/mode", auth.AuthMode)
+		pub.GET("/auth/captcha", auth.Captcha)
 		pub.GET("/auth/login-url", auth.ZitadelLoginURL)
 		pub.GET("/auth/callback", auth.ZitadelCallback)
 		// 用户工作台 SSO（OPIC-SSO-01：Casdoor）

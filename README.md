@@ -33,7 +33,7 @@ opic-techbase/
 │   ├── api/                      # 路由与控制器(gin)
 │   │   ├── routes.go             # /api 路由(公开组+登录组+权限中间件,与旧版逐条一致)
 │   │   ├── common/               # returnInfo 响应助手/分页/路径参数
-│   │   ├── auth/                 # 登录/登出/信息 + ZITADEL OIDC 回调与 provisioning
+│   │   ├── auth/                 # 登录/登出/信息 + ZITADEL/Casdoor OIDC 回调与 provisioning + 图形验证码(本地登录前置)
 │   │   ├── meta/                 # 字典/客户状态/M3 规则
 │   │   ├── business/             # 客户申请 + 审批中心
 │   │   ├── flow/                 # 流程定义/实例/任务

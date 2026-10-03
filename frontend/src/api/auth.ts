@@ -32,8 +32,13 @@ export const authApi = {
   casdoorLoginUrl() {
     return http.get<{ url: string }>('/api/auth/casdoor/login-url')
   },
-  login(username: string, password: string) {
-    return http.post<LoginPayload>('/api/auth/login', { username, password })
+  captcha() {
+    return http.get<{ captcha_id: string; image: string; ttl: number }>('/api/auth/captcha')
+  },
+  login(username: string, password: string, captchaId?: string, captchaCode?: string) {
+    return http.post<LoginPayload>('/api/auth/login', {
+      username, password, captcha_id: captchaId, captcha_code: captchaCode,
+    })
   },
   info() {
     return http.get<AuthInfo>('/api/auth/info')
