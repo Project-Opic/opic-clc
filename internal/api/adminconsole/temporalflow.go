@@ -24,6 +24,7 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
 	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/expr"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
+	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/llmcfg"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/temporalflow"
 
@@ -37,6 +38,7 @@ func RegisterTemporalFlow(g *gin.RouterGroup) {
 	g.GET("/temporalflow/definitions", list)
 	g.GET("/temporalflow/definitions/:id", get)
 	g.POST("/temporalflow/definitions", save)
+	g.PUT("/temporalflow/definitions/:id", save) // 设计器"保存"走 PUT(编辑已有流程)
 	g.POST("/temporalflow/definitions/:id/publish", publish)
 	g.POST("/temporalflow/definitions/:id/run", run)
 	g.POST("/temporalflow/validate", validate) // 设计器即时校验（不落库）
@@ -78,7 +80,8 @@ func get(c *gin.Context) {
 	common.OKJSON(c, row, "")
 }
 
-// save 新建或更新（body: {id?, code, name, description, node_graph(JSON 字符串或对象)}）。
+// save 新建或更新（body: {id?, code, name, description, node_graph(JSON 对象)}）。
+// PUT /definitions/:id 时以路径 id 为准（前端 body 可能缺 id）。
 func save(c *gin.Context) {
 	var body struct {
 		ID          int64           `json:"id"`
@@ -90,6 +93,11 @@ func save(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		common.FailJSON(c, err)
 		return
+	}
+	if body.ID <= 0 {
+		if pid, err := strconv.ParseInt(c.Param("id"), 10, 64); err == nil && pid > 0 {
+			body.ID = pid
+		}
 	}
 	if body.Code == "" || body.Name == "" || len(body.NodeGraph) == 0 {
 		common.FailJSON(c, fmt.Errorf("code/name/node_graph 必填"))
@@ -108,23 +116,23 @@ func save(c *gin.Context) {
 	if body.ID > 0 {
 		if _, err := store.Exec(nil, `UPDATE flow_definition SET code=?, name=?, description=?, node_graph=?, updated_at=? WHERE id=? AND flow_type=?`,
 			body.Code, body.Name, body.Description, string(body.NodeGraph), now, body.ID, flowTypeTemporal); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			common.FailJSON(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"id": body.ID})
+		common.OKJSON(c, gin.H{"id": body.ID}, "保存成功")
 		return
 	}
 	row, err := store.One(nil, `INSERT INTO flow_definition (code, name, flow_type, description, node_graph, version, status, created_by, created_at, updated_at)
 		VALUES (?,?,?,?,?,0,0,?,?,?) RETURNING id`, body.Code, body.Name, flowTypeTemporal, body.Description, string(body.NodeGraph), createdBy, now, now)
 	if err != nil {
 		if strings.Contains(err.Error(), "flow_definition_code_key") || strings.Contains(err.Error(), "duplicate key") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "流程编码已存在: " + body.Code})
+			c.JSON(200, errcode.New(errcode.ErrParam, "流程编码已存在: "+body.Code, nil))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		common.FailJSON(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": toI64(row["id"])})
+	common.OKJSON(c, gin.H{"id": toI64(row["id"])}, "保存成功")
 }
 
 // publish 发布（status=1；发布前强校验）。

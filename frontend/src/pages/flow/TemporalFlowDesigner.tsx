@@ -300,14 +300,13 @@ function DesignerInner() {
     }
     setSaving(true)
     try {
-      const body = { code, name, description, node_graph: serialize(nodes, edges) }
-      let rid = savedId ?? defId
+      const rid = savedId ?? defId
+      const body = { id: rid ?? undefined, code, name, description, node_graph: serialize(nodes, edges) }
       if (rid) {
         await http.put(`/api/admin/temporalflow/definitions/${rid}`, body)
       } else {
         const r = await http.post<{ id: number }>('/api/admin/temporalflow/definitions', body)
-        rid = r.id
-        setSavedId(rid)
+        setSavedId(r.id)
       }
       if (thenPublish) {
         await http.post(`/api/admin/temporalflow/definitions/${rid}/publish`)
