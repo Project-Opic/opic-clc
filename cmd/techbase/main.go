@@ -56,6 +56,10 @@ func main() {
 	if err := llmcfg.EnsureTable(); err != nil {
 		logger.Warnf("ai_model_config 建表失败: %v", err)
 	}
+	// AI 供应商账号表（多账号模型设置;幂等）
+	if err := llmcfg.EnsureAccountsTable(); err != nil {
+		logger.Warnf("ai_provider_account 建表失败: %v", err)
+	}
 
 	// 本体注册表 + 种子
 	ontology.Load()

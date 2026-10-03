@@ -20,12 +20,28 @@ type AssistantReply struct {
 	Action string   `json:"action"` // 建议跳转路径(可空)
 }
 
-// AssistantChat 助理问答入口。
-func AssistantChat(uid int64, question string) (*AssistantReply, error) {
+// AssistantChat 助理问答入口。accountID=0 → 首个启用账号;model 空 → 账号默认模型;
+// temperature<=0 → 账号默认温度。LLM 失败/未配置一律降级规则应答。
+func AssistantChat(uid int64, question string, accountID int64, model string, temperature float64) (*AssistantReply, error) {
 	q := strings.TrimSpace(question)
 
-	// LLM 优先（管理控制台配置启用时）：系统提示词声明只读边界与角色
-	if cfg := llmcfg.Current(); cfg != nil {
+	// LLM 优先（多供应商账号;系统提示词声明只读边界与角色）
+	if acct := pickAccount(accountID); acct != nil {
+		if model == "" {
+			model = acct.DefaultModelResolve()
+		}
+		answer, err := llmcfg.ChatAccount(context.Background(), acct, model, temperature, []llmcfg.Message{
+			{Role: "system", Content: "你是 OPIC 技术底座的 AI 智能助理。只回答与本系统相关的问题" +
+				"（待办/客户/审批/流程/操作指引）。你只能给出文字指引，不能执行任何写操作。" +
+				"与系统无关的问题请礼貌拒绝。用中文简洁回答。"},
+			{Role: "user", Content: q},
+		})
+		if err == nil {
+			return &AssistantReply{Answer: answer, Hints: []string{"我有哪些待办？", "我的客户申请进展？"}}, nil
+		}
+		log.Printf("[assistant] LLM(%s/%s) 调用失败,降级规则匹配: %v", acct.Name, model, err)
+	} else if cfg := llmcfg.Current(); cfg != nil {
+		// 兼容旧单行配置(未迁移成账号时)
 		answer, err := llmcfg.Chat(context.Background(), cfg, []llmcfg.Message{
 			{Role: "system", Content: "你是 OPIC 技术底座的 AI 智能助理。只回答与本系统相关的问题" +
 				"（待办/客户/审批/流程/操作指引）。你只能给出文字指引，不能执行任何写操作。" +
@@ -95,4 +111,43 @@ func AssistantChat(uid int64, question string) (*AssistantReply, error) {
 			Hints: []string{"我有哪些待办？", "我的客户申请进展？", "审批怎么操作？", "流程有哪些节点？"},
 		}, nil
 	}
+}
+
+// pickAccount 选定供应商账号（accountID=0 → 首个启用账号;指定 id 须已启用）。
+func pickAccount(accountID int64) *llmcfg.Account {
+	accts := llmcfg.EnabledAccounts()
+	if len(accts) == 0 {
+		return nil
+	}
+	if accountID == 0 {
+		return &accts[0]
+	}
+	for i := range accts {
+		if accts[i].ID == accountID {
+			return &accts[i]
+		}
+	}
+	return nil
+}
+
+// AssistantModels 登录用户可选的模型清单（启用账号 × 模型目录）。
+type AssistantModel struct {
+	AccountID    int64    `json:"account_id"`
+	AccountName  string   `json:"account_name"`
+	Provider     string   `json:"provider"`
+	Models       []string `json:"models"`
+	DefaultModel string   `json:"default_model"`
+}
+
+// AssistantModelOptions 助理模型选择器数据源。
+func AssistantModelOptions() []AssistantModel {
+	accts := llmcfg.EnabledAccounts()
+	out := make([]AssistantModel, 0, len(accts))
+	for _, a := range accts {
+		out = append(out, AssistantModel{
+			AccountID: a.ID, AccountName: a.Name, Provider: a.Provider,
+			Models: a.ModelList(), DefaultModel: a.DefaultModelResolve(),
+		})
+	}
+	return out
 }

@@ -43,6 +43,7 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/meta/dictionaries", meta.Dictionaries)
 		authed.GET("/meta/customer-status", meta.CustomerStatus)
 		authed.POST("/assistant/chat", business.AssistantChat)
+		authed.GET("/assistant/models", business.AssistantModels)
 		authed.GET("/meta/rules", meta.Rules)
 
 		// 客户申请(登录即可;业务校验在服务层)
@@ -76,6 +77,14 @@ func SetupRoutes(r *gin.Engine) {
 			adminconsole.RegisterTemporalFlow(g)
 			g.GET("/llm-config", adminconsole.LLMConfigGet)
 			g.PUT("/llm-config", adminconsole.LLMConfigSave)
+			// AI 模型设置:多供应商账号管理
+			g.GET("/ai/catalog", adminconsole.AICatalog)
+			g.GET("/ai/accounts", adminconsole.AIAccountList)
+			g.POST("/ai/accounts", adminconsole.AIAccountCreate)
+			g.PUT("/ai/accounts/:id", adminconsole.AIAccountUpdate)
+			g.DELETE("/ai/accounts/:id", adminconsole.AIAccountDelete)
+			g.POST("/ai/accounts/:id/test", adminconsole.AIAccountTest)
+			g.GET("/ai/upstream-models", adminconsole.AIUpstreamModels)
 			g.GET("/logs/operation", adminconsole.OperationLogs)
 			g.GET("/logs/login", adminconsole.LoginLogs)
 			g.GET("/logs/audit", adminconsole.AuditLogs)

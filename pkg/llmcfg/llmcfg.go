@@ -13,12 +13,12 @@ import (
 
 // Config AI 模型配置（单行）。
 type Config struct {
-	Provider   string `json:"provider"`    // openai 兼容（含 deepseek/qwen/vllm 等）
-	BaseURL    string `json:"base_url"`    // 如 https://api.deepseek.com/v1
-	Model      string `json:"model"`       // 如 deepseek-chat
-	APIKey     string `json:"api_key"`     // 写入后读取打码
+	Provider    string  `json:"provider"` // openai 兼容（含 deepseek/qwen/vllm 等）
+	BaseURL     string  `json:"base_url"` // 如 https://api.deepseek.com/v1
+	Model       string  `json:"model"`    // 如 deepseek-chat
+	APIKey      string  `json:"api_key"`  // 写入后读取打码
 	Temperature float64 `json:"temperature"`
-	Enabled    bool   `json:"enabled"`
+	Enabled     bool    `json:"enabled"`
 }
 
 var mu sync.RWMutex
