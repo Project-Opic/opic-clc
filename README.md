@@ -7,6 +7,17 @@ OPIC 开放智能算力平台的 **Go 技术底座**:《系统管理 + 流程引
 > [gopherforge](https://github.com/SuperiorChuo/gopherforge)(MIT)的工程模式 —— **Gin 微服务脚手架栈**;
 > 业务功能、API 契约、OPIC 统一错误码与本体七模型语义 **100% 保留**(见文末"重构映射与行为变更")。
 
+## 0. 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| [新人培训入门](docs/ONBOARDING.md) | 背景/架构/环境/首次启动/开发流程 |
+| [编译与部署指南](docs/DEPLOYMENT.md) | 构建、生产部署、迁移回滚、fork checklist |
+| [运维手册](docs/OPERATIONS.md) | 健康检查/监控告警/日志/备份/凭据/故障速查 |
+| [FAQ](docs/FAQ.md) | 18 条实战踩坑速查（SSO/SQL/部署/前端/AI） |
+
+官网镜像：opic-website「技术底座」分类（https://opic-website 10.26.8.51:8088）。
+
 ## 1. 技术选型(gopherforge 栈对齐)
 
 | 层 | 选型 | 说明 |
