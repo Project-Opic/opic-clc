@@ -66,7 +66,13 @@ func IsolationInfo(c *gin.Context) {
 			"address":    cfg.Workflow.Address,
 			"namespace":  cfg.Workflow.Namespace,
 			"task_queue": taskQueue,
+			"storage":    "Pigsty PostgreSQL(与 opicdb 同实例,独立库 temporal/temporal_visibility)——2026-10-03 由独立 pg 容器迁移纳管",
 			"note":       "TaskQueue=中心域码,worker 只消费本中心任务",
+		},
+		"nats_storage": gin.H{
+			"mode":  "JetStream 文件存储(NATS 产品形态,无外部数据库)",
+			"path":  "/opt/opic/nats/data/jetstream",
+			"note":  "随部署目录纳入备份;流按中心隔离(OPIC_<CODE>)",
 		},
 		"redis": gin.H{
 			"enabled": cfg.Redis.Enabled,

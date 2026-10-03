@@ -19,7 +19,8 @@ interface IsolationData {
     sslmode: string; pool: string; schema_exists: boolean; table_count: number; migration_version: string
   }
   eventbus: { driver: string; url: string; stream: string; subject_prefix: string; max_age_days: number; note: string }
-  workflow: { driver: string; address: string; namespace: string; task_queue: string; note: string }
+  workflow: { driver: string; address: string; namespace: string; task_queue: string; storage: string; note: string }
+  nats_storage: { mode: string; path: string; note: string }
   redis: { enabled: boolean; host: string; port: number; db: number; note: string }
 }
 
@@ -137,7 +138,23 @@ export default function IsolationPage() {
           <Descriptions.Item label="TaskQueue">
             <b style={{ color: '#2266e3' }}>{data.workflow.task_queue}</b>
           </Descriptions.Item>
+          <Descriptions.Item label="持久化存储">
+            <b style={{ color: '#2266e3' }}>Pigsty · temporal 库</b>
+          </Descriptions.Item>
+          <Descriptions.Item label="存储说明" span={2}>{data.workflow.storage}</Descriptions.Item>
           <Descriptions.Item label="说明" span={2}>{data.workflow.note}</Descriptions.Item>
+        </Descriptions>
+      </div>
+
+      {/* NATS 存储 */}
+      <div style={card}>
+        {title(<ThunderboltOutlined />, 'NATS 持久化（文件存储 · 无外部数据库）')}
+        <Descriptions size="small" column={2}>
+          <Descriptions.Item label="形态">{data.nats_storage.mode}</Descriptions.Item>
+          <Descriptions.Item label="数据目录">
+            <b style={{ color: '#2266e3' }}>{data.nats_storage.path}</b>
+          </Descriptions.Item>
+          <Descriptions.Item label="说明" span={2}>{data.nats_storage.note}</Descriptions.Item>
         </Descriptions>
       </div>
 
