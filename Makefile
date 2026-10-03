@@ -86,6 +86,7 @@ deploy-prod: ## 同步源码到生产构建并拉起（实测流程：服务器 
 	ssh $(PROD_HOST) "cd $(PROD_DIR)-src && docker build --network host -t $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/techbase:latest . && \
 		docker build --network host -t $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/techbase-frontend:latest ./frontend && \
 		cp -a docker-compose.yml configs $(PROD_DIR)/ 2>/dev/null; cp -a configs $(PROD_DIR)/ && \
+		cp -f /opt/opic-prod/certs/ca.crt $(PROD_DIR)/ca.crt && chmod 644 $(PROD_DIR)/ca.crt && \
 		test -f $(PROD_DIR)/.env || (printf 'JWT_SECRET=%s\nEVENTBUS_PASSWORD=%s\n' \"\$$(openssl rand -hex 32)\" \"\$$(grep '^NATS_PASSWORD=' /opt/opic-prod/.env | cut -d= -f2)\" > $(PROD_DIR)/.env && chmod 600 $(PROD_DIR)/.env) && \
 		cd $(PROD_DIR) && set -a && source .env && set +a && set -a && source /opt/opic-prod/.env && set +a && \
 		BASE_DOMAIN=$(BASE_DOMAIN) TRAEFIK_ENTRYPOINT=websecure docker compose up -d && docker compose ps"

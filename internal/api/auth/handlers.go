@@ -85,7 +85,8 @@ func AuthMode(c *gin.Context) {
 	if userMode == "" {
 		userMode = "local"
 	}
-	userLocalAllowed := userMode == "local"
+	// 用户端本地登录跟随全局 allow_local_login（用户规则 2026-10：SSO 模式下仍可切本地账号）
+	userLocalAllowed := localAllowed
 	c.JSON(200, errcode.OK(gin.H{
 		"mode": mode, "allow_local_login": localAllowed, // 兼容旧前端（管理控制台端）
 		"admin": gin.H{"mode": mode, "allow_local_login": localAllowed, "sso": mode == "zitadel"},

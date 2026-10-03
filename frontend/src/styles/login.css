@@ -691,3 +691,131 @@
     0 10px 28px rgba(217, 119, 6, 0.4),
     0 0 40px rgba(234, 138, 44, 0.22) !important;
 }
+
+/* ===== 亮色主题:登录页输入框白底黑字(用户规则 2026-10:须看得清楚) =====
+   置于文件末尾以同优先级 !important 覆盖上方「深色玻璃输入框」规则块 */
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper,
+[data-glass][data-theme='light'] .brand-page .ant-input-outlined,
+[data-glass][data-theme='light'] .brand-page .ant-input {
+  background: #ffffff !important;
+  border-color: #d9e4f5 !important;
+  color: #14203c !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05) !important;
+}
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper .ant-input {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #14203c !important;
+}
+[data-glass][data-theme='light'] .brand-page .ant-input-affix-wrapper:hover,
+[data-glass][data-theme='light'] .brand-page .ant-input-outlined:hover {
+  border-color: #b8cef2 !important;
+  background: #ffffff !important;
+}
+[data-glass][data-theme='light'] .brand-page .ant-input::placeholder {
+  color: #9ab0d0;
+}
+[data-glass][data-theme='light'] .brand-page .ant-input-prefix,
+[data-glass][data-theme='light'] .brand-page .ant-input-password-icon,
+[data-glass][data-theme='light'] .brand-page .ant-input-password-icon:hover {
+  color: #7d92b8;
+}
+
+/* ===== 入口内认证方式切换器(SSO 默认) ===== */
+.method-switch {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #eef3fb;
+  border: 1px solid #dfe8f6;
+}
+.method-switch button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #5a6f92;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.method-switch button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.method-switch button.on {
+  background: #fff;
+  color: #2266e3;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(34, 102, 227, 0.14);
+}
+.method-switch .default-badge {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: #2266e3;
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 2px;
+}
+
+/* ===== 左侧品牌区随入口联动(管理员=琥珀系;用户=既有蓝系,用户规则 2026-10) ===== */
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-headline {
+  color: #7a3c07;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-headline em {
+  color: #c2620a;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-subline,
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-features li {
+  color: #9a6a38;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-feature-icon {
+  background: #fff7e8;
+  border: 1px solid #f3ddc0;
+  color: #b45309;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-logo-mark {
+  background: linear-gradient(135deg, #b45309, #e8963e);
+  box-shadow: 0 8px 24px rgba(180, 83, 9, 0.35);
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-footer {
+  color: #b08d63;
+}
+
+/* 切换器窄容器排版微调(防换行/角标挤压) */
+.method-switch button {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.method-switch .default-badge {
+  font-size: 9px;
+  padding: 0.5px 6px;
+}
+.method-switch button span {
+  white-space: nowrap;
+}
+
+/* 管理员入口:右侧表单标题/副题也随入口琥珀化 */
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-form-title {
+  color: #7a3c07;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .brand-form-sub {
+  color: #b08d63;
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .method-switch button.on {
+  color: #c2620a;
+  box-shadow: 0 2px 8px rgba(194, 98, 10, 0.16);
+}
+[data-glass][data-theme='light'] [data-entry='admin'] .method-switch .default-badge {
+  background: #c2620a;
+}

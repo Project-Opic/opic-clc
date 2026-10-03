@@ -64,8 +64,19 @@ services:
       ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID:-}
       ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET:-}
       ZITADEL_REDIRECT_URL: ${ZITADEL_REDIRECT_URL:-}
+      # IdP 域名经宿主网关 Traefik 回环(宿主 /etc/hosts 将 *.opic-ai.ccoe.tech 指向 127.0.0.1,
+      # 容器内直连会得到 127.0.0.1 → 必须显式 host-gateway);CA 信任见下方 SSL_CERT_FILE
+      SSL_CERT_FILE: /etc/ssl/certs/opic-ca.crt
     extra_hosts:
       - "host.docker.internal:${HOST_GW_IP:-host-gateway}"
+      # IdP/自站域名 → 宿主网关(容器侧 OIDC 发现/换码走 Traefik TLS)
+      - "auth.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
+      - "casdoor.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
+      - "techbase.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
+    volumes:
+      # 自建 CA 公钥(step1 gen-certs.sh 签发 *.opic-ai.ccoe.tech,公钥可入库);
+      # 容器内 OIDC 发现/换码经宿主网关 Traefik TLS 时须信任此 CA
+      - ./configs/ca.crt:/etc/ssl/certs/opic-ca.crt:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9680/health/live >/dev/null 2>&1 || exit 1"]
       interval: 10s
