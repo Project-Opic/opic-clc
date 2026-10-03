@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {FloatButton,  Layout, Menu, Avatar, Dropdown, Space, Breadcrumb } from 'antd'
 import type { MenuProps } from 'antd'
 import AIAssistantPanel from '../../components/AIAssistantPanel'
+import AIChatWorkspace from '../../components/AIChatWorkspace'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {SunOutlined,MoonOutlined,UserOutlined,DashboardOutlined,TeamOutlined,SafetyOutlined,ApartmentOutlined,DesktopOutlined,SolutionOutlined,PartitionOutlined,CloudServerOutlined,WarningOutlined,ToolOutlined,MenuFoldOutlined,MenuUnfoldOutlined,NotificationOutlined,ControlOutlined,CheckSquareOutlined,FileTextOutlined,FolderOutlined,HomeOutlined,LoginOutlined,LogoutOutlined,MonitorOutlined,RobotOutlined,SwapOutlined} from '@ant-design/icons'
 import { useSelector } from 'react-redux'
@@ -126,6 +127,21 @@ function ConsoleShell() {
   const { mode, toggle: toggleTheme } = useThemeMode()
   const [collapsed, setCollapsed] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
+  // AI 助理工作区折叠态(独立记忆)
+  const [chatCollapsed, setChatCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('opic_admin_chat_collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('opic_admin_chat_collapsed', chatCollapsed ? '1' : '0')
+    } catch {
+      /* 存储不可用时忽略 */
+    }
+  }, [chatCollapsed])
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
@@ -278,6 +294,21 @@ function ConsoleShell() {
           <Space size={8} className="app-header-actions">
             <span
               className="app-trigger"
+              onClick={() => setChatCollapsed((v) => !v)}
+              role="button"
+              tabIndex={0}
+              aria-label={chatCollapsed ? '展开 AI 助理工作区' : '收起 AI 助理工作区'}
+              title={chatCollapsed ? '展开 AI 助理工作区' : '收起 AI 助理工作区'}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                setChatCollapsed((v) => !v)
+              }}
+            >
+              <RobotOutlined />
+            </span>
+            <span
+              className="app-trigger"
               onClick={(e) => {
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
@@ -306,11 +337,15 @@ function ConsoleShell() {
           </div>
         </Content>
       </Layout>
-      {/* AI 智能助理（OPIC-SSO-01/模型配置：双端可用） */}
+
+      {/* AI 智能助理工作区（与用户工作台同款共享组件;折叠后内容区经 flex 自动加宽） */}
+      <AIChatWorkspace collapsed={chatCollapsed} onToggle={() => setChatCollapsed((v) => !v)} />
+
+      {/* AI 智能助理（悬浮抽屉,保留;与工作区共享模型选择;工作区展开时右移避让） */}
       <FloatButton
         icon={<RobotOutlined />}
         type="primary"
-        style={{ right: 24, bottom: 24, width: 44, height: 44 }}
+        style={{ right: chatCollapsed ? 24 : 340, bottom: 24, width: 44, height: 44 }}
         tooltip="AI 智能助理"
         onClick={() => setAiOpen(true)}
       />
