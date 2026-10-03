@@ -28,6 +28,7 @@ import FlowDefinitions from '../pages/flow/FlowDefinitions'
 import FlowDesigner from '../pages/flow/FlowDesigner'
 import TemporalFlowDesignerPage, { TemporalFlowListPage } from '../pages/flow/TemporalFlowDesigner'
 import AIModelConfigPage from '../admin/ai/AIModelConfig'
+import IsolationPage from '../admin/ai/IsolationInfo'
 import FlowInstances from '../pages/flow/FlowInstances'
 import FlowTasks from '../pages/flow/FlowTasks'
 import UserManage from '../pages/system/UserManage'
@@ -152,6 +153,7 @@ export default function AppRoutes() {
         <Route path="temporalflow/designer/:id" element={<TemporalFlowDesignerPage />} />
         <Route path="temporalflow/designer/new" element={<TemporalFlowDesignerPage />} />
         <Route path="ai-model-config" element={<AIModelConfigPage />} />
+        <Route path="isolation" element={<IsolationPage />} />
         <Route path="flow/instances" element={<FlowInstances />} />
         <Route path="flow/tasks" element={<FlowTasks />} />
         <Route path="logs/operation" element={<OperationLogs />} />

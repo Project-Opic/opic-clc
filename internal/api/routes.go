@@ -85,6 +85,7 @@ func SetupRoutes(r *gin.Engine) {
 			g.DELETE("/ai/accounts/:id", adminconsole.AIAccountDelete)
 			g.POST("/ai/accounts/:id/test", adminconsole.AIAccountTest)
 			g.GET("/ai/upstream-models", adminconsole.AIUpstreamModels)
+			g.GET("/isolation", adminconsole.IsolationInfo)
 			g.GET("/logs/operation", adminconsole.OperationLogs)
 			g.GET("/logs/login", adminconsole.LoginLogs)
 			g.GET("/logs/audit", adminconsole.AuditLogs)

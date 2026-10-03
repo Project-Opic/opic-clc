@@ -90,6 +90,7 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
         { key: '/admin/errcodes', label: '错误码管理', icon: <WarningOutlined /> },
         { key: '/admin/monitor', label: '系统监控', icon: <CloudServerOutlined /> },
         { key: '/admin/ai-model-config', label: 'AI 模型配置', icon: <RobotOutlined /> },
+        { key: '/admin/isolation', label: '隔离信息', icon: <PartitionOutlined /> },
       ],
     })
     defs.push({
