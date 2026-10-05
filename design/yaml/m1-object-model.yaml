@@ -1,10 +1,11 @@
 model_type: OBJECT
-version: '1.0'
+version: '1.1'
 domain: 集群域
 aggregates:
 - id: AGG-CLC-01
   name: 集群
   alias: Cluster
+  tableName: clc_cluster
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -112,6 +113,7 @@ aggregates:
 - id: AGG-CLC-02
   name: 集群节点
   alias: ClusterNode
+  tableName: clc_cluster_node
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -184,6 +186,7 @@ aggregates:
 - id: AGG-CLC-03
   name: 中心引用绑定
   alias: ClusterBinding
+  tableName: clc_binding
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -241,6 +244,7 @@ aggregates:
 - id: AGG-CLC-04
   name: 集群参数
   alias: ClusterParam
+  tableName: clc_param
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -293,6 +297,7 @@ aggregates:
 - id: AGG-CLC-05
   name: 版本快照
   alias: ClusterSnapshot
+  tableName: clc_snapshot
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -350,6 +355,7 @@ aggregates:
 - id: AGG-CLC-06
   name: 集群任务
   alias: ClusterTask
+  tableName: clc_task
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -423,10 +429,124 @@ aggregates:
     type: DateTime
     required: true
     unique: false
-  entities: []
+  entities:
+  - name: 交付步骤
+    alias: ClusterTaskStep
+    tableName: clc_task_step
+    description: 任务的内嵌明细，不是独立台账对象：随任务一次性展开、生命周期完全从属任务（表 clc_task_step）。对象分类：记录型数据（任务内从属明细；状态可推进，终局受保护）；不独立编号（任务内步骤序号唯一，与集群参数不编号同判据）。
+    localId: stepIndex
+    cardinality: ONE_OR_MORE
+    cascadeDelete: true
+    attributes:
+    - name: taskRef
+      label: 所属任务
+      type: Ref
+      required: true
+    - name: stepIndex
+      label: 步骤序号
+      type: Integer
+      required: true
+      description: 任务内唯一、自 1 连续；续跑任务沿用上次任务的序号语义（INV-37 / INV-03 的取值域）
+    - name: stepCode
+      label: 步骤编码
+      type: Dict
+      required: true
+      description: CLC_INSTALL_STEP；非安装类任务取与 CLC_TASK_KIND 同名的单步编码
+    - name: stepName
+      label: 步骤名称
+      type: String
+      required: true
+      description: 展示名取字典显示文本（界面不得内置步骤清单）
+    - name: stepStatus
+      label: 步骤状态
+      type: Dict
+      required: true
+      description: CLC_STEP_STATUS
+    - name: commandSummary
+      label: 命令摘要
+      type: String
+      required: false
+      description: 由参数数组渲染的脱敏命令面呈现（动作 + 参数骨架）；不得含凭据、私钥与配置内容（INV-40），不接受用户输入拼接（INV-47）
+    - name: verdictSource
+      label: 判定依据
+      type: Dict
+      required: false
+      description: CLC_STEP_VERDICT；终态必填（INV-38）
+    - name: exitCode
+      label: 退出码
+      type: Integer
+      required: false
+      description: 本地链路终态必填；远程链路以回执结论为准、可空
+    - name: startedAt
+      label: 起始时间
+      type: DateTime
+      required: false
+      description: 进入 RUNNING 时写入
+    - name: endedAt
+      label: 结束时间
+      type: DateTime
+      required: false
+      description: 终态必填（INV-38）
+    - name: logStartLine
+      label: 日志游标起点
+      type: Integer
+      required: false
+      description: 本步骤日志在任务日志中的行区间起点；回放定位用，不另建日志副本（属性指针，不建关联）
+    - name: logEndLine
+      label: 日志游标终点
+      type: Integer
+      required: false
+      description: 行区间终点（随执行推进右移）
+    - name: failDetail
+      label: 失败摘要
+      type: String
+      required: false
+      description: FAILED 必填；含交付工具侧的错误定位（脱敏后）
+    - name: skipReason
+      label: 跳过原因
+      type: String
+      required: false
+      description: SKIPPED 必填；续跑场景固定为「上次任务该步已成功（INV-03 不重跑）」
+  - name: 交付日志
+    alias: TaskLogLine
+    tableName: clc_task_log
+    description: 一条交付执行的日志行（表 clc_task_log）。高频时序数据、不是台账：本地链路由本域采集落库并按游标增量回放；远程链路原始流在对端交付域、本域界面跳转不留副本（REF-12）。只增不改；受保留期约束（REF-15 / INV-44）。不独立编号（任务内日志序号唯一）。
+    localId: lineNo
+    cardinality: ZERO_OR_MORE
+    cascadeDelete: true
+    attributes:
+    - name: lineNo
+      label: 日志序号
+      type: Integer
+      required: true
+      description: 任务内唯一的单调游标、只增不改；断线回放的续传起点（FUNC-35 / INV-43）
+    - name: taskRef
+      label: 所属任务
+      type: Ref
+      required: true
+    - name: stepIndex
+      label: 所属步骤
+      type: Integer
+      required: false
+      description: 空 = 任务级输出（展开、收尾、取消、失联判定）
+    - name: loggedAt
+      label: 记录时间
+      type: DateTime
+      required: true
+    - name: logLevel
+      label: 日志级别
+      type: Dict
+      required: true
+      description: CLC_LOG_LEVEL
+    - name: content
+      label: 日志内容
+      type: String
+      required: true
+      description: 落库前完成凭据掩码（INV-42）；单行长度受平台配置约束、超长截断并标注
 - id: AGG-CLC-07
   name: 探活记录
   alias: HealthProbe
+  tableName: clc_probe
   aggregateType: AGGREGATE_ROOT
   description: 对象分类
   lifecycle:
@@ -939,4 +1059,152 @@ data_dictionaries:
       label: 人工
       enabled: true
       sortOrder: 20
-aggregate_associations: []
+- id: DICT-CLC_STEP_STATUS
+  name: CLC_STEP_STATUS
+  types:
+  - typeCode: CLC_STEP_STATUS
+    typeName: CLC_STEP_STATUS
+    items:
+    - code: PENDING
+      label: 待执行
+      enabled: true
+      sortOrder: 10
+    - code: RUNNING
+      label: 执行中
+      enabled: true
+      sortOrder: 20
+    - code: SUCCEEDED
+      label: 已成功
+      enabled: true
+      sortOrder: 30
+    - code: FAILED
+      label: 已失败
+      enabled: true
+      sortOrder: 40
+    - code: CANCELLED
+      label: 未执行即取消
+      enabled: true
+      sortOrder: 50
+    - code: SKIPPED
+      label: 本次跳过（上次已成功）
+      enabled: true
+      sortOrder: 60
+- id: DICT-CLC_INSTALL_STEP
+  name: CLC_INSTALL_STEP
+  types:
+  - typeCode: CLC_INSTALL_STEP
+    typeName: CLC_INSTALL_STEP
+    items:
+    - code: "01"
+      label: 环境准备（prepare）
+      enabled: true
+      sortOrder: 10
+    - code: "02"
+      label: 部署 etcd 集群
+      enabled: true
+      sortOrder: 20
+    - code: "03"
+      label: 部署容器运行时（runtime）
+      enabled: true
+      sortOrder: 30
+    - code: "04"
+      label: 部署 K8s 控制面（master）
+      enabled: true
+      sortOrder: 40
+    - code: "05"
+      label: 加入工作节点（worker）
+      enabled: true
+      sortOrder: 50
+    - code: "06"
+      label: 部署网络插件（network）
+      enabled: true
+      sortOrder: 60
+    - code: "07"
+      label: 部署扩展组件（addons）
+      enabled: true
+      sortOrder: 70
+- id: DICT-CLC_STEP_VERDICT
+  name: CLC_STEP_VERDICT
+  types:
+  - typeCode: CLC_STEP_VERDICT
+    typeName: CLC_STEP_VERDICT
+    items:
+    - code: EXIT_CODE
+      label: 退出码
+      enabled: true
+      sortOrder: 10
+    - code: PLAY_RECAP
+      label: 剧本汇总判定
+      enabled: true
+      sortOrder: 20
+    - code: REMOTE_RECEIPT
+      label: 远端回执
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_LOG_LEVEL
+  name: CLC_LOG_LEVEL
+  types:
+  - typeCode: CLC_LOG_LEVEL
+    typeName: CLC_LOG_LEVEL
+    items:
+    - code: INFO
+      label: 信息
+      enabled: true
+      sortOrder: 10
+    - code: WARN
+      label: 告警
+      enabled: true
+      sortOrder: 20
+    - code: ERROR
+      label: 错误
+      enabled: true
+      sortOrder: 30
+aggregate_associations:
+- id: ASSOC-CLC-CLUSTER-NODE
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-02
+  associationType: DEPENDENCY
+  sourceRole: 集群成员
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-BINDING
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-03
+  associationType: DEPENDENCY
+  sourceRole: 引用台账
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-PARAM
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-04
+  associationType: DEPENDENCY
+  sourceRole: 参数清单
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-SNAPSHOT
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-05
+  associationType: DEPENDENCY
+  sourceRole: 版本快照
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-TASK
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-06
+  associationType: DEPENDENCY
+  sourceRole: 交付任务
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-PROBE
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-07
+  associationType: DEPENDENCY
+  sourceRole: 探活记录
+  targetRole: 所属集群
+  cardinality: ONE_TO_MANY
+  referenceField: clusterRef

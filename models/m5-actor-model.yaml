@@ -1,5 +1,5 @@
 model_type: ACTOR
-version: '1.0'
+version: '1.1'
 domain: 集群域
 actors:
 - actorId: ACTOR-CLC-ROLE-01
@@ -59,6 +59,9 @@ roles:
   - PERM-FUNC-26
   - PERM-FUNC-27
   - PERM-FUNC-29
+  - PERM-FUNC-33
+  - PERM-FUNC-34
+  - PERM-FUNC-35
 - roleId: CLC-ROLE-02
   name: 平台运维管理员
   permissions:
@@ -75,6 +78,8 @@ roles:
   - PERM-FUNC-30
   - PERM-FUNC-31
   - PERM-FUNC-32
+  - PERM-FUNC-34
+  - PERM-FUNC-35
 - roleId: CLC-ROLE-03
   name: 集群审计员
   permissions:
@@ -88,6 +93,8 @@ roles:
   - PERM-FUNC-26
   - PERM-FUNC-27
   - PERM-FUNC-29
+  - PERM-FUNC-34
+  - PERM-FUNC-35
 - roleId: CLC-ROLE-04
   name: 集群只读用户
   permissions:
@@ -229,4 +236,16 @@ permissions:
 - permissionId: PERM-FUNC-32
   targetType: BEHAVIOR
   targetRef: FUNC-32
+  dataScope: ALL
+- permissionId: PERM-FUNC-33
+  targetType: BEHAVIOR
+  targetRef: FUNC-33
+  dataScope: ALL
+- permissionId: PERM-FUNC-34
+  targetType: BEHAVIOR
+  targetRef: FUNC-34
+  dataScope: ALL
+- permissionId: PERM-FUNC-35
+  targetType: BEHAVIOR
+  targetRef: FUNC-35
   dataScope: ALL

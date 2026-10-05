@@ -1,5 +1,5 @@
 model_type: UI
-version: '1.0'
+version: '1.1'
 domain: 集群域
 application:
   name: OPIC-集群域
@@ -225,7 +225,7 @@ screens:
     - PERM-FUNC-21
 - screenId: frmClcOrch
   name: 编排操作台
-  screenType: SINGLE_FORM
+  screenType: MASTER_DETAIL_FORM
   layout: ''
   elements:
   - id: el01
@@ -337,6 +337,32 @@ screens:
     io: I
     required: false
     dataBinding: ''
+  - id: el19
+    type: BUTTON
+    label: 取消（行内按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el20
+    type: BUTTON
+    label: 查看步骤（行内入口）
+    io: O
+    required: false
+    dataBinding: ''
+  - id: el21
+    type: GRID
+    label: 交付步骤流水线（从表，只读）
+    io: O
+    required: false
+    dataBinding: ClusterTask.steps
+    dataSource: REP-12
+  - id: el22
+    type: TEXTAREA
+    label: 日志回放面板（游标增量，只读）
+    io: O
+    required: false
+    dataBinding: ClusterTask.logs
+    dataSource: REP-13
   actions:
   - actionId: act-FUNC-03
     name: 发起安装
@@ -398,6 +424,24 @@ screens:
     behaviorRef: FUNC-32
     permissionRef:
     - PERM-FUNC-32
+  - actionId: act-FUNC-33
+    name: 取消执行中任务
+    actionType: OTHER
+    behaviorRef: FUNC-33
+    permissionRef:
+    - PERM-FUNC-33
+  - actionId: act-FUNC-34
+    name: 交付步骤查询
+    actionType: QUERY
+    behaviorRef: FUNC-34
+    permissionRef:
+    - PERM-FUNC-34
+  - actionId: act-FUNC-35
+    name: 任务日志回放查询
+    actionType: QUERY
+    behaviorRef: FUNC-35
+    permissionRef:
+    - PERM-FUNC-35
 - screenId: frmClcRef
   name: 引用与参数台
   screenType: LIST_MAINTENANCE

@@ -1,5 +1,5 @@
 model_type: REPORT
-version: '1.0'
+version: '1.1'
 domain: 集群域
 query_reports:
 - id: REP-01
@@ -726,3 +726,207 @@ query_reports:
   reportOptions: null
   version: '1.0'
   parameterSpecNote: 规格 5.x 未列该报表的输入查询条件（紧凑家族只给「内容要点」结果列口径）；绑定屏 frmClcOps 的 9.x 原型亦无工具栏筛选控件 → 参数待建模阶段补齐
+- id: REP-12
+  name: 交付步骤流水线
+  alias: rep12
+  objectType: LIST_QUERY
+  description: 明细（时序）。入口：任务台账行内「步骤」入口 + 集群详情「最近任务」下钻 —— 同一张报表、两个入口，不构成第二张报表（绑定 FUNC-34，v1.1 新增）。
+  behaviorRef: FUNC-34
+  sourceObjects:
+  - objectRef: EXT-EXTERNAL
+    alias: external
+    primary: true
+    sourceNote: 明细（时序）；数据源为任务聚合内子实体交付步骤（表 clc_task_step）
+  joins: []
+  parameters:
+  - name: p1
+    label: 任务 / 步骤状态 / 判定依据 / 时间区间
+    dataType: String
+    required: false
+    allowedOperators:
+    - EQ
+    sourceField: ''
+  conditions:
+  - conditionId: C01
+    leftExpression: 任务 / 步骤状态 / 判定依据 / 时间区间
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  resultColumns:
+  - name: c1
+    label: 步骤序号
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 步骤编码与名称（读 CLC_INSTALL_STEP 字典）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 步骤状态
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c4
+    label: 判定依据（退出码 / 剧本汇总 / 远端回执）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c5
+    label: 命令摘要（已脱敏）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c6
+    label: 起止时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c7
+    label: 日志区间（游标起点~终点，点击进入任务日志回放）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c8
+    label: 失败摘要（FAILED）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c9
+    label: 跳过原因（SKIPPED）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: true
+    defaultPageSize: 20
+    maxPageSize: 100
+  reportOptions: null
+  version: '1.1'
+  caliberNote: 口径注记（v1.1）：界面不内置步骤清单 —— 行集合完全来自数据行，缺行即缺陷（REF-13 的报表层落点）；SKIPPED 与 CANCELLED 分列呈现（上次已成功 vs 本次未执行）；命令摘要已脱敏（口径 1 / INV-40）；不提供任何整表原始日志正文（口径 8）
+- id: REP-13
+  name: 任务日志回放
+  alias: rep13
+  objectType: LIST_QUERY
+  description: 明细（游标增量）。交付形态：游标增量接口（offset = 已读最大日志序号）；运行中任务流式追加、终态任务一次性回放至末尾后停止（绑定 FUNC-35，v1.1 新增）。
+  behaviorRef: FUNC-35
+  sourceObjects:
+  - objectRef: EXT-EXTERNAL
+    alias: external
+    primary: true
+    sourceNote: 明细（游标增量）；数据源为任务聚合内子实体交付日志（表 clc_task_log，仅本地链路）
+  joins: []
+  parameters:
+  - name: p1
+    label: 任务（必填）
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: ''
+  - name: p2
+    label: 步骤序号
+    dataType: String
+    required: false
+    allowedOperators:
+    - EQ
+    sourceField: ''
+  - name: p3
+    label: 日志级别（CLC_LOG_LEVEL）
+    dataType: String
+    required: false
+    allowedOperators:
+    - EQ
+    sourceField: ''
+  - name: p4
+    label: 游标起点（offset = 已读最大日志序号）
+    dataType: Integer
+    required: false
+    allowedOperators:
+    - GTE
+    sourceField: ''
+  conditions:
+  - conditionId: C01
+    leftExpression: 任务
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  - conditionId: C02
+    leftExpression: 步骤序号
+    operator: EQ
+    parameterRef: p2
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  - conditionId: C03
+    leftExpression: 日志级别
+    operator: EQ
+    parameterRef: p3
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  - conditionId: C04
+    leftExpression: 日志序号
+    operator: GTE
+    parameterRef: p4
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  resultColumns:
+  - name: c1
+    label: 日志序号（单调游标）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 记录时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 级别
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c4
+    label: 所属步骤序号（空 = 任务级输出）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c5
+    label: 内容（落库前已掩码）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: true
+    defaultPageSize: 200
+    maxPageSize: 500
+  reportOptions: null
+  version: '1.1'
+  caliberNote: 口径注记（v1.1，口径 8 的本域落点）：禁整表拉取 —— 只按游标取增量，接口不提供无游标整表出口；本地链路内容来自本域交付日志表，远程链路本区显示「原始日志在 O-IGN 侧」+ 跳转标识、不留副本不留占位假数据（REF-12）；保留期外显式提示「已按 REF-15 清理」而非空结果（INV-44）；级别为 CLC_LOG_LEVEL 三类

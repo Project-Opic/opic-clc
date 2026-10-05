@@ -1,5 +1,5 @@
 model_type: FLOW
-version: '1.0'
+version: '1.1'
 domain: 集群域
 flows:
 - id: FLOW-PROC-01
@@ -68,9 +68,10 @@ flows:
     - A08
   - activityId: A08
     name: 交付工具分步执行
-    activityType: TASK
+    activityType: SUB_FLOW_CALL
     roleRef: CLC-ROLE-01
     behaviorRef: null
+    subFlowRef: FLOW-PROC-06
     nextActivities:
     - A09
   - activityId: A09
@@ -173,16 +174,18 @@ flows:
     - A08
   - activityId: A08
     name: 交付工具执行加入
-    activityType: TASK
+    activityType: SUB_FLOW_CALL
     roleRef: CLC-ROLE-01
     behaviorRef: null
+    subFlowRef: FLOW-PROC-06
     nextActivities:
     - A09
   - activityId: A09
     name: 交付工具执行移除
-    activityType: TASK
+    activityType: SUB_FLOW_CALL
     roleRef: CLC-ROLE-01
     behaviorRef: null
+    subFlowRef: FLOW-PROC-06
     nextActivities:
     - A10
   - activityId: A10
@@ -438,14 +441,14 @@ flows:
     nextActivities:
     - A02
   - activityId: A02
-    name: 交付工具卸载
-    activityType: TASK
+    name: 交付工具卸载（执行内核子流）
+    activityType: SUB_FLOW_CALL
     roleRef: CLC-ROLE-01
-    behaviorRef: null
+    subFlowRef: FLOW-PROC-06
     nextActivities:
     - A03
   - activityId: A03
-    name: ezctl destroy 清理控制面组件
+    name: 清理控制面组件残留
     activityType: TASK
     roleRef: CLC-ROLE-01
     behaviorRef: null
@@ -498,6 +501,211 @@ flows:
     activityType: END
     roleRef: CLC-ROLE-01
     behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-06
+  name: 交付执行与续跑
+  flowType: COLLABORATION
+  description: 交付任务的执行内核：把一个已登记的任务推进到有数据依据的终态，每一步的结论都是可查的数据行（v1.1 新增，被 PROC-01 / 02 / 05 与升级 / 备份 / 恢复 / 启停的任务创建复用）
+  businessObjectRefs:
+  - AGG-CLC-06
+  - AGG-CLC-01
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: SUB_FLOW
+  preconditions:
+  - "任务已在本流之外完成步骤展开（INV-45）"
+  postconditions:
+  - "任务到达终态或有结论依据的挂起态；步骤行、日志行与集群回写全部由规则承载（R-14 / R-15 / R-16 / R-17 / R-18）"
+  startActivity: A01
+  endActivities:
+  - A16
+  - A21
+  - A23
+  - A25
+  activities:
+  - activityId: A01
+    name: 任务已展开步骤（INV-45）
+    activityType: START
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 全局执行槽位判定
+    activityType: GATEWAY
+    ruleRef: R-18
+    branches:
+    - branchName: 槽位占满
+      conditionExpression: "运行中任务数已达全局槽位上限（上限取 REF-14）"
+      targetActivity: A03
+    - branchName: 取得槽位
+      isDefault: true
+      targetActivity: A04
+  - activityId: A03
+    name: 排队等待（QUEUED，按序推进）
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    nextActivities:
+    - A02
+  - activityId: A04
+    name: 任务置执行中：取当前最小非终态步骤序号
+    activityType: BEHAVIOR_CALL
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-39
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 适配器形态判定（运行期不互转）
+    activityType: GATEWAY
+    ruleRef: REF-16
+    branches:
+    - branchName: 本地链路
+      conditionExpression: "executionPath == 'LOCAL'"
+      targetActivity: A06
+    - branchName: 远程链路
+      conditionExpression: "executionPath == 'REMOTE_EXECUTOR'"
+      targetActivity: A10
+  - activityId: A06
+    name: 命令数组直调交付工具（不经 shell）
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-47
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 逐行采集交付输出
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-42
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 写日志游标区间（logStartLine / logEndLine）
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    nextActivities:
+    - A13
+  - activityId: A10
+    name: 经点火中心提交并登记远端任务引用
+    activityType: BEHAVIOR_CALL
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-46
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 远端执行事实采集（域外）
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-12
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 回执对账：不一致以远端为准并留痕
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-12
+    ruleRef: R-16
+    nextActivities:
+    - A13
+  - activityId: A13
+    name: 单步结论判定
+    activityType: GATEWAY
+    branches:
+    - branchName: 成功结论
+      conditionExpression: "判定依据（CLC_STEP_VERDICT）给出成功结论：退出码为 0 且执行回显无失败，或远端回执为成功"
+      targetActivity: A14
+    - branchName: 超时按失败落行
+      ruleRef: REF-15
+      targetActivity: A17
+    - branchName: 执行痕迹不可存活
+      ruleRef: R-09
+      targetActivity: A22
+    - branchName: 失败结论
+      isDefault: true
+      targetActivity: A17
+  - activityId: A14
+    name: 步骤置已成功：写判定依据与结束时间
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-38
+    nextActivities:
+    - A15
+  - activityId: A15
+    name: 是否还有下一个非终态步骤序号
+    activityType: GATEWAY
+    branches:
+    - branchName: 继续单步推进
+      isDefault: true
+      targetActivity: A04
+    - branchName: 全部步骤完成
+      targetActivity: A26
+  - activityId: A26
+    name: 任务置成功：交付工具产物按存放标识登记
+    activityType: BEHAVIOR_CALL
+    behaviorRef: B-AUTO-09
+    ruleRef: R-13
+    nextActivities:
+    - A16
+  - activityId: A16
+    name: 交付成功终局
+    activityType: END
+    nextActivities: []
+  - activityId: A17
+    name: 步骤置已失败：写失败摘要，后续未执行步骤置未执行即取消
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    ruleRef: R-14
+    nextActivities:
+    - A18
+  - activityId: A18
+    name: 任务置失败：失败步骤索引在任务与集群双写
+    activityType: SYSTEM_TASK
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-30
+    nextActivities:
+    - A19
+  - activityId: A19
+    name: 人工出口
+    activityType: GATEWAY
+    branches:
+    - branchName: 续跑
+      targetActivity: A20
+    - branchName: 取消
+      targetActivity: A24
+    - branchName: 不再处理
+      isDefault: true
+      targetActivity: A21
+  - activityId: A20
+    name: 安装续跑：新任务展开步骤（已成功序号置本次跳过并填原因）
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-04
+    ruleRef: R-17
+    nextActivities:
+    - A04
+  - activityId: A21
+    name: 失败终局（可续跑：失败步骤索引已保留）
+    activityType: END
+    nextActivities: []
+  - activityId: A22
+    name: 任务置失联挂起：集群降级归因执行机失联
+    activityType: BEHAVIOR_CALL
+    behaviorRef: B-AUTO-11
+    ruleRef: INV-28
+    nextActivities:
+    - A23
+  - activityId: A23
+    name: 失联终局：恢复路径唯一为人工重试或显式换机（执行位置不可改写）
+    activityType: END
+    nextActivities: []
+  - activityId: A24
+    name: 取消执行中任务：终止进程组 / 撤销远端
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-33
+    ruleRef: R-15
+    nextActivities:
+    - A25
+  - activityId: A25
+    name: 取消终局（取消不是回滚）
+    activityType: END
     nextActivities: []
 - id: FLOW-PROC-APP-01
   name: 集群销毁审批（单级）

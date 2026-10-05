@@ -1,5 +1,5 @@
 model_type: RULE
-version: '1.0'
+version: '1.1'
 domain: 集群域
 rules:
 - id: REF-01
@@ -80,12 +80,40 @@ rules:
   reusedBy: []
   version: '1.0'
 - id: REF-12
-  name: 交付动作日志复用平台统一任务通道回放（不在本域另建日志存储）
+  name: 交付执行日志按链路分治（本地链路由本域逐行采集落库并按游标回放；远程链路的原始流只在 O-IGN 侧、本域跳转不建副本）
   ruleType: FORMAT
-  description: FUNC-25
-  expression: FUNC-25
+  description: FUNC-35 / TaskLogLine
+  expression: FUNC-35 / TaskLogLine
   reusedBy: []
-  version: '1.0'
+  version: '1.1'
+- id: REF-13
+  name: 步骤 → 交付工具命令的映射为代码内固定契约（安装步骤序号即命令面 setup <cluster> <序号>，其余动作为固定命令字），不入字典也不可配置；命令面与入参一律以参数数组直调、不经过 shell
+  ruleType: FORMAT
+  description: FUNC-03 / ClusterTaskStep
+  expression: FUNC-03 / ClusterTaskStep
+  reusedBy: []
+  version: '1.1'
+- id: REF-14
+  name: 交付执行的全局并发槽位上限取平台配置（缺省 2），槽位占满时新任务排队置 QUEUED 而不是失败
+  ruleType: FORMAT
+  description: B-AUTO-10 / ClusterTask.status
+  expression: B-AUTO-10 / ClusterTask.status
+  reusedBy: []
+  version: '1.1'
+- id: REF-15
+  name: 单步骤超时时长与日志保留期取平台配置（缺省 45 分钟 / 14 天）；超时按失败结论落步骤行
+  ruleType: FORMAT
+  description: ClusterTaskStep / TaskLogLine
+  expression: ClusterTaskStep / TaskLogLine
+  reusedBy: []
+  version: '1.1'
+- id: REF-16
+  name: 执行适配器形态（LOCAL / REMOTE_EXECUTOR）由部署配置显式声明且运行期不得互转；集群的执行位置一旦登记即只读（INV-32 的配置侧同源）
+  ruleType: FORMAT
+  description: ClusterTask.executionPath
+  expression: ClusterTask.executionPath
+  reusedBy: []
+  version: '1.1'
 - id: INV-01
   name: 集群名称在未销毁范围内唯一（保存即校验）
   ruleType: INVARIANT
@@ -332,12 +360,96 @@ rules:
   reusedBy: []
   version: '1.0'
 - id: INV-36
-  name: 探活记录只读探测、探测过程不得向集群写入任何内容（与 O-AST 巡检同纪律；设
+  name: 探活记录只读探测、探测过程不得向集群写入任何内容（与 O-AST 巡检同纪律；设计约束）
   ruleType: INVARIANT
   description: 探活记录：探活记录只读探测、探测过程不得向集群写入任何内容（与 O-AST 巡检同纪律；设计约束）
   expression: ''
   reusedBy: []
   version: '1.0'
+- id: INV-37
+  name: 步骤序号在任务内唯一且自 1 连续；SUCCEEDED / SKIPPED 步骤不得再次进入 RUNNING（续跑不重跑已成功步骤的数据形态；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 交付步骤：步骤序号在任务内唯一且自 1 连续；SUCCEEDED / SKIPPED 步骤不得再次进入 RUNNING（续跑不重跑已成功步骤的数据形态；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-38
+  name: 步骤进入终态必须有结束时间与判定依据；FAILED 必填失败摘要；SKIPPED 必填跳过原因（保存即校验）
+  ruleType: INVARIANT
+  description: 交付步骤：步骤进入终态必须有结束时间与判定依据；FAILED 必填失败摘要；SKIPPED 必填跳过原因（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-39
+  name: 一个任务在任一时刻至多一个步骤处于 RUNNING（单步推进；并发多步属交付工具内部行为、不由本域表达；保存即校验）
+  ruleType: INVARIANT
+  description: 交付步骤：一个任务在任一时刻至多一个步骤处于 RUNNING（单步推进；并发多步属交付工具内部行为、不由本域表达；保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-40
+  name: 命令摘要与失败摘要不得含 SSH 私钥、kubeconfig 内容或任何凭据明文（凭据零持久化在步骤层的延伸；设计约束 + 落库前掩码）
+  ruleType: INVARIANT
+  description: 交付步骤：命令摘要与失败摘要不得含 SSH 私钥、kubeconfig 内容或任何凭据明文（定性三「凭据零持久化」在步骤层的延伸；设计约束 + 落库前掩码）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-41
+  name: 步骤终态（SUCCEEDED / FAILED / CANCELLED / SKIPPED）不可回退为其他状态；终局保护与节点移除终局（INV-13）同族（保存即校验）
+  ruleType: INVARIANT
+  description: 交付步骤：步骤终态（SUCCEEDED / FAILED / CANCELLED / SKIPPED）不可回退为其他状态；终局保护与节点移除终局（INV-13）同族（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-42
+  name: 日志内容落库前必须完成凭据掩码 —— SSH 私钥、kubeconfig 内容、令牌与密码形态一律替换为掩码；掩码不可逆、原文不留存（保存即校验）
+  ruleType: INVARIANT
+  description: 交付日志：日志内容落库前必须完成凭据掩码 —— SSH 私钥、kubeconfig 内容、令牌与密码形态一律替换为掩码；掩码不可逆、原文不留存（保存即校验；定性三的日志层落点）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-43
+  name: 日志序号在任务内单调递增、只增不改（与探活记录 INV-35 同族；保存即校验）
+  ruleType: INVARIANT
+  description: 交付日志：日志序号在任务内单调递增、只增不改（与探活记录 INV-35 同族；保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-44
+  name: 日志与探活记录同受保留期约束（REF-15）、到期清理留痕；清理不影响任务与步骤台账（终态任务的失败摘要已独立成字段，不依赖日志存活；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 交付日志：日志与探活记录同受保留期约束（REF-15）、到期清理留痕；清理不影响任务与步骤台账（终态任务的失败摘要已独立成字段，不依赖日志存活；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-45
+  name: 任务进入 RUNNING 前必须已完成步骤展开（交付步骤行齐备、序号自 1 连续）；无步骤行的任务不得执行（R-17 承载展开；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群任务：任务进入 RUNNING 前必须已完成步骤展开（2.8 步骤行齐备、序号自 1 连续）；无步骤行的任务不得执行（R-17 承载展开；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-46
+  name: 执行位置为 REMOTE_EXECUTOR 的任务必须有远端任务引用（remoteTaskRef 非空）—— 登记为远程却无远端引用即登记值与真实位置不符，是 INV-32 的可验证形态（仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群任务：执行位置为 REMOTE_EXECUTOR 的任务必须有远端任务引用（remoteTaskRef 非空）—— 登记为远程却无远端引用即「登记值与真实位置不符」，是 INV-32 的可验证形态（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-47
+  name: 交付动作的命令参数不得含 shell 元字符，且集群标识 / 步骤序号 / 节点地址三类入参必须各自命中格式白名单后以参数数组直调交付工具（无 shell 直调；commandSummary 由参数数组渲染、不得由用户输入拼接；设计约束）
+  ruleType: INVARIANT
+  description: 集群任务：交付动作的命令参数不得含 shell 元字符，且集群标识 / 步骤序号 / 节点地址三类入参必须各自命中格式白名单后以参数数组直调交付工具（无 shell 直调；设计约束的落库形态：commandSummary 由参数数组渲染，不得由用户输入拼接）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
+- id: INV-48
+  name: 同一集群在任一时刻至多一个处于 RUNNING 的交付任务（步骤级并发由交付工具自身承担，本域不表达；与节点 IP 同集群唯一 INV-10 同族；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群任务：同一集群在任一时刻至多一个处于 RUNNING 的交付任务（步骤级并发由交付工具自身承担，本域不表达；与节点 IP 同集群唯一 INV-10 同族；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.1'
 - id: R-01
   name: 内联引用列与引用台账双写同步
   ruleType: CROSS_OBJECT
@@ -429,3 +541,38 @@ rules:
   expression: 安装成功落点：kubeconfig 存放标识登记（内容不入库）+ 主控入口登记 + 状态置运行中 + 发布安装完成事件
   reusedBy: []
   version: '1.0'
+- id: R-14
+  name: 步骤失败回写链
+  ruleType: CROSS_OBJECT
+  description: 步骤失败回写链（R-09 的步骤层细化）：该步骤置 FAILED 并写失败摘要与判定依据、后续未执行步骤置 CANCELLED、任务置 FAILED、失败步骤索引在任务与集群双写（INV-30 同源）；安装类失败 ⇒ 集群置「安装失败」
+  expression: 步骤失败回写链（R-09 的步骤层细化）：该步骤置 FAILED 并写失败摘要与判定依据、后续未执行步骤置 CANCELLED、任务置 FAILED、失败步骤索引在任务与集群双写（INV-30 同源）；安装类失败 ⇒ 集群置「安装失败」
+  reusedBy: []
+  version: '1.1'
+- id: R-15
+  name: 任务取消处置
+  ruleType: CROSS_OBJECT
+  description: 任务取消处置：取消 ⇒ 终止执行（本地进程组 / 远端撤销）→ 运行中步骤置 FAILED（摘要「人工取消」）→ 未执行步骤置 CANCELLED → 任务置 CANCELLED；已终态步骤不回改（INV-41），取消不是回滚
+  expression: 任务取消处置：取消 ⇒ 终止执行（本地进程组 / 远端撤销）→ 运行中步骤置 FAILED（摘要「人工取消」）→ 未执行步骤置 CANCELLED → 任务置 CANCELLED；已终态步骤不回改（INV-41），取消不是回滚
+  reusedBy: []
+  version: '1.1'
+- id: R-16
+  name: 远端回执对账
+  ruleType: CROSS_OBJECT
+  description: 远端回执对账：本地步骤结论与 O-IGN 侧执行事实不一致 ⇒ 以远端为准修正本地步骤与任务状态并写对账留痕（触发原因、双侧结论）；不静默覆盖、修正记录可在日志与对账台账查得
+  expression: 远端回执对账：本地步骤结论与 O-IGN 侧执行事实不一致 ⇒ 以远端为准修正本地步骤与任务状态并写对账留痕（触发原因、双侧结论）；不静默覆盖、修正记录可在日志与对账台账查得
+  reusedBy: []
+  version: '1.1'
+- id: R-17
+  name: 续跑步骤展开
+  ruleType: CROSS_OBJECT
+  description: 续跑步骤展开：新任务按失败步骤索引生成步骤行 —— 索引之前置 SKIPPED（填跳过原因、不执行）、索引起按序真实执行；已成功序号不得重新执行（INV-03 的步骤层形态）
+  expression: 续跑步骤展开：新任务按失败步骤索引生成步骤行 —— 索引之前置 SKIPPED（填跳过原因、不执行）、索引起按序真实执行；已成功序号不得重新执行（INV-03 的步骤层形态）
+  reusedBy: []
+  version: '1.1'
+- id: R-18
+  name: 执行并发与互斥
+  ruleType: CROSS_OBJECT
+  description: 执行并发与互斥：全局执行槽位（REF-14）占满 ⇒ 任务排队 QUEUED；同一集群至多一个运行中交付任务（INV-48）；槽位释放按排队次序推进
+  expression: 执行并发与互斥：全局执行槽位（REF-14）占满 ⇒ 任务排队 QUEUED；同一集群至多一个运行中交付任务（INV-48）；槽位释放按排队次序推进
+  reusedBy: []
+  version: '1.1'

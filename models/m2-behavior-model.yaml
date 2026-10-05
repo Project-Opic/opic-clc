@@ -1,5 +1,5 @@
 model_type: BEHAVIOR
-version: '1.0'
+version: '1.1'
 domain: 集群域
 behaviors:
 - id: FUNC-01
@@ -53,17 +53,33 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "交付版本引用可用（REF-05 禁用版本拦截）"
+  - "交付执行机引用就绪"
+  - "节点清单非空且校验通过（PENDING 节点不得作为交付目标，INV-15）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（无槽位时排队，REF-14 / R-18）"
+  - field: ClusterTask.executionPath
+    setValue: "登记值即真实执行位置（INV-32 / REF-16）"
+  - field: Cluster.status
+    setValue: "INSTALLING"
+  - "同事务完成步骤展开：按 CLC_INSTALL_STEP 生成 01~07 七条步骤行（INV-45 / R-17）"
   appliedRules:
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-17
+  - R-18
   requiredPermissions:
   - PERM-FUNC-03
   syncTriggers: []
@@ -72,17 +88,31 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "集群状态为 INSTALL_FAILED 且携带失败步骤索引（INV-03）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "RETRY_INSTALL（续跑是新任务，INV-31）"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED"
+  - "步骤展开：失败索引之前按序生成 SKIPPED 行并填跳过原因，索引起按序待执行（R-17 / INV-37）"
   appliedRules:
+  - INV-03
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-37
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-17
+  - R-18
   requiredPermissions:
   - PERM-FUNC-04
   syncTriggers: []
@@ -91,8 +121,12 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "影响面强制展示：下游引用方聚合、节点清单、基础设施证书清单（R-10）"
+  - "存在下游引用时默认阻断；显式强制才进入审批 —— 强制不免审批（R-10）"
+  postconditions:
+  - "进入单级销毁审批（提交 = 角色 01、裁决 = 角色 02，互斥）"
+  - "审批通过后创建 DESTROY 任务（INV-33 / R-10）；销毁编排一经发起不可取消（FUNC-33 前置 / R-07）"
   appliedRules:
   - INV-28
   - INV-29
@@ -100,6 +134,7 @@ behaviors:
   - INV-31
   - INV-32
   - INV-33
+  - R-07
   - R-09
   - R-10
   requiredPermissions:
@@ -170,17 +205,27 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "交付版本引用可用（REF-05）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "UPGRADE"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（展开为与任务类别同名的单步步骤行，INV-45）"
   appliedRules:
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-18
   requiredPermissions:
   - PERM-FUNC-09
   syncTriggers: []
@@ -189,17 +234,27 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "集群处于 RUNNING（备份目标是运行中的集群）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "BACKUP"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（展开为与任务类别同名的单步步骤行，INV-45）"
   appliedRules:
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-18
   requiredPermissions:
   - PERM-FUNC-10
   syncTriggers: []
@@ -208,17 +263,27 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "恢复点存在且可定位（备份产物按存放标识登记，本域不读取内容）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "RESTORE"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（展开为与任务类别同名的单步步骤行，INV-45）"
   appliedRules:
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-18
   requiredPermissions:
   - PERM-FUNC-11
   syncTriggers: []
@@ -227,17 +292,27 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "启停目标集群状态与动作相容（START 面向已停止、STOP 面向运行中）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "START ｜ STOP"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（展开为与任务类别同名的单步步骤行，INV-45）"
   appliedRules:
   - INV-28
   - INV-29
   - INV-30
   - INV-31
   - INV-32
-  - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
   - R-09
-  - R-10
+  - R-14
+  - R-18
   requiredPermissions:
   - PERM-FUNC-12
   syncTriggers: []
@@ -246,63 +321,87 @@ behaviors:
   ownerEntity: AGG-CLC-03
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "新引用必须存在且可用，以引用台账全量反查为准（R-01）"
+  - "STALLED 任务的显式换机必须人工发起 —— 不自动重试、不静默切回本地链路（INV-32 / R-05）"
+  postconditions:
+  - "内联引用列与引用台账双写同步（R-01）"
+  - "换机结论：后续新交付任务按新执行位置登记并携带新远端任务引用（INV-32 / INV-46）；执行适配器形态运行期不互转（REF-16）"
+  - "已终态的任务与步骤不回改（INV-41），换机以新任务承载（INV-31）"
   appliedRules:
   - INV-16
   - INV-17
   - INV-18
   - INV-19
+  - INV-31
+  - INV-32
+  - INV-41
+  - INV-46
   - R-01
+  - R-05
   - R-07
   requiredPermissions:
   - PERM-FUNC-13
   syncTriggers: []
 - id: FUNC-14
   name: 参数人工覆写
-  ownerEntity: AGG-CLC-03
+  ownerEntity: AGG-CLC-04
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "集群非 DESTROYED（终态冻结，INV-09）"
+  postconditions:
+  - field: ClusterParam.paramSource
+    setValue: "MANUAL_OVERRIDE（覆写留痕、再派生不覆盖、冲突提示 R-04）"
   appliedRules:
-  - INV-16
-  - INV-17
-  - INV-18
-  - INV-19
-  - R-01
-  - R-07
+  - INV-20
+  - INV-21
+  - INV-22
+  - INV-23
+  - R-04
   requiredPermissions:
   - PERM-FUNC-14
   syncTriggers: []
 - id: FUNC-15
   name: 触发参数同步（确认执行）
-  ownerEntity: AGG-CLC-03
+  ownerEntity: AGG-CLC-04
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "存在待同步参数行（syncPending 为真且有派生注记，INV-22）"
+  - "同步是运维的显式确认动作，不由派生事件自动执行（R-04）"
+  postconditions:
+  - field: ClusterParam.syncPending
+    setValue: "false（派生值生效并留痕）"
   appliedRules:
-  - INV-16
-  - INV-17
-  - INV-18
-  - INV-19
-  - R-01
-  - R-07
+  - INV-20
+  - INV-21
+  - INV-22
+  - INV-23
+  - R-04
   requiredPermissions:
   - PERM-FUNC-15
   syncTriggers: []
 - id: FUNC-16
   name: 显式恢复（重绑定 / 确认）
-  ownerEntity: AGG-CLC-07
+  ownerEntity: AGG-CLC-01
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "集群健康为 DEGRADED 才可调用；健康集群不渲染入口（R-11）"
+  - "重绑定提交的新引用必须存在且可用（R-11）"
+  - "多个降级原因逐一处理，全部清除后健康才回归（INV-06）"
+  postconditions:
+  - field: Cluster.health
+    setValue: "全部降级原因清除后置 HEALTHY（DEGRADED 只能由本行为清除）"
+  - field: Cluster.degradedReason
+    setValue: "清除本次处理完成的那一条降级原因"
+  - "重绑定：内联引用列与引用台账双写更新（R-01）、派生参数更新（R-04）并创建快照"
   appliedRules:
-  - INV-34
-  - INV-35
-  - INV-36
+  - INV-06
+  - R-01
+  - R-04
+  - R-11
   requiredPermissions:
   - PERM-FUNC-16
   syncTriggers: []
@@ -429,18 +528,17 @@ behaviors:
   queryReportRef: REP-04
 - id: FUNC-23
   name: 参数清单查询
-  ownerEntity: AGG-CLC-03
+  ownerEntity: AGG-CLC-04
   behaviorType: QUERY
   triggerType: USER_ACTION
   preconditions: []
   postconditions: []
   appliedRules:
-  - INV-16
-  - INV-17
-  - INV-18
-  - INV-19
-  - R-01
-  - R-07
+  - INV-20
+  - INV-21
+  - INV-22
+  - INV-23
+  - R-04
   requiredPermissions:
   - PERM-FUNC-23
   syncTriggers: []
@@ -565,17 +663,32 @@ behaviors:
   ownerEntity: AGG-CLC-06
   behaviorType: COMMAND
   triggerType: USER_ACTION
-  preconditions: []
-  postconditions: []
+  preconditions:
+  - "存在审批通过的销毁申请（INV-33 / R-10）"
+  - "同一集群不存在运行中的交付任务（INV-48 / R-18）"
+  postconditions:
+  - field: ClusterTask.taskKind
+    setValue: "DESTROY（单步展开，INV-45）"
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED"
+  - field: Cluster.status
+    setValue: "DESTROYING"
+  - "销毁链由 R-07 承载：交付工具卸载 → 吊销本域证书（失败挂起重试）→ 级联清理引用台账 → 发布销毁事件 → DESTROYED"
   appliedRules:
   - INV-28
   - INV-29
-  - INV-30
   - INV-31
   - INV-32
   - INV-33
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
+  - R-07
   - R-09
   - R-10
+  - R-14
+  - R-18
   requiredPermissions:
   - PERM-FUNC-31
   syncTriggers: []
@@ -597,4 +710,285 @@ behaviors:
   - R-10
   requiredPermissions:
   - PERM-FUNC-32
+  syncTriggers: []
+- id: FUNC-33
+  name: 取消执行中任务
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "仅 QUEUED / RUNNING 可取消；终态任务不渲染入口（INV-29）"
+  - "DESTROY 类任务不可取消：审批通过后即进入不可逆编排（R-07）"
+  - "取消需显式填写原因并入审计留痕"
+  postconditions:
+  - field: ClusterTask.status
+    setValue: "CANCELLED（本地链路终止交付工具进程组及其全部子进程；远程链路经点火中心撤销远端任务）"
+  - "运行中步骤置 FAILED 且失败摘要记「人工取消」；未执行步骤置 CANCELLED；已终态步骤不回改（INV-41）"
+  - "安装 / 续跑类取消 ⇒ 集群置 INSTALL_FAILED 并保留失败步骤索引（可续跑）；其余类别集群状态不变"
+  - "取消不是回滚 —— 已执行步骤的效果由交付工具自身幂等性承担"
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-31
+  - INV-41
+  - INV-45
+  - INV-48
+  - R-07
+  - R-15
+  requiredPermissions:
+  - PERM-FUNC-33
+  syncTriggers: []
+- id: FUNC-34
+  name: 交付步骤查询
+  ownerEntity: AGG-CLC-06
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-37
+  - INV-38
+  - INV-40
+  - INV-41
+  requiredPermissions:
+  - PERM-FUNC-34
+  syncTriggers: []
+  queryReportRef: REP-12
+- id: FUNC-35
+  name: 任务日志回放查询
+  ownerEntity: AGG-CLC-06
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "按游标增量读取（offset = 已读最大日志序号），禁整表拉取"
+  postconditions: []
+  appliedRules:
+  - INV-42
+  - INV-43
+  - INV-44
+  requiredPermissions:
+  - PERM-FUNC-35
+  syncTriggers: []
+  queryReportRef: REP-13
+- id: B-AUTO-01
+  name: 健康探活调度
+  ownerEntity: AGG-CLC-07
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "集群处于运行中；周期与连续失败阈值取平台配置（REF-03）"
+  postconditions:
+  - "新增一条探活记录（只读探测，不向集群写入任何内容，INV-36）"
+  - "连续失败转不可达、连续成功恢复健康（防抖阈值 REF-11）；探活不覆盖 DEGRADED（R-08）"
+  appliedRules:
+  - INV-34
+  - INV-35
+  - INV-36
+  - REF-03
+  - REF-11
+  - R-08
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-02
+  name: 降级事件订阅处置
+  ownerEntity: AGG-CLC-01
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "收到执行机销毁 / 交付域降级 / 实例移除 / 资产下架等订阅事件"
+  postconditions:
+  - field: Cluster.health
+    setValue: "DEGRADED（降级归因写入 degradedReason，映射为固定枚举 REF-09）"
+  - "恢复事件不自动清除降级，只由显式恢复处理（R-05）"
+  appliedRules:
+  - INV-06
+  - REF-09
+  - R-03
+  - R-05
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-03
+  name: 节点健康事件发布
+  ownerEntity: AGG-CLC-02
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "单个节点的资产健康发生变化"
+  postconditions:
+  - "仅发布节点级健康事件；集群健康不因单节点变化降级（集群健康写入仍受 R-08 口径约束）"
+  appliedRules:
+  - INV-06
+  - R-08
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-04
+  name: 上游变更参数派生
+  ownerEntity: AGG-CLC-04
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "上游实例升级 / 交付版本切换事件到达"
+  postconditions:
+  - field: ClusterParam.syncPending
+    setValue: "true（派生新参数并置待同步，同时创建快照留痕）"
+  - "不覆盖人工覆写行（冲突时保留覆写值并登记差异提示）；不做任何自动同步执行（R-04）"
+  appliedRules:
+  - INV-21
+  - INV-22
+  - INV-23
+  - REF-06
+  - R-04
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-05
+  name: 证书轮换推送
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "基础设施证书完成轮换事件到达"
+  postconditions:
+  - "创建证书推送任务（单步骤展开）经执行适配器覆盖节点侧并热加载"
+  appliedRules:
+  - INV-45
+  - INV-46
+  - INV-48
+  - R-18
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-06
+  name: 挂起吊销重试
+  ownerEntity: AGG-CLC-03
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "销毁编排中存在吊销失败而挂起的基础设施证书"
+  postconditions:
+  - "逐小时重试直至成功；期间残留显式可见，不做静默失败（R-07）"
+  appliedRules:
+  - INV-19
+  - R-07
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-07
+  name: 探活记录清理
+  ownerEntity: AGG-CLC-07
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "探活记录已超过平台配置的保留期（REF-08）"
+  postconditions:
+  - "清理到期探活记录并留痕"
+  appliedRules:
+  - REF-08
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-08
+  name: 快照保留期清理
+  ownerEntity: AGG-CLC-05
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "快照已超过平台配置的保留期（REF-02）"
+  postconditions:
+  - "清理到期快照并留痕；清理动作不改动集群当前登记（INV-27）"
+  appliedRules:
+  - INV-27
+  - REF-02
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-09
+  name: 安装成功收尾
+  ownerEntity: AGG-CLC-01
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "安装类任务的末步取得成功结论"
+  postconditions:
+  - field: Cluster.status
+    setValue: "RUNNING（发布安装完成事件）"
+  - "登记 kubeconfig 存放标识与主控入口；交付工具产物按存放标识登记，本域不读取其内容（R-13）"
+  appliedRules:
+  - INV-02
+  - INV-07
+  - INV-08
+  - R-13
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-10
+  name: 交付步骤驱动
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "任务进入 RUNNING 且步骤行已展开（INV-45）"
+  - "取得全局执行槽位（REF-14）；无槽位则任务保持 QUEUED 等待（R-18）"
+  postconditions:
+  - "按当前序号取步骤 → 以参数数组直调交付工具命令面（不经 shell）→ 采集结论与日志游标 → 单步推进（INV-39）"
+  - "步骤进入终态写判定依据（退出码 / 执行回显结论 / 远端回执）与结束时间（INV-38）"
+  - "失败步骤按 R-14 回写任务与集群；超时按失败结论落步骤行（REF-15）"
+  appliedRules:
+  - INV-37
+  - INV-38
+  - INV-39
+  - INV-40
+  - INV-42
+  - INV-45
+  - INV-47
+  - REF-13
+  - REF-14
+  - REF-15
+  - REF-16
+  - R-14
+  - R-18
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-11
+  name: 执行失联判定
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "运行中任务的执行痕迹不可存活（执行进程不存在且无结论）"
+  postconditions:
+  - field: ClusterTask.status
+    setValue: "STALLED（失联挂起：可重试或显式换执行机）"
+  - "集群降级归因 EXECUTOR_LOST；执行位置登记值不得改写（绝不静默回退本地重跑）"
+  appliedRules:
+  - INV-28
+  - INV-32
+  - REF-16
+  - R-09
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-12
+  name: 远端回执对账
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "远程链路任务存在远端任务引用（INV-46）"
+  postconditions:
+  - "本地步骤结论与远端执行事实不一致时以远端为准修正步骤与任务状态，并写对账留痕（不静默覆盖）"
+  appliedRules:
+  - INV-31
+  - INV-41
+  - INV-46
+  - REF-12
+  - R-16
+  requiredPermissions: []
+  syncTriggers: []
+- id: B-AUTO-13
+  name: 日志保留期清理
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: SYSTEM
+  preconditions:
+  - "交付日志行已超过平台配置的保留期（REF-15）"
+  postconditions:
+  - "清理到期日志行并留痕；任务行与步骤行不动，失败摘要不依赖日志存活（INV-44）"
+  appliedRules:
+  - INV-44
+  - REF-15
+  requiredPermissions: []
   syncTriggers: []
