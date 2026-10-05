@@ -674,6 +674,14 @@ func (rt *deliveryRuntime) markLogStart(taskNo string, idx, line int) {
 	_, _ = qExec(`UPDATE clc_task_step SET log_start_line=? WHERE task_ref=? AND step_index=? AND flag=1`, line, taskNo, idx)
 }
 
+// closeStepWindow 失败/取消链收口日志区间右界(A08):已按结论行落库后取当前游标,
+// 已闭合的区间(成功链)不回改。
+func (rt *deliveryRuntime) closeStepWindow(taskNo string, idx int) {
+	_, _ = qExec(`UPDATE clc_task_step SET log_end_line=?
+		WHERE task_ref=? AND step_index=? AND flag=1 AND log_end_line IS NULL`,
+		rt.currentCursor(taskNo), taskNo, idx)
+}
+
 func (rt *deliveryRuntime) currentCursor(taskNo string) int {
 	rt.mu.Lock()
 	lg, ok := rt.loggers[taskNo]
@@ -785,11 +793,13 @@ func (rt *deliveryRuntime) applyFailChain(taskNo, kind string, idx int, user Use
 	}
 	stepIdx := idx
 	writeTaskLog(taskNo, &stepIdx, delivery.LevelError, fmt.Sprintf("失败回写链完成(R-14):步骤 %02d FAILED,任务 FAILED,失败步骤索引已双写(INV-30)", idx))
+	rt.closeStepWindow(taskNo, idx) // 结论行即本步末行(A08 右界)
 }
 
 // applyCancelChain R-15 取消处置:运行中步骤 FAILED(摘要「人工取消」)→ 未执行步骤 CANCELLED →
 // 任务 CANCELLED;已终态步骤不回改(INV-41);取消不是回滚(FUNC-33)。
 func (rt *deliveryRuntime) applyCancelChain(taskNo, kind string, args DeliveryArgs, user UserInfo, reasonDetail string) {
+	runningIdx := 0 // 取消时的运行中步骤(其日志区间须在链末收口)
 	err := tx(func(db *gorm.DB) error {
 		task, err := store.One(db, `SELECT * FROM clc_task WHERE task_no=? AND flag=1`, taskNo)
 		if err != nil {
@@ -808,6 +818,7 @@ func (rt *deliveryRuntime) applyCancelChain(taskNo, kind string, args DeliveryAr
 		resumeIdx := 0
 		if run != nil {
 			resumeIdx = int(paramInt(run["step_index"]))
+			runningIdx = resumeIdx
 			from = resumeIdx
 			if err := markStepTx(db, taskNo, resumeIdx, StepStatusFailed, delivery.VerdictExitCode, nil, "人工取消:"+reasonDetail, "", nil); err != nil {
 				return err
@@ -850,6 +861,9 @@ func (rt *deliveryRuntime) applyCancelChain(taskNo, kind string, args DeliveryAr
 	if err != nil {
 		writeTaskLog(taskNo, nil, delivery.LevelError, "取消处置落库异常: "+err.Error())
 		return
+	}
+	if runningIdx > 0 {
+		rt.closeStepWindow(taskNo, runningIdx) // 收口先于任务级结论行(A08 右界=本步末行)
 	}
 	writeTaskLog(taskNo, nil, delivery.LevelInfo, "取消处置完成(R-15):取消不是回滚,已执行步骤效果由交付工具幂等性承担")
 }

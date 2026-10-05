@@ -501,6 +501,40 @@ func TestStepLogWindowMatchesOwnRows(t *testing.T) {
 	waitAllSlotsFree(t, rt)
 }
 
+// TestFailedStepWindowCloses 失败链同样要收口日志区间(A08/REP-12 c7):
+// FAILED 步骤的区间须覆盖本步全部行(含末行「失败回写链完成」),不得留空右界。
+func TestFailedStepWindowCloses(t *testing.T) {
+	requireDB(t)
+	rt := useTool(t, `echo "PLAY RECAP ****"`+"\n"+
+		`echo "node-1 : ok=5 changed=1 unreachable=0 failed=1 skipped=0"`, time.Minute)
+	newFakeRemote([]string{"UNUSED"}, "IGN-NA").attach(t, rt)
+
+	clusterNo := seedCluster(t, ClusterStatusRunning)
+	taskNo := seedTask(t, clusterNo, TaskKindUpgrade, TaskStatusQueued, ExecPathLocal)
+	expandSteps(t, taskNo, TaskKindUpgrade, clusterNo, 0, nil)
+	enqueueTask(taskNo, DeliveryArgs{})
+	waitTaskStatuses(t, taskNo, TaskStatusFailed)
+
+	failed := stepsByStatus(t, taskNo, StepStatusFailed)
+	if len(failed) != 1 {
+		t.Fatalf("应只有第 1 步 FAILED,得到 %d 行", len(failed))
+	}
+	s := failed[0]
+	idx := int(paramInt(s["step_index"]))
+	rows, err := qList(`SELECT line_no FROM clc_task_log WHERE task_ref=? AND step_index=? AND flag=1 ORDER BY line_no`,
+		taskNo, idx)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("失败步骤应有日志行(rows=%d err=%v)", len(rows), err)
+	}
+	start := int(paramInt(s["log_start_line"]))
+	end := int(paramInt(s["log_end_line"]))
+	first, last := int(paramInt(rows[0]["line_no"])), int(paramInt(rows[len(rows)-1]["line_no"]))
+	if start != first || end != last {
+		t.Fatalf("失败步骤日志区间应为实走范围 [%d,%d],登记 [%d,%d]", first, last, start, end)
+	}
+	waitAllSlotsFree(t, rt)
+}
+
 func TestRecapVerdictOverridesExitCodeZero(t *testing.T) {
 	requireDB(t)
 	// 退出码 0 但剧本汇总有失败 ⇒ 判失败(B-AUTO-10 / A13 判定网关)
@@ -713,6 +747,18 @@ func TestCancelRunningTaskChain(t *testing.T) {
 	dump := logDump(t, taskNo)
 	if !strings.Contains(dump, "STEP-02-BEGIN") {
 		t.Fatalf("R-15/INV-42:被取消步骤的已产生输出不得丢失(采集须先于结论收束): %s", dump)
+	}
+	// A08:被取消步骤的日志区间同样收口(右界=本步末行,不含链后任务级结论行)
+	rows, err := qList(`SELECT line_no FROM clc_task_log WHERE task_ref=? AND step_index=? AND flag=1 ORDER BY line_no`, taskNo, 2)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("被取消步骤应有日志行(rows=%d err=%v)", len(rows), err)
+	}
+	after := mustStepRow(t, taskNo, 2)
+	if paramInt(after["log_start_line"]) != paramInt(rows[0]["line_no"]) ||
+		paramInt(after["log_end_line"]) != paramInt(rows[len(rows)-1]["line_no"]) {
+		t.Fatalf("A08:被取消步骤日志区间应收口到本步行 [%d,%d],登记 [%d,%d]",
+			paramInt(rows[0]["line_no"]), paramInt(rows[len(rows)-1]["line_no"]),
+			paramInt(after["log_start_line"]), paramInt(after["log_end_line"]))
 	}
 	if !strings.Contains(Str(row["result_summary"]), "取消完成") || Str(row["ended_at"]) == "" {
 		t.Fatalf("INV-29:取消终态须有结果摘要与结束时间: %+v", row)
