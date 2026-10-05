@@ -1,16 +1,16 @@
-# 应用栈：techbase 后端 + 前端（nginx）—— 接入 step1 生产基础设施
+# 应用栈：clc 后端 + 前端（nginx）—— 接入 step1 生产基础设施
 #
 # 重构口径（2026-10-02）：不再自起 gateway/postgres/redis，全部接入 opic-ai 生产环境
 # （192.168.3.200，*.opic-ai.ccoe.tech，见 opic-deploy 仓与 118 号生产部署方案）：
-#   - Traefik    统一入口（opic-net 外部网络，本栈只声明 labels，子域 techbase.opic-ai.ccoe.tech）
-#   - PostgreSQL Pigsty 集群 haproxy :5433（库 opicdb，schema otechbase —— OPIC-DB-SCHEMA-01）
+#   - Traefik    统一入口（opic-net 外部网络，本栈只声明 labels，子域 clc.opic-ai.ccoe.tech）
+#   - PostgreSQL Pigsty 集群 haproxy :5433（库 opicdb，schema oclc —— OPIC-DB-SCHEMA-01）
 #   - Redis      opic-redis（opic-net 内 :6379）
 #   - NATS       opic-nats（opic-net 内 :4222，EVENTBUS_DRIVER=nats 时）
 #   - Temporal   opic-temporal（opic-net 内 :7233，WORKFLOW_DRIVER=temporal 时）
 #   - Harbor     镜像来源（make harbor-push 推送 192.168.3.200:18700）
 #
 # 本地开发：configs/config.yml 默认即指生产；纯离线自足栈见 docker-compose.infra.yml（dev only）。
-name: opic-techbase
+name: opic-clc
 
 networks:
   opic-net:
@@ -18,9 +18,9 @@ networks:
     name: ${DOCKER_NETWORK:-opic-net}
 
 services:
-  techbase:
-    image: ${IMAGE_PREFIX:-192.168.3.200:18700/opic/techbase}:${IMAGE_TAG:-latest}
-    container_name: opic-techbase-app
+  clc:
+    image: ${IMAGE_PREFIX:-192.168.3.200:18700/opic/clc}:${IMAGE_TAG:-latest}
+    container_name: opic-clc-app
     restart: always
     depends_on: []   # 数据面(opic-pg/redis/nats/temporal)由 step1 部署工程先行拉起
     environment:
@@ -32,7 +32,7 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD 未配置}}
       DB_NAME: ${DB_NAME:-opicdb}
-      DB_SCHEMA: ${DB_SCHEMA:-otechbase}
+      DB_SCHEMA: ${DB_SCHEMA:-oclc}
       DB_SSLMODE: disable
       # ── Redis / 事件总线 / 工作流（容器网直连）──
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
@@ -43,7 +43,7 @@ services:
       EVENTBUS_URL: ${EVENTBUS_URL:-nats://opic-nats:4222}
       EVENTBUS_USERNAME: ${EVENTBUS_USERNAME:-opic}
       EVENTBUS_PASSWORD: ${EVENTBUS_PASSWORD:-${NATS_PASSWORD:?NATS_PASSWORD 未配置}}
-      CENTER_CODE: ${CENTER_CODE:-techbase}
+      CENTER_CODE: ${CENTER_CODE:-clc}
       NATS_STREAM: ${NATS_STREAM:-}
       NATS_SUBJECT_PREFIX: ${NATS_SUBJECT_PREFIX:-}
       WORKFLOW_DRIVER: ${WORKFLOW_DRIVER:-temporal}
@@ -74,7 +74,7 @@ services:
       # IdP/自站域名 → 宿主网关(容器侧 OIDC 发现/换码走 Traefik TLS)
       - "auth.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
       - "casdoor.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
-      - "techbase.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
+      - "clc.opic-ai.ccoe.tech:${AUTH_HOST_IP:-host-gateway}"
     volumes:
       # 自建 CA 公钥(step1 gen-certs.sh 签发 *.opic-ai.ccoe.tech,公钥可入库);
       # 容器内 OIDC 发现/换码经宿主网关 Traefik TLS 时须信任此 CA
@@ -88,30 +88,30 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=${DOCKER_NETWORK:-opic-net}
-      - opic.stack=techbase
+      - opic.stack=clc
       # 子域路由（TLS 入口由 step1 Traefik 的 websecure 承载；/api|/health|/metrics → 后端）
-      - traefik.http.routers.techbase-api.rule=Host(`techbase.${BASE_DOMAIN:?BASE_DOMAIN 未配置}`) && (PathPrefix(`/api`) || PathPrefix(`/health`) || Path(`/metrics`))
-      - traefik.http.routers.techbase-api.entrypoints=${TRAEFIK_ENTRYPOINT:-web}
-      - traefik.http.routers.techbase-api.priority=100
-      - traefik.http.routers.techbase-api.service=techbase-api
-      - traefik.http.services.techbase-api.loadbalancer.server.port=9680
+      - traefik.http.routers.clc-api.rule=Host(`clc.${BASE_DOMAIN:?BASE_DOMAIN 未配置}`) && (PathPrefix(`/api`) || PathPrefix(`/health`) || Path(`/metrics`))
+      - traefik.http.routers.clc-api.entrypoints=${TRAEFIK_ENTRYPOINT:-web}
+      - traefik.http.routers.clc-api.priority=100
+      - traefik.http.routers.clc-api.service=clc-api
+      - traefik.http.services.clc-api.loadbalancer.server.port=9680
     networks: [opic-net]
 
   frontend:
-    image: ${IMAGE_PREFIX:-192.168.3.200:18700/opic/techbase-frontend}:${IMAGE_TAG:-latest}
-    container_name: opic-techbase-frontend
+    image: ${IMAGE_PREFIX:-192.168.3.200:18700/opic/clc-frontend}:${IMAGE_TAG:-latest}
+    container_name: opic-clc-frontend
     restart: always
     depends_on:
-      - techbase
+      - clc
     labels:
       - traefik.enable=true
       - traefik.docker.network=${DOCKER_NETWORK:-opic-net}
-      - opic.stack=techbase
+      - opic.stack=clc
       # ⚠ Traefik 的 service 只指向 label 所在容器（step1 实测坑③）：
-      # web 路由必须挂 frontend 容器；/api|/health|/metrics 由 techbase 容器的 api 路由（priority 100）承接
-      - traefik.http.routers.techbase-web.rule=Host(`techbase.${BASE_DOMAIN}`)
-      - traefik.http.routers.techbase-web.entrypoints=${TRAEFIK_ENTRYPOINT:-web}
-      - traefik.http.routers.techbase-web.priority=1
-      - traefik.http.routers.techbase-web.service=techbase-web
-      - traefik.http.services.techbase-web.loadbalancer.server.port=80
+      # web 路由必须挂 frontend 容器；/api|/health|/metrics 由 clc 容器的 api 路由（priority 100）承接
+      - traefik.http.routers.clc-web.rule=Host(`clc.${BASE_DOMAIN}`)
+      - traefik.http.routers.clc-web.entrypoints=${TRAEFIK_ENTRYPOINT:-web}
+      - traefik.http.routers.clc-web.priority=1
+      - traefik.http.routers.clc-web.service=clc-web
+      - traefik.http.services.clc-web.loadbalancer.server.port=80
     networks: [opic-net]

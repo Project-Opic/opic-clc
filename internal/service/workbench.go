@@ -80,10 +80,10 @@ func WorkbenchTodo(userID int64, page, size int) (*Page, error) {
 	}
 	rows, err := qList(`
 		SELECT t.*, i.business_key, i.creator_id, i.started_at,
-		       c.customer_name, c.customer_no, c.applicant_name
+		       c.name AS cluster_name, c.cluster_no, c.status AS cluster_status, c.destroy_reason
 		FROM flow_task t
 		JOIN flow_instance i ON i.id = t.instance_id
-		LEFT JOIN customer_application c ON c.instance_id = i.id
+		LEFT JOIN clc_cluster c ON c.cluster_no = i.business_key AND c.flag = 1
 		WHERE `+where+` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`,
 		append(args, size, (page-1)*size)...)
 	if err != nil {
@@ -116,10 +116,10 @@ func WorkbenchDone(userID int64, page, size int) (*Page, error) {
 		return nil, err
 	}
 	rows, err := qList(`
-		SELECT t.*, i.business_key, c.customer_name, c.customer_no
+		SELECT t.*, i.business_key, c.name AS cluster_name, c.cluster_no
 		FROM flow_task t
 		JOIN flow_instance i ON i.id = t.instance_id
-		LEFT JOIN customer_application c ON c.instance_id = i.id
+		LEFT JOIN clc_cluster c ON c.cluster_no = i.business_key AND c.flag = 1
 		WHERE `+where+` ORDER BY t.done_at DESC LIMIT ? OFFSET ?`,
 		append(args, size, (page-1)*size)...)
 	if err != nil {
@@ -131,18 +131,22 @@ func WorkbenchDone(userID int64, page, size int) (*Page, error) {
 	return &Page{List: rows, Total: total, PageV: page, Size: size}, nil
 }
 
-// WorkbenchRequested 我的申请。
+// WorkbenchRequested 我的申请(clc 口径:我提交的集群销毁审批单;审批期间状态不变)。
 func WorkbenchRequested(userID int64, page, size int) (*Page, error) {
-	total, err := qCount(`SELECT COUNT(*) FROM customer_application WHERE applicant_id=?`, userID)
+	total, err := qCount(`
+		SELECT COUNT(*) FROM flow_instance i JOIN flow_definition d ON d.id = i.def_id
+		WHERE d.code = ? AND i.creator_id = ?`, flowDestroyApp, userID)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := qList(`
-		SELECT c.*, i.status AS flow_status
-		FROM customer_application c
-		LEFT JOIN flow_instance i ON i.id = c.instance_id
-		WHERE c.applicant_id=?
-		ORDER BY c.id DESC LIMIT ? OFFSET ?`, userID, size, (page-1)*size)
+		SELECT i.id, i.business_key, i.status AS flow_status, i.started_at,
+		       c.name AS cluster_name, c.status AS cluster_status, c.destroy_reason
+		FROM flow_instance i
+		JOIN flow_definition d ON d.id = i.def_id
+		LEFT JOIN clc_cluster c ON c.cluster_no = i.business_key AND c.flag = 1
+		WHERE d.code = ? AND i.creator_id = ?
+		ORDER BY i.id DESC LIMIT ? OFFSET ?`, flowDestroyApp, userID, size, (page-1)*size)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +236,7 @@ func ApproveTask(taskID int64, comment string, user UserInfo) (any, error) {
 		if _, err := eng.Approve(toInt(task["id"]), comment, user.ID, user.Username); err != nil {
 			return nil, err
 		}
-		if _, err := SyncCustomerStatusFromInstance(db, toInt(task["instance_id"])); err != nil {
+		if _, err := SyncClusterDestroyFromInstance(db, toInt(task["instance_id"])); err != nil {
 			return nil, err
 		}
 		return toInt(task["instance_id"]), nil
@@ -245,7 +249,7 @@ func RejectTask(taskID int64, comment string, user UserInfo) (any, error) {
 		if _, err := eng.Reject(toInt(task["id"]), comment, user.ID, user.Username); err != nil {
 			return nil, err
 		}
-		if _, err := SyncCustomerStatusFromInstance(db, toInt(task["instance_id"])); err != nil {
+		if _, err := SyncClusterDestroyFromInstance(db, toInt(task["instance_id"])); err != nil {
 			return nil, err
 		}
 		return toInt(task["instance_id"]), nil
@@ -265,7 +269,7 @@ func ReturnTask(taskID int64, targetActivityID, comment string, user UserInfo) (
 		if _, err := eng.ReturnTo(toInt(task["id"]), targetActivityID, comment, user.ID, user.Username); err != nil {
 			return nil, err
 		}
-		if _, err := SyncCustomerStatusFromInstance(db, toInt(task["instance_id"])); err != nil {
+		if _, err := SyncClusterDestroyFromInstance(db, toInt(task["instance_id"])); err != nil {
 			return nil, err
 		}
 		return nil, nil

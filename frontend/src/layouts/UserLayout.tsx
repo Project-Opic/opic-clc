@@ -36,6 +36,13 @@ import {
   RobotOutlined,
   CommentOutlined,
   DoubleRightOutlined,
+  ClusterOutlined,
+  DatabaseOutlined,
+  HddOutlined,
+  ApiOutlined,
+  HistoryOutlined,
+  HeartOutlined,
+  FundViewOutlined,
 } from '@ant-design/icons'
 import { useSelector } from 'react-redux'
 import { authApi, type MenuItem } from '../api/auth'
@@ -70,6 +77,14 @@ const ICON_MAP: Record<string, React.ComponentType<{ style?: React.CSSProperties
   Shield: SafetyOutlined,
   Key: KeyOutlined,
   Menu: MenuOutlined,
+  Cluster: ClusterOutlined,
+  Database: DatabaseOutlined,
+  Hdd: HddOutlined,
+  Api: ApiOutlined,
+  History: HistoryOutlined,
+  Heartbeat: HeartOutlined,
+  FundView: FundViewOutlined,
+  DeploymentUnit: DeploymentUnitOutlined,
 }
 
 function renderIcon(name: string | null | undefined, isDir: boolean) {
@@ -179,7 +194,7 @@ function WorkbenchShell() {
     setTabs(next)
     if (location.pathname === key) {
       const target = next[idx] || next[idx - 1]
-      navigate(target ? target.key : '/customer/apply')
+      navigate(target ? target.key : '/clc/cluster')
     }
   }
 

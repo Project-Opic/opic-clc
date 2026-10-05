@@ -512,6 +512,43 @@ flows:
   startActivity: A01
   endActivities:
   - A08
+  nodeGraph:
+    nodes:
+    - id: start
+      type: start
+      name: 提交销毁申请(强制原因 + 影响面强制展示)
+      behavior_ref: FUNC-05
+    - id: approve
+      type: approval_task
+      name: 平台运维管理员审批(销毁;强制不免审批 R-10)
+      role_ref: CLC-ROLE-02
+      behavior_ref: FUNC-31
+      outcomes:
+      - APPROVE
+      - REJECT
+    - id: execute
+      type: behavior_call
+      name: 进入 PROC-05 销毁链(交付工具卸载 → 吊销证书 → 级联清理 → 终态)
+      behavior_ref: FUNC-31
+    - id: end_ok
+      type: end
+      name: 审批通过:创建 DESTROY 任务并执行销毁编排(R-07/R-10)
+      result: APPROVED
+    - id: end_reject
+      type: end
+      name: 审批关闭:状态不变,意见留痕
+      result: REJECTED
+    edges:
+    - source: start
+      target: approve
+    - source: approve
+      target: execute
+      approval_outcome: APPROVE
+    - source: execute
+      target: end_ok
+    - source: approve
+      target: end_reject
+      approval_outcome: REJECT
   activities:
   - activityId: A01
     name: 提交销毁申请 FUNC-05

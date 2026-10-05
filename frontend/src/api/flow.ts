@@ -1,5 +1,4 @@
 import { http, type PageResult } from './request'
-import type { Customer } from './customer'
 
 export interface FlowGraphNode {
   id: string
@@ -95,19 +94,26 @@ export interface FlowHistoryItem {
 /* ============ 工作台条目(任务行合并客户信息) ============ */
 
 export interface TodoItem extends FlowTask {
-  customer_name?: string
-  customer_no?: string
-  applicant_name?: string
+  cluster_name?: string
+  cluster_no?: string
+  cluster_status?: string
+  destroy_reason?: string
   started_at?: string
 }
 
 export interface DoneItem extends FlowTask {
-  customer_name?: string
-  customer_no?: string
+  cluster_name?: string
+  cluster_no?: string
 }
 
-export interface RequestedItem extends Customer {
+export interface RequestedItem {
+  id: number
+  business_key?: string
+  cluster_name?: string | null
+  cluster_status?: string | null
+  destroy_reason?: string | null
   flow_status?: string
+  started_at?: string
 }
 
 /* ============ 流程定义 ============ */

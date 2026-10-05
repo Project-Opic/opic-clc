@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Popover } from 'antd'
+import { Popover, Table } from 'antd'
 import { DoubleRightOutlined, RobotOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { assistantApi } from '../api/assistant'
+import { assistantApi, type AssistantTable } from '../api/assistant'
 import { http } from '../api/request'
 
 // AI 智能助理工作区（用户工作台与管理控制台共用的右侧常驻面板,用户规则 2026-10）。
 // 复用 .app-chat* 玻璃样式(user-workbench.css,[data-glass] 作用域双端生效);
 // 折叠态由宿主布局持久化;对话携带模型选择(与悬浮抽屉共享 localStorage 选择)。
+// 渲染协议:text(正文)+ table(只读 SQL/台账结构化结果)+ action(引导跳转);
+// 安全边界:AI 只读,动态 SQL 仅 SELECT/WITH + clc 白名单 + 强制 LIMIT + 审计(/api/assistant/sql)。
 interface ChatMsg {
   id: number
   role: 'user' | 'assistant'
   text: string
   action?: string
+  table?: AssistantTable
 }
 
 interface ModelOption {
@@ -42,9 +45,9 @@ export default function AIChatWorkspace({
   const [busy, setBusy] = useState(false)
   const [hints, setHints] = useState<string[]>([
     '我有哪些待办？',
-    '我的客户申请进展？',
-    '审批怎么操作？',
-    '流程有哪些节点？',
+    '集群台账有哪些？',
+    '任务台账有哪些？',
+    '聚合健康怎么查？',
   ])
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -91,7 +94,10 @@ export default function AIChatWorkspace({
       setBusy(true)
       try {
         const reply = await assistantApi.chat(q, sel.accountId, sel.model, sel.temp)
-        setMessages((m) => [...m, { id: Date.now() + 1, role: 'assistant', text: reply.answer, action: reply.action }])
+        setMessages((m) => [
+          ...m,
+          { id: Date.now() + 1, role: 'assistant', text: reply.answer, action: reply.action, table: reply.table },
+        ])
         if (reply.hints?.length) setHints(reply.hints)
       } catch {
         setMessages((m) => [...m, { id: Date.now() + 1, role: 'assistant', text: '助理服务暂时不可用，请稍后重试。' }])
@@ -213,6 +219,23 @@ export default function AIChatWorkspace({
               }}
             >
               {m.text}
+              {m.role === 'assistant' && m.table && (m.table.columns?.length || 0) > 0 ? (
+                <Table
+                  size="small"
+                  style={{ marginTop: 8, maxWidth: 460 }}
+                  pagination={false}
+                  scroll={{ x: 'max-content' }}
+                  columns={(m.table.columns || []).map((c) => ({ title: c, dataIndex: c, key: c, ellipsis: true }))}
+                  dataSource={(m.table.rows || []).map((r, i) => {
+                    const row: Record<string, unknown> = { __key: i }
+                    ;(m.table!.columns || []).forEach((c, ci) => {
+                      row[c] = r[ci]
+                    })
+                    return row
+                  })}
+                  rowKey="__key"
+                />
+              ) : null}
               {m.role === 'assistant' && m.action ? (
                 <div style={{ marginTop: 6 }}>
                   <a
@@ -234,7 +257,7 @@ export default function AIChatWorkspace({
                 <RobotOutlined />
               </div>
               <p className="app-chat-empty-title">我是 OPIC AI 助理</p>
-              <p className="app-chat-empty-desc">可以查待办、客户进展、审批指引——试试下方问题</p>
+              <p className="app-chat-empty-desc">可以查待办、集群/任务台账、聚合健康,或直接输入只读 SELECT——试试下方问题</p>
             </div>
           ) : null}
           {hints.length > 0 && !busy ? (

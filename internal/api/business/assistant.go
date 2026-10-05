@@ -37,3 +37,25 @@ func AssistantChat(c *gin.Context) {
 func AssistantModels(c *gin.Context) {
 	c.JSON(200, errcode.OK(gin.H{"models": service.AssistantModelOptions()}))
 }
+
+type assistantSQLReq struct {
+	SQL string `json:"sql"`
+}
+
+// AssistantSQL POST /api/assistant/sql —— 只读 SQL 工具(readonly_sql_query)。
+//
+// 安全边界(架构文档 §9.11):仅 SELECT/WITH、clc 白名单、强制 LIMIT、禁多语句、执行审计。
+func AssistantSQL(c *gin.Context) {
+	var body assistantSQLReq
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.SQL) == "" {
+		c.JSON(200, errcode.Error(errcode.ErrParam, "sql 不能为空"))
+		return
+	}
+	u := service.FromCtx(c.Request.Context())
+	table, guarded, err := service.RunReadOnlySQL(u.ID, u.Username, body.SQL)
+	if err != nil {
+		c.JSON(200, errcode.Error(errcode.ErrParam, "%s", err.Error()))
+		return
+	}
+	c.JSON(200, errcode.OK(gin.H{"columns": table.Columns, "rows": table.Rows, "count": len(table.Rows), "sql": guarded}))
+}

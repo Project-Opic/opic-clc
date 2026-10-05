@@ -55,15 +55,15 @@ export default function Todo() {
 
   const columns: ColumnsType<TodoItem> = [
     {
-      title: '客户编号',
-      dataIndex: 'customer_no',
-      key: 'customer_no',
+      title: '集群编号',
+      dataIndex: 'cluster_no',
+      key: 'cluster_no',
       width: 150,
       render: (v: string | undefined, r) => v || r.business_key || '-',
     },
-    { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name', render: (v) => v || '-' },
+    { title: '集群名称', dataIndex: 'cluster_name', key: 'cluster_name', render: (v) => v || '-' },
     { title: '审批节点', dataIndex: 'activity_name', key: 'activity_name', width: 180 },
-    { title: '提交人', dataIndex: 'applicant_name', key: 'applicant_name', width: 120, render: (v) => v || '-' },
+    { title: '强制原因', dataIndex: 'destroy_reason', key: 'destroy_reason', ellipsis: true, render: (v) => v || '-' },
     { title: '提交时间', dataIndex: 'started_at', key: 'started_at', width: 180, render: (v) => v || '-' },
     {
       title: '操作',
@@ -133,7 +133,7 @@ export default function Todo() {
         }
       >
         <p style={{ color: '#888' }}>
-          客户：{current?.customer_name || '-'}（{current?.customer_no || current?.business_key || '-'}） · 节点：
+          集群：{current?.cluster_name || '-'}（{current?.cluster_no || current?.business_key || '-'}） · 
           {current?.activity_name}
         </p>
         <Input.TextArea

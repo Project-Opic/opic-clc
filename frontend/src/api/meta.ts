@@ -16,10 +16,7 @@ export interface Rule {
 
 export const metaApi = {
   dictionaries() {
-    return http.get<{ CUSTOMER_TYPE: DictItem[]; CUSTOMER_LEVEL: DictItem[] }>('/api/meta/dictionaries')
-  },
-  customerStatus() {
-    return http.get<string[]>('/api/meta/customer-status')
+    return http.get<Record<string, DictItem[]>>('/api/meta/dictionaries')
   },
   rules() {
     return http.get<Rule[]>('/api/meta/rules')

@@ -19,8 +19,14 @@ import NoticeManage from '../admin/pages/NoticeManage'
 import ErrCodes from '../admin/pages/ErrCodes'
 import ServerMonitor from '../admin/pages/ServerMonitor'
 import { isAdminPermissions } from '../admin/access'
-import CustomerApply from '../pages/customer/CustomerApply'
-import CustomerQuery from '../pages/customer/CustomerQuery'
+import ClcClusterManage from '../pages/clc/ClusterManage'
+import ClcNodeManage from '../pages/clc/NodeManage'
+import ClcOrchManage from '../pages/clc/OrchManage'
+import ClcRefManage from '../pages/clc/RefManage'
+import ClcSnapManage from '../pages/clc/SnapManage'
+import ClcHealthManage from '../pages/clc/HealthManage'
+import ClcOpsManage from '../pages/clc/OpsManage'
+import ClcParams from '../pages/clc/ParamsManage'
 import Todo from '../pages/workbench/Todo'
 import Done from '../pages/workbench/Done'
 import Requested from '../pages/workbench/Requested'
@@ -38,7 +44,7 @@ import ResourceManage from '../pages/system/ResourceManage'
 
 /** 登录成功 / 恢复会话后的首页:一律进用户工作台(管理员经工作台 Header「管理控制台」入口或直接输 /admin 进控制台) */
 export function resolveHomePath(_permissions?: string[] | undefined | null): string {
-  return '/customer/apply'
+  return '/clc/cluster'
 }
 
 /** 有 token 无 user 时先调 /auth/info 恢复登录态,失败清 token 回 /login */
@@ -82,7 +88,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 /** 根路径:一律重定向到用户工作台 */
 function RootRedirect() {
-  return <Navigate to="/customer/apply" replace />
+  return <Navigate to="/clc/cluster" replace />
 }
 
 /** 旧设计器路径重定向:需要在运行时读取 :id 参数(Navigate.to 不会做参数插值) */
@@ -113,7 +119,7 @@ export default function AppRoutes() {
         }
       />
 
-      {/* 用户工作台(玻璃风):/customer/*、/workbench/* */}
+      {/* 用户工作台(玻璃风):/clc/* 八屏、/workbench/* */}
       <Route
         path="/"
         element={
@@ -122,8 +128,14 @@ export default function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route path="customer/apply" element={<CustomerApply />} />
-        <Route path="customer/query" element={<CustomerQuery />} />
+        <Route path="clc/cluster" element={<ClcClusterManage />} />
+        <Route path="clc/node" element={<ClcNodeManage />} />
+        <Route path="clc/orch" element={<ClcOrchManage />} />
+        <Route path="clc/ref" element={<ClcRefManage />} />
+        <Route path="clc/snap" element={<ClcSnapManage />} />
+        <Route path="clc/health" element={<ClcHealthManage />} />
+        <Route path="clc/ops" element={<ClcOpsManage />} />
+        <Route path="clc/params" element={<ClcParams />} />
         <Route path="workbench/todo" element={<Todo />} />
         <Route path="workbench/done" element={<Done />} />
         <Route path="workbench/requested" element={<Requested />} />
@@ -163,7 +175,10 @@ export default function AppRoutes() {
         <Route path="notice" element={<NoticeManage />} />
         <Route path="errcodes" element={<ErrCodes />} />
         <Route path="monitor" element={<ServerMonitor />} />
-        <Route path="biz/customers" element={<CustomerQuery />} />
+        <Route path="biz/clusters" element={<ClcClusterManage />} />
+        <Route path="biz/nodes" element={<ClcNodeManage />} />
+        <Route path="biz/orch" element={<ClcOrchManage />} />
+        <Route path="biz/ops" element={<ClcOpsManage />} />
         <Route path="biz/approval" element={<Todo />} />
       </Route>
 

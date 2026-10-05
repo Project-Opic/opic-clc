@@ -1,4 +1,4 @@
-// Package meta —— 元数据控制器(字典/客户状态/M3 规则;数据源为本体注册表)。
+// Package meta —— 元数据控制器(字典/M3 规则;数据源为本体注册表)。
 package meta
 
 import (
@@ -12,20 +12,31 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
 )
 
-var customerStatuses = []string{"草稿", "待客户经理审批", "待部门总经理审批", "已通过", "已驳回"}
-
-// Dictionaries GET /api/meta/dictionaries 字典项。
+// Dictionaries GET /api/meta/dictionaries 字典项(m1 data_dictionaries 全量)。
 func Dictionaries(c *gin.Context) {
 	reg := ontology.Load()
 	c.JSON(200, errcode.OK(map[string]any{
-		"CUSTOMER_TYPE":  common.OrEmpty(reg.GetDictionaryItems("DICT-CUSTOMER-TYPE", "CUSTOMER_TYPE")),
-		"CUSTOMER_LEVEL": common.OrEmpty(reg.GetDictionaryItems("DICT-CUSTOMER-LEVEL", "CUSTOMER_LEVEL")),
+		"CLC_CLUSTER_STATUS":     common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_CLUSTER_STATUS", "CLC_CLUSTER_STATUS")),
+		"CLC_HEALTH":             common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_HEALTH", "CLC_HEALTH")),
+		"CLC_DEGRADED_REASON":    common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_DEGRADED_REASON", "CLC_DEGRADED_REASON")),
+		"CLC_NODE_STATUS":        common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_NODE_STATUS", "CLC_NODE_STATUS")),
+		"CLC_NODE_HEALTH":        common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_NODE_HEALTH", "CLC_NODE_HEALTH")),
+		"CLC_TASK_STATUS":        common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TASK_STATUS", "CLC_TASK_STATUS")),
+		"CLC_TASK_FAIL_REASON":   common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TASK_FAIL_REASON", "CLC_TASK_FAIL_REASON")),
+		"CLC_PROBE_RESULT":       common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_PROBE_RESULT", "CLC_PROBE_RESULT")),
+		"CLC_RUN_MODE":           common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_RUN_MODE", "CLC_RUN_MODE")),
+		"CLC_NODE_ROLE":          common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_NODE_ROLE", "CLC_NODE_ROLE")),
+		"CLC_TARGET_CAPABILITY":  common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TARGET_CAPABILITY", "CLC_TARGET_CAPABILITY")),
+		"CLC_TARGET_KIND":        common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TARGET_KIND", "CLC_TARGET_KIND")),
+		"CLC_BINDING_PURPOSE":    common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_BINDING_PURPOSE", "CLC_BINDING_PURPOSE")),
+		"CLC_BINDING_SOURCE":     common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_BINDING_SOURCE", "CLC_BINDING_SOURCE")),
+		"CLC_PARAM_SOURCE":       common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_PARAM_SOURCE", "CLC_PARAM_SOURCE")),
+		"CLC_PARAM_DERIVED_FROM": common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_PARAM_DERIVED_FROM", "CLC_PARAM_DERIVED_FROM")),
+		"CLC_SNAPSHOT_TYPE":      common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_SNAPSHOT_TYPE", "CLC_SNAPSHOT_TYPE")),
+		"CLC_TASK_KIND":          common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TASK_KIND", "CLC_TASK_KIND")),
+		"CLC_EXEC_PATH":          common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_EXEC_PATH", "CLC_EXEC_PATH")),
+		"CLC_TRIGGER_SOURCE":     common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TRIGGER_SOURCE", "CLC_TRIGGER_SOURCE")),
 	}))
-}
-
-// CustomerStatus GET /api/meta/customer-status 客户状态清单。
-func CustomerStatus(c *gin.Context) {
-	c.JSON(200, errcode.OK(customerStatuses))
 }
 
 // Rules GET /api/meta/rules M3 规则清单。

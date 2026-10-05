@@ -1,6 +1,7 @@
 // Package api —— Gin 路由注册(gopherforge internal/api 模式:公开组 + 登录组 + 权限中间件按路由挂载)。
 //
-// 路由表与重构前(hertz router/v1)逐条一致,API 契约不变。
+// 路由表与重构前(hertz router/v1)逐条一致,API 契约不变;
+// 集群域业务路由(/api/clc/*)写操作按 m5 行为级权限挂载。
 package api
 
 import (
@@ -41,18 +42,53 @@ func SetupRoutes(r *gin.Engine) {
 
 		// 元数据(登录即可)
 		authed.GET("/meta/dictionaries", meta.Dictionaries)
-		authed.GET("/meta/customer-status", meta.CustomerStatus)
 		authed.POST("/assistant/chat", business.AssistantChat)
 		authed.GET("/assistant/models", business.AssistantModels)
+		authed.POST("/assistant/sql", business.AssistantSQL)
 		authed.GET("/meta/rules", meta.Rules)
 
-		// 客户申请(登录即可;业务校验在服务层)
-		authed.GET("/customer", business.CustomerList)
-		authed.GET("/customer/:id", business.CustomerGet)
-		authed.POST("/customer/draft", business.CustomerCreateDraft)
-		authed.PUT("/customer/:id/draft", business.CustomerUpdateDraft)
-		authed.POST("/customer/:id/submit", business.CustomerSubmit)
-		authed.POST("/customer/:id/withdraw", business.CustomerWithdraw)
+		// 写操作权限挂载助手(RequirePermission 包装)
+		perm := func(code string, handler gin.HandlerFunc) []gin.HandlerFunc {
+			return []gin.HandlerFunc{middleware.RequirePermission(code), handler}
+		}
+
+		// ---- 集群域业务(/api/clc/*;写操作按 m5 行为级权限挂载) ----
+		// 集群(AGG-CLC-01)
+		authed.GET("/clc/cluster", perm("PERM-FUNC-19", business.ClcClusterList)...)
+		authed.GET("/clc/cluster/:id", perm("PERM-FUNC-20", business.ClcClusterGet)...)
+		authed.POST("/clc/cluster", perm("PERM-FUNC-01", business.ClcClusterCreate)...)
+		authed.PUT("/clc/cluster/:id", perm("PERM-FUNC-02", business.ClcClusterUpdate)...)
+		authed.GET("/clc/cluster/:id/destroy-impact", perm("PERM-FUNC-05", business.ClcDestroyImpact)...)
+		authed.PUT("/clc/cluster/:id/destroy-draft", perm("PERM-FUNC-05", business.ClcDestroyDraft)...)
+		authed.POST("/clc/cluster/:id/destroy-submit", perm("PERM-FUNC-05", business.ClcDestroySubmit)...)
+		authed.POST("/clc/cluster/:id/recover", perm("PERM-FUNC-16", business.ClcRecover)...)
+		authed.GET("/clc/statistics", perm("PERM-FUNC-29", business.ClcStatistics)...)
+		authed.GET("/clc/cross/clusters", perm("PERM-FUNC-28", business.ClcCrossClusters)...)
+		// 节点(AGG-CLC-02)
+		authed.GET("/clc/node", perm("PERM-FUNC-21", business.ClcNodeList)...)
+		authed.POST("/clc/cluster/:id/node", perm("PERM-FUNC-06", business.ClcNodeAdd)...)
+		authed.POST("/clc/node/:id/remove", perm("PERM-FUNC-07", business.ClcNodeRemove)...)
+		authed.POST("/clc/node/:id/rebind", perm("PERM-FUNC-08", business.ClcNodeRebind)...)
+		// 引用与参数(AGG-CLC-03/04)
+		authed.GET("/clc/binding", perm("PERM-FUNC-22", business.ClcBindingList)...)
+		authed.POST("/clc/cluster/:id/binding", perm("PERM-FUNC-13", business.ClcBindingAdjust)...)
+		authed.GET("/clc/param", perm("PERM-FUNC-23", business.ClcParamList)...)
+		authed.POST("/clc/cluster/:id/param", perm("PERM-FUNC-14", business.ClcParamOverride)...)
+		authed.POST("/clc/cluster/:id/param/sync", perm("PERM-FUNC-15", business.ClcParamSync)...)
+		// 快照(AGG-CLC-05)
+		authed.GET("/clc/snapshot", perm("PERM-FUNC-24", business.ClcSnapshotList)...)
+		authed.POST("/clc/cluster/:id/snapshot", perm("PERM-FUNC-17", business.ClcSnapshotCreate)...)
+		authed.POST("/clc/snapshot/:id/rollback", perm("PERM-FUNC-18", business.ClcSnapshotRollback)...)
+		// 任务(AGG-CLC-06)
+		authed.GET("/clc/task", perm("PERM-FUNC-25", business.ClcTaskList)...)
+		authed.POST("/clc/cluster/:id/task", perm("PERM-FUNC-03", business.ClcTaskAction)...)
+		// 探活(AGG-CLC-07)
+		authed.GET("/clc/probe", perm("PERM-FUNC-26", business.ClcProbeList)...)
+		authed.POST("/clc/cluster/:id/probe", perm("PERM-FUNC-26", business.ClcProbeRun)...)
+		authed.GET("/clc/health/aggregate", perm("PERM-FUNC-27", business.ClcAggregateHealth)...)
+		// 平台参数(FUNC-30)
+		authed.GET("/clc/params", business.ClcParamsGet)
+		authed.PUT("/clc/params", perm("PERM-FUNC-30", business.ClcParamsSave)...)
 
 		// 审批中心(登录即可;归属校验在服务层)
 		authed.GET("/workbench/todo", business.WorkbenchTodo)
@@ -106,11 +142,6 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/permissions/all", system.PermissionAll)
 		authed.GET("/resources", system.ResourceList)
 		authed.GET("/resources/tree", system.ResourceTree)
-
-		// ---- 写操作:按权限码挂载中间件 ----
-		perm := func(code string, handler gin.HandlerFunc) []gin.HandlerFunc {
-			return []gin.HandlerFunc{middleware.RequirePermission(code), handler}
-		}
 
 		// 用户管理
 		authed.POST("/users", perm("system:user:add", system.UserCreate)...)

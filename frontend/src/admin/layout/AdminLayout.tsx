@@ -9,7 +9,7 @@ import type { MenuProps } from 'antd'
 import AIAssistantPanel from '../../components/AIAssistantPanel'
 import AIChatWorkspace from '../../components/AIChatWorkspace'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import {SunOutlined,MoonOutlined,UserOutlined,DashboardOutlined,TeamOutlined,SafetyOutlined,ApartmentOutlined,DesktopOutlined,SolutionOutlined,PartitionOutlined,CloudServerOutlined,WarningOutlined,ToolOutlined,MenuFoldOutlined,MenuUnfoldOutlined,NotificationOutlined,ControlOutlined,CheckSquareOutlined,FileTextOutlined,FolderOutlined,HomeOutlined,LoginOutlined,LogoutOutlined,MonitorOutlined,RobotOutlined,SwapOutlined} from '@ant-design/icons'
+import {SunOutlined,MoonOutlined,UserOutlined,DashboardOutlined,TeamOutlined,SafetyOutlined,ApartmentOutlined,DesktopOutlined,SolutionOutlined,PartitionOutlined,CloudServerOutlined,WarningOutlined,ToolOutlined,MenuFoldOutlined,MenuUnfoldOutlined,NotificationOutlined,ControlOutlined,CheckSquareOutlined,FileTextOutlined,FolderOutlined,HomeOutlined,LoginOutlined,LogoutOutlined,MonitorOutlined,RobotOutlined,SwapOutlined,ClusterOutlined,HddOutlined,DeploymentUnitOutlined} from '@ant-design/icons'
 import { useSelector } from 'react-redux'
 import { authApi } from '../../api/auth'
 import { clearToken } from '../../api/request'
@@ -98,7 +98,9 @@ function buildMenuDefs(hasSystem: boolean, hasFlow: boolean): AdminMenuDef[] {
       label: '业务管理',
       icon: <CheckSquareOutlined />,
       children: [
-        { key: '/admin/biz/customers', label: '客户管理', icon: <UserOutlined /> },
+        { key: '/admin/biz/clusters', label: '集群台账', icon: <ClusterOutlined /> },
+        { key: '/admin/biz/nodes', label: '节点管理', icon: <HddOutlined /> },
+        { key: '/admin/biz/orch', label: '交付编排', icon: <DeploymentUnitOutlined /> },
         { key: '/admin/biz/approval', label: '审批工作台', icon: <CheckSquareOutlined /> },
       ],
     })
@@ -184,7 +186,7 @@ function ConsoleShell() {
       key: 'workbench',
       icon: <SwapOutlined />,
       label: '用户工作台',
-      onClick: () => navigate('/customer/apply'),
+      onClick: () => navigate('/clc/cluster'),
     },
     { type: 'divider' },
     {

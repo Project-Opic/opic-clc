@@ -57,15 +57,27 @@ func NewNATS(opts Options) (EventBus, error) {
 	if len(subjects) == 0 {
 		subjects = []string{"opic.>"} // 兜底：未指定前缀时保持全平台捕获（兼容旧部署）
 	}
-	stream, err := js.CreateStream(context.Background(), jetstream.StreamConfig{
+	desired := jetstream.StreamConfig{
 		Name:      name,
 		Subjects:  subjects,
 		Retention: jetstream.LimitsPolicy,
 		MaxAge:    maxAge,
-	})
+	}
+	stream, err := js.CreateStream(context.Background(), desired)
 	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("eventbus: 创建 stream %s 失败: %w", name, err)
+		// 已存在(10058 stream name already in use / 10065 subjects overlap)时改为取回并更新,
+		// 保证进程重启/参数调整后事件总线仍可用(幂等,不因存量流而整体降级)。
+		ctx := context.Background()
+		existing, gerr := js.Stream(ctx, name)
+		if gerr != nil {
+			nc.Close()
+			return nil, fmt.Errorf("eventbus: 创建 stream %s 失败: %w", name, err)
+		}
+		if _, uerr := js.UpdateStream(ctx, desired); uerr != nil {
+			nc.Close()
+			return nil, fmt.Errorf("eventbus: 更新 stream %s 失败: %w", name, uerr)
+		}
+		stream = existing
 	}
 	return &natsBus{conn: nc, js: js, stream: stream, opts: opts}, nil
 }

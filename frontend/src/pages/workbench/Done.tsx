@@ -47,12 +47,12 @@ export default function Done() {
   const columns: ColumnsType<DoneItem> = [
     {
       title: '客户编号',
-      dataIndex: 'customer_no',
-      key: 'customer_no',
+      dataIndex: 'cluster_no',
+      key: 'cluster_no',
       width: 150,
       render: (v: string | undefined, r) => v || r.business_key || '-',
     },
-    { title: '客户名称', dataIndex: 'customer_name', key: 'customer_name', render: (v) => v || '-' },
+    { title: '集群名称', dataIndex: 'cluster_name', key: 'cluster_name', render: (v) => v || '-' },
     { title: '审批节点', dataIndex: 'activity_name', key: 'activity_name', width: 160 },
     {
       title: '动作',

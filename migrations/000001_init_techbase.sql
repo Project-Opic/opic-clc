@@ -158,30 +158,10 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
 
--- ============ 示例业务表:客户申请 ============
-
-CREATE TABLE IF NOT EXISTS customer_application (
-    id BIGSERIAL PRIMARY KEY,
-    customer_no VARCHAR(50) UNIQUE,
-    customer_name VARCHAR(100) NOT NULL,
-    customer_type VARCHAR(20),
-    industry VARCHAR(50),
-    contact_person VARCHAR(50),
-    contact_phone VARCHAR(20),
-    customer_level VARCHAR(20),
-    address VARCHAR(200),
-    remark VARCHAR(500),
-    status VARCHAR(30) DEFAULT '草稿',
-    applicant_id BIGINT,
-    applicant_name VARCHAR(50),
-    instance_id BIGINT,
-    created_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
-    updated_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
-);
+-- cluster-center-mcc fork:底座客户申请示例业务表已移除,业务 DDL 见 000004_business_clc.sql
 
 -- +goose Down
 
-DROP TABLE IF EXISTS customer_application;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS flow_history;
 DROP TABLE IF EXISTS flow_task;
