@@ -48,7 +48,7 @@ var seedRoles = []struct{ Code, Name, Desc string }{
 	{"CLC-ROLE-05", "下游能力中心", "服务身份,非岗位(m5 actorType=SYSTEM;仅跨中心集群查询口径)"},
 }
 
-// permNames PERM-FUNC-01..32 → m2 行为名(权限种子列序与值序一致)。
+// permNames PERM-FUNC-01..35 → m2 行为名(权限种子列序与值序一致)。
 var permNames = map[int]string{
 	1:  "创建集群(四步向导提交)",
 	2:  "集群信息修改",
@@ -82,17 +82,64 @@ var permNames = map[int]string{
 	30: "运行参数维护",
 	31: "集群销毁 · 通过",
 	32: "集群销毁 · 驳回",
+	33: "取消执行中任务",
+	34: "交付步骤查询",
+	35: "任务日志回放查询",
 }
 
 // buildSeedPermissions 由 permNames 展开(m5 permissions 全集,严格与 m2 requiredPermissions 对齐)。
 func buildSeedPermissions() []struct{ Code, Name, TargetType, TargetRef string } {
 	out := make([]struct{ Code, Name, TargetType, TargetRef string }, 0, len(permNames))
-	for i := 1; i <= 32; i++ {
+	for i := 1; i <= len(permNames); i++ {
 		out = append(out, struct{ Code, Name, TargetType, TargetRef string }{
 			Code: fmt.Sprintf("PERM-FUNC-%02d", i), Name: permNames[i], TargetType: "BEHAVIOR", TargetRef: fmt.Sprintf("FUNC-%02d", i),
 		})
 	}
 	return out
+}
+
+// backfillSeedPermissions m5 权限矩阵幂等回填。
+// EnsureSeed 主路径只在空库执行;v1.1 新增行为(PERM-FUNC-33/34/35)必须在存量库同样入库,
+// 否则接口层 perm() 直接 403(模型是唯一语义来源,矩阵照抄 m5 roles[].permissions)。
+func backfillSeedPermissions() error {
+	for _, p := range buildSeedPermissions() {
+		exists, err := qOne(`SELECT id FROM sys_permission WHERE code = ?`, p.Code)
+		if err != nil {
+			return err
+		}
+		if exists != nil {
+			continue
+		}
+		if _, err := qExec(`
+			INSERT INTO sys_permission (code, name, target_type, target_ref, data_scope, status)
+			VALUES (?, ?, ?, ?, 'ALL', 1)`, p.Code, p.Name, p.TargetType, p.TargetRef); err != nil {
+			return err
+		}
+	}
+	for roleCode, permCodes := range seedRolePermissions {
+		role, err := qOne(`SELECT id FROM sys_role WHERE code = ?`, roleCode)
+		if err != nil || role == nil {
+			return err
+		}
+		for _, pc := range permCodes {
+			perm, err := qOne(`SELECT id FROM sys_permission WHERE code = ?`, pc)
+			if err != nil || perm == nil {
+				return err
+			}
+			bound, err := qOne(`SELECT role_id FROM sys_role_permission WHERE role_id = ? AND permission_id = ?`,
+				toInt(role["id"]), toInt(perm["id"]))
+			if err != nil {
+				return err
+			}
+			if bound == nil {
+				if _, err := qExec(`INSERT INTO sys_role_permission (role_id, permission_id) VALUES (?, ?)`,
+					toInt(role["id"]), toInt(perm["id"])); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // seedResources 菜单资源(mu-ui-model application.menus + 工作台)。
@@ -138,15 +185,18 @@ var seedRolePermissions = map[string][]string{
 		"PERM-FUNC-16", "PERM-FUNC-17", "PERM-FUNC-18", "PERM-FUNC-19", "PERM-FUNC-20",
 		"PERM-FUNC-21", "PERM-FUNC-22", "PERM-FUNC-23", "PERM-FUNC-24", "PERM-FUNC-25",
 		"PERM-FUNC-26", "PERM-FUNC-27", "PERM-FUNC-29",
+		"PERM-FUNC-33", "PERM-FUNC-34", "PERM-FUNC-35",
 	},
 	"CLC-ROLE-02": {
 		"PERM-FUNC-19", "PERM-FUNC-20", "PERM-FUNC-21", "PERM-FUNC-22", "PERM-FUNC-23",
 		"PERM-FUNC-24", "PERM-FUNC-25", "PERM-FUNC-26", "PERM-FUNC-27", "PERM-FUNC-29",
 		"PERM-FUNC-30", "PERM-FUNC-31", "PERM-FUNC-32",
+		"PERM-FUNC-34", "PERM-FUNC-35",
 	},
 	"CLC-ROLE-03": {
 		"PERM-FUNC-19", "PERM-FUNC-20", "PERM-FUNC-21", "PERM-FUNC-22", "PERM-FUNC-23",
 		"PERM-FUNC-24", "PERM-FUNC-25", "PERM-FUNC-26", "PERM-FUNC-27", "PERM-FUNC-29",
+		"PERM-FUNC-34", "PERM-FUNC-35",
 	},
 	"CLC-ROLE-04": {
 		"PERM-FUNC-19", "PERM-FUNC-20", "PERM-FUNC-21", "PERM-FUNC-26", "PERM-FUNC-27", "PERM-FUNC-29",
@@ -163,6 +213,9 @@ func EnsureSeed() error {
 		return err
 	}
 	if count > 0 {
+		if err := backfillSeedPermissions(); err != nil {
+			return err
+		}
 		return ensureFlowDefinitions()
 	}
 	// 角色
@@ -329,12 +382,21 @@ func ensureFlowDefinitions() error {
 	return nil
 }
 
-// buildNodeGraph M6 activities+nextActivities → {nodes, edges}(指导书 §2.5 映射)。
+// buildNodeGraph M6 activities+nextActivities/branches → {nodes, edges}(指导书 §2.5 映射)。
 // FLOW-PROC-APP-01(销毁审批)显式图在 YAML 中给出;其余协同流为可视化定义。
+// GATEWAY 分支双落点:引擎(flow_engine.selectGatewayTargets)读节点上的 branches,
+// 设计器(FlowDesigner)读 edges 连线 —— branches 与条件 edge 必须同时生成,否则分支丢失。
 func buildNodeGraph(code string, flow map[string]any) map[string]any {
 	activities, _ := flow["activities"].([]any)
 	var nodes []any
 	var edges []any
+	addEdge := func(source, target string, extra map[string]any) {
+		e := map[string]any{"source": source, "target": target}
+		for k, v := range extra {
+			e[k] = v
+		}
+		edges = append(edges, e)
+	}
 	for _, a := range activities {
 		am, ok := a.(map[string]any)
 		if !ok {
@@ -345,6 +407,7 @@ func buildNodeGraph(code string, flow map[string]any) map[string]any {
 		at, _ := am["activityType"].(string)
 		roleRef, _ := am["roleRef"].(string)
 		behaviorRef, _ := am["behaviorRef"].(string)
+		subFlowRef, _ := am["subFlowRef"].(string)
 		node := map[string]any{"id": id, "name": name}
 		switch at {
 		case "START":
@@ -355,6 +418,75 @@ func buildNodeGraph(code string, flow map[string]any) map[string]any {
 				node["result"] = "REJECTED"
 			} else {
 				node["result"] = "APPROVED"
+			}
+		case "GATEWAY":
+			node["type"] = "gateway"
+			branches, _ := am["branches"].([]any)
+			nodeBranches := make([]any, 0, len(branches))
+			for _, b := range branches {
+				bm, ok := b.(map[string]any)
+				if !ok {
+					continue
+				}
+				branchName, _ := bm["branchName"].(string)
+				ruleRef, _ := bm["ruleRef"].(string)
+				condition, _ := bm["conditionExpression"].(string)
+				approvalOutcome, _ := bm["approvalOutcome"].(string)
+				target, _ := bm["targetActivity"].(string)
+				isDefault, _ := bm["isDefault"].(bool)
+				nb := map[string]any{"target": target}
+				if branchName != "" {
+					nb["name"] = branchName
+				}
+				if ruleRef != "" {
+					nb["rule_ref"] = ruleRef
+				}
+				if condition != "" {
+					nb["condition"] = condition
+				}
+				if approvalOutcome != "" {
+					nb["approval_outcome"] = approvalOutcome
+				}
+				if isDefault {
+					nb["is_default"] = true
+				}
+				nodeBranches = append(nodeBranches, nb)
+				if target != "" {
+					extra := map[string]any{}
+					if ruleRef != "" {
+						extra["rule_ref"] = ruleRef
+					}
+					if condition != "" {
+						extra["condition"] = condition
+					}
+					if approvalOutcome != "" {
+						extra["approval_outcome"] = approvalOutcome
+					}
+					if isDefault {
+						extra["is_default"] = true
+					}
+					addEdge(id, target, extra)
+				}
+			}
+			node["branches"] = nodeBranches
+		case "USER_TASK":
+			node["type"] = "user_task"
+			node["role_ref"] = roleRef
+			if behaviorRef != "" {
+				node["behavior_ref"] = behaviorRef
+			}
+		case "SUB_FLOW_CALL":
+			node["type"] = "sub_flow_call"
+			if subFlowRef != "" {
+				node["sub_flow_ref"] = subFlowRef
+			}
+		case "BEHAVIOR_CALL":
+			node["type"] = "behavior_call"
+			node["behavior_ref"] = behaviorRef
+		case "SYSTEM_TASK":
+			node["type"] = "system_task"
+			if behaviorRef != "" {
+				node["behavior_ref"] = behaviorRef
 			}
 		default:
 			switch {
@@ -370,10 +502,13 @@ func buildNodeGraph(code string, flow map[string]any) map[string]any {
 			}
 		}
 		nodes = append(nodes, node)
+		if at == "GATEWAY" {
+			continue // 分支 edge 已生成,GATEWAY 无 nextActivities
+		}
 		nexts, _ := am["nextActivities"].([]any)
 		for _, nx := range nexts {
 			if t, ok := nx.(string); ok && t != "" {
-				edges = append(edges, map[string]any{"source": id, "target": t})
+				addEdge(id, t, nil)
 			}
 		}
 	}

@@ -1,5 +1,6 @@
-// 集群域 · 交付编排(MU frmClcOrch,SINGLE_FORM):交付动作台 + 任务台账 + 销毁审批(影响面强制展示 + 保存草稿/提交双按钮)。
-// R-10 销毁强制不免审批;R-09 失败步骤索引写回;INV-28 STALLED 与 FAILED 分列。
+// 集群域 · 交付编排(MU frmClcOrch,MASTER_DETAIL_FORM):交付动作台 + 任务台账 + 销毁审批(影响面强制展示 + 保存草稿/提交双按钮)
+// + 交付执行内核入口(v1.1):act-FUNC-33 取消(二次确认+原因必填)、act-FUNC-34/35 步骤/日志行内入口(详情抽屉三段式)。
+// R-10 销毁强制不免审批;R-09 失败步骤索引写回;INV-28 STALLED 与 FAILED 分列;取消 ≠ 回滚(R-15);步骤权威在后端(裁定二)。
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Descriptions, Form, Input, Modal, Select, Space, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -7,15 +8,22 @@ import { CaretRightOutlined, ReloadOutlined, DeleteOutlined, ThunderboltOutlined
 import { clusterApi, taskApi, type ClcTask } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
+import TaskDetailDrawer, { type TaskDetailDrawerProps } from './TaskDetail'
 import { EXEC_PATH, TASK_FAIL_REASON, TASK_KIND, TASK_STATUS, pill } from './common'
 
 const KIND_OPTIONS = Object.keys(TASK_KIND).map((k) => ({ value: k, label: TASK_KIND[k] }))
 const DELIVERABLE_KINDS = ['INSTALL', 'RETRY_INSTALL', 'UPGRADE', 'BACKUP', 'RESTORE', 'START', 'STOP'].map((k) => ({ value: k, label: TASK_KIND[k] }))
 
+/** act-FUNC-33 前置(m2):仅 QUEUED/RUNNING 可取消、DESTROY 拒绝、终态不渲染入口 */
+function cancellable(t: ClcTask): boolean {
+  return (t.task_status === 'QUEUED' || t.task_status === 'RUNNING') && t.task_kind !== 'DESTROY'
+}
+
 export default function OrchManage() {
   const hasPerm = usePermission()
   const [form] = Form.useForm()
   const [destroyForm] = Form.useForm()
+  const [cancelForm] = Form.useForm<{ reason: string }>()
   const [data, setData] = useState<ClcTask[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -29,6 +37,10 @@ export default function OrchManage() {
   const [destroyTarget, setDestroyTarget] = useState<{ id: number; cluster_no: string; name: string } | null>(null)
   const [impact, setImpact] = useState<Record<string, unknown> | null>(null)
   const [destroying, setDestroying] = useState(false)
+  const [detail, setDetail] = useState<{ task: ClcTask; focus: TaskDetailDrawerProps['focus'] } | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<ClcTask | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  const cancelReason = Form.useWatch('reason', cancelForm)
 
   const load = async (p = page, s = size, f = filters) => {
     setLoading(true)
@@ -67,7 +79,7 @@ export default function OrchManage() {
     setRunning(true)
     try {
       await clusterApi.taskAction(actionTarget.id, values)
-      message.success('交付动作已执行(任务台账与集群状态同步回写)')
+      message.success('交付动作已受理,任务排队执行(可在任务列表查看步骤与日志)')
       setActionTarget(null)
       load()
       loadClusters()
@@ -114,6 +126,34 @@ export default function OrchManage() {
     }
   }
 
+  // act-FUNC-33 取消:原因必填(不填不可提交)→ Modal.confirm 二次确认 → 提交(失败直出后端中文 errorMsg)
+  const openCancel = (task: ClcTask) => {
+    setCancelTarget(task)
+    cancelForm.resetFields()
+  }
+
+  const handleCancelSubmit = async () => {
+    if (!cancelTarget) return
+    const { reason } = await cancelForm.validateFields()
+    Modal.confirm({
+      title: `二次确认:取消任务 ${cancelTarget.task_no}`,
+      content: `取消 ≠ 回滚(R-15),已执行步骤的效果由交付工具幂等性承担。取消原因:${reason.trim()}`,
+      okText: '确认取消任务',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setCancelling(true)
+        try {
+          await taskApi.cancel(cancelTarget.task_no, { reason: reason.trim() })
+          message.success('任务已取消(取消不是回滚,已执行步骤的效果由交付工具幂等性承担)')
+          setCancelTarget(null)
+          load()
+        } finally {
+          setCancelling(false)
+        }
+      },
+    })
+  }
+
   const columns: ColumnsType<ClcTask> = [
     { title: '任务编号', dataIndex: 'task_no', key: 'task_no', width: 170 },
     { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
@@ -125,6 +165,25 @@ export default function OrchManage() {
     { title: '结果摘要', dataIndex: 'result_summary', key: 'result_summary', ellipsis: true, render: (v: string | null) => v || '-' },
     { title: '起止时间', key: 'time', width: 260, render: (_, r) => `${r.started_at || '-'} ~ ${r.ended_at || '-'}` },
     { title: '提交人', dataIndex: 'submitted_by', key: 'submitted_by', width: 100 },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 210,
+      fixed: 'right',
+      render: (_, r) => (
+        <Space size={0} wrap>
+          {hasPerm('PERM-FUNC-34') && (
+            <Button size="small" type="link" onClick={() => setDetail({ task: r, focus: 'steps' })}>查看步骤</Button>
+          )}
+          {hasPerm('PERM-FUNC-35') && (
+            <Button size="small" type="link" onClick={() => setDetail({ task: r, focus: 'logs' })}>查看日志</Button>
+          )}
+          {hasPerm('PERM-FUNC-33') && cancellable(r) && (
+            <Button size="small" type="link" danger onClick={() => openCancel(r)}>取消</Button>
+          )}
+        </Space>
+      ),
+    },
   ]
 
   return (
@@ -158,7 +217,7 @@ export default function OrchManage() {
           action={<Button size="small" onClick={() => load()}>重试</Button>} />
       )}
       <Table
-        rowKey="id" columns={columns} dataSource={data} loading={loading} scroll={{ x: 1300 }}
+        rowKey="id" columns={columns} dataSource={data} loading={loading} scroll={{ x: 1560 }}
         pagination={{
           current: page, pageSize: size, total, showSizeChanger: true,
           onChange: (p, s) => { setPage(p); setSize(s) },
@@ -188,7 +247,9 @@ export default function OrchManage() {
                 <>
                   <Form.Item name="master_endpoints" label="主控入口(可空,成功落点 R-13 自动生成)"><Input placeholder="https://api.xxx:6443" /></Form.Item>
                   <Form.Item name="kubeconfig_ref" label="凭据存放标识(仅位置标识,INV-08)"><Input placeholder="vault://opic/clc/..." /></Form.Item>
-                  <Form.Item name="fail_step_index" label="注入失败步骤(冒烟验证用,可空;R-09 写回集群)"><Input type="number" min={0} placeholder="如 3" /></Form.Item>
+                  <Form.Item name="fail_step_index" label="注入失败步骤(可空;仅故障注入验证用,步骤权威在后端,R-09 写回集群)">
+                    <Input type="number" min={0} placeholder="如 3" />
+                  </Form.Item>
                 </>
               ) : null
             }
@@ -223,6 +284,34 @@ export default function OrchManage() {
           </Form.Item>
         </Form>
       </Modal>
+      <Modal
+        title={`取消任务 → ${cancelTarget?.task_no || ''}`}
+        open={!!cancelTarget}
+        okText="进入二次确认"
+        okButtonProps={{ danger: true, disabled: !cancelReason || !cancelReason.trim() }}
+        confirmLoading={cancelling}
+        onOk={handleCancelSubmit}
+        onCancel={() => setCancelTarget(null)}
+        width={520}
+      >
+        <Alert
+          type="warning" showIcon style={{ marginBottom: 12 }}
+          message="取消 ≠ 回滚(R-15):已执行步骤的效果由交付工具幂等性承担;DESTROY 类任务不可取消;原因写入审计(R-14)"
+        />
+        <Form form={cancelForm} layout="vertical">
+          <Form.Item name="reason" label="取消原因(必填,act-FUNC-33)" rules={[{ required: true, whitespace: true, message: '取消原因必填,不填不可提交' }]}>
+            <Input.TextArea rows={3} placeholder="如:变更窗口调整,暂停本次交付" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      {detail && (
+        <TaskDetailDrawer
+          key={detail.task.task_no}
+          task={detail.task}
+          focus={detail.focus}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </Card>
   )
 }

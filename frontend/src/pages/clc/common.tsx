@@ -101,6 +101,30 @@ export const EXEC_PATH: Record<string, string> = {
   REMOTE_EXECUTOR: '远程执行机',
 }
 
+/** 交付步骤状态(字典 CLC_STEP_STATUS;CANCELLED=未执行即取消 与 SKIPPED=本次跳过(上次已成功) 语义分列) */
+export const STEP_STATUS: Record<string, { tone: StatusTone; label: string }> = {
+  PENDING: { tone: 'muted', label: '待执行' },
+  RUNNING: { tone: 'info', label: '执行中' },
+  SUCCEEDED: { tone: 'success', label: '已成功' },
+  FAILED: { tone: 'danger', label: '已失败' },
+  CANCELLED: { tone: 'muted', label: '未执行即取消' },
+  SKIPPED: { tone: 'warning', label: '本次跳过(上次已成功)' },
+}
+
+/** 步骤判定依据(字典 CLC_STEP_VERDICT;REP-12 c4) */
+export const STEP_VERDICT: Record<string, string> = {
+  EXIT_CODE: '退出码',
+  PLAY_RECAP: '剧本汇总判定',
+  REMOTE_RECEIPT: '远端回执',
+}
+
+/** 交付日志级别(字典 CLC_LOG_LEVEL;REP-13 面板着色) */
+export const LOG_LEVEL: Record<string, { tone: 'info' | 'warn' | 'error'; label: string }> = {
+  INFO: { tone: 'info', label: '信息' },
+  WARN: { tone: 'warn', label: '告警' },
+  ERROR: { tone: 'error', label: '错误' },
+}
+
 /** 快照类型(AGG-CLC-05;字典 CLC_SNAPSHOT_TYPE) */
 export const SNAPSHOT_TYPE: Record<string, { tone: StatusTone; label: string }> = {
   CHANGE: { tone: 'info', label: '变更快照' },

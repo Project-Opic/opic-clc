@@ -127,7 +127,9 @@ func (r *Registry) register(data map[string]any) {
 					attrs = append(attrs, n)
 				}
 			}
-			r.DBWhitelist[toSnake(alias)] = WhitelistEntry{Table: toSnake(alias), Alias: alias, Attributes: attrs}
+			// 表名口径:模型显式 tableName 优先(表名是模型事实,不做 alias 推断的特例修正)
+			table := tableNameOf(agg, alias)
+			r.DBWhitelist[table] = WhitelistEntry{Table: table, Alias: alias, Attributes: attrs}
 			for _, e := range asMaps(agg["entities"]) {
 				ealias, _ := e["alias"].(string)
 				if ealias == "" {
@@ -140,7 +142,8 @@ func (r *Registry) register(data map[string]any) {
 						eattrs = append(eattrs, n)
 					}
 				}
-				r.DBWhitelist[toSnake(ealias)] = WhitelistEntry{Table: toSnake(ealias), Alias: ealias, Attributes: eattrs}
+				etable := tableNameOf(e, ealias)
+				r.DBWhitelist[etable] = WhitelistEntry{Table: etable, Alias: ealias, Attributes: eattrs}
 			}
 		}
 		for _, dic := range asMaps(data["data_dictionaries"]) {
@@ -222,6 +225,15 @@ func (r *Registry) GetDictionaryItems(dictID, typeCode string) []map[string]stri
 		return out
 	}
 	return nil
+}
+
+// tableNameOf 表名解析:模型显式 tableName(m1 声明的存储事实)优先,
+// 缺失时才回退 alias 驼峰转下划线的推断口径。
+func tableNameOf(node map[string]any, alias string) string {
+	if t, ok := node["tableName"].(string); ok && t != "" {
+		return t
+	}
+	return toSnake(alias)
 }
 
 func toSnake(name string) string {

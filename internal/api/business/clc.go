@@ -6,6 +6,10 @@
 package business
 
 import (
+	"encoding/json"
+	"strconv"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
@@ -276,7 +280,8 @@ func ClcSnapshotRollback(c *gin.Context) {
 // ClcTaskList GET /api/clc/task (FUNC-25)
 func ClcTaskList(c *gin.Context) {
 	page, size := common.PageOf(c)
-	p, err := service.ListTasks(page, size, map[string]any{
+	// ⚠ 交付任务台账走 clc_task(ListClusterTasks)；service.ListTasks 是 flow_task 审批任务
+	p, err := service.ListClusterTasks(page, size, map[string]any{
 		"cluster_ref": c.Query("cluster_ref"), "task_kind": c.Query("task_kind"),
 		"task_status": c.Query("task_status"), "keyword": c.Query("keyword"),
 	})
@@ -317,7 +322,197 @@ func ClcTaskAction(c *gin.Context) {
 		common.FailJSON(c, err)
 		return
 	}
-	common.OKJSON(c, row, "交付动作已执行")
+	common.OKJSON(c, row, "交付动作已受理,任务排队执行")
+}
+
+// ---------- 交付执行内核(FUNC-33/34/35,v1.1) ----------
+
+// ClcTaskCancel POST /api/clc/task/:no/cancel (FUNC-33;取消 ≠ 回滚,R-15)
+func ClcTaskCancel(c *gin.Context) {
+	reason := common.Trim(common.BindJSON(c)["reason"])
+	if reason == "" {
+		common.FailJSON(c, service.Fail(errcode.ErrParam, "取消必须显式填写原因(审计留痕)"))
+		return
+	}
+	row, err := service.CancelClusterTask(c.Param("no"), reason, common.UserOf(c))
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	common.OKJSON(c, row, "任务已取消(取消不是回滚,已执行步骤的效果由交付工具幂等性承担)")
+}
+
+// ClcTaskSteps GET /api/clc/task/:no/steps (FUNC-34 → REP-12 c1~c9;无整表原始日志正文,INV-40)
+func ClcTaskSteps(c *gin.Context) {
+	rows, err := service.ListTaskSteps(c.Param("no"), map[string]any{
+		"step_status": c.Query("step_status"), "verdict_source": c.Query("verdict_source"),
+	})
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	common.OKJSON(c, gin.H{"list": rows, "total": len(rows)}, "")
+}
+
+// ClcTaskLogs GET /api/clc/task/:no/logs (FUNC-35 → REP-13;游标增量,禁整表拉取,INV-43)
+func ClcTaskLogs(c *gin.Context) {
+	taskNo := c.Param("no")
+	offset, _ := strconv.ParseInt(c.DefaultQuery("offset", "0"), 10, 64)
+	if offset < 0 {
+		offset = 0
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "500"))
+	rows, err := service.ReadTaskLogs(taskNo, offset, limit, map[string]any{
+		"log_level": c.Query("log_level"), "step_index": c.Query("step_index"),
+	})
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	for _, r := range rows {
+		if ln := service.Int(r["line_no"]); ln > offset {
+			offset = ln
+		}
+	}
+	status, _, err := service.TaskLogSnapshot(taskNo)
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	common.OKJSON(c, gin.H{
+		"list": rows, "total": len(rows), "offset": offset, "task_status": status,
+	}, "")
+}
+
+// sseReplayBatch SSE 历史补差单批行数(与 ReadTaskLogs 上限口径一致)。
+const sseReplayBatch = 2000
+
+// ClcTaskLogsStream GET /api/clc/task/:no/logs/stream?offset=N (FUNC-35 SSE;
+// 先补历史再追增量,终态任务一次性回放至末尾后停止 —— REP-13 交付形态)。
+func ClcTaskLogsStream(c *gin.Context) {
+	taskNo := c.Param("no")
+	offset, _ := strconv.ParseInt(c.DefaultQuery("offset", "0"), 10, 64)
+	if offset < 0 {
+		offset = 0
+	}
+	params := map[string]any{"log_level": c.Query("log_level"), "step_index": c.Query("step_index")}
+	status, _, err := service.TaskLogSnapshot(taskNo)
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	if status == "" {
+		common.FailJSON(c, service.NotFound("任务"))
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("Connection", "keep-alive")
+
+	// 订阅先行:补历史期间的实时行经游标去重,不漏不重(INV-43)
+	unsub, ch := service.SubscribeTaskLogs(taskNo)
+	defer unsub()
+
+	sendEvent := func(event string, data any) bool {
+		raw, jerr := json.Marshal(data)
+		if jerr != nil {
+			return false
+		}
+		if _, werr := c.Writer.WriteString("event: " + event + "\ndata: " + string(raw) + "\n\n"); werr != nil {
+			return false
+		}
+		c.Writer.Flush()
+		return c.Request.Context().Err() == nil
+	}
+	sendBatch := func(rows []map[string]any) (alive bool, advanced bool) {
+		for _, r := range rows {
+			ln := service.Int(r["line_no"])
+			if ln <= offset {
+				continue
+			}
+			offset = ln
+			advanced = true
+			if !sendEvent("log", r) {
+				return false, advanced
+			}
+		}
+		return true, advanced
+	}
+	// 1) 先补历史(offset = 已读最大日志序号)
+	for {
+		rows, rerr := service.ReadTaskLogs(taskNo, offset, sseReplayBatch, params)
+		if rerr != nil {
+			sendEvent("error", gin.H{"message": rerr.Error()})
+			return
+		}
+		if len(rows) == 0 {
+			break
+		}
+		alive, _ := sendBatch(rows)
+		if !alive {
+			return
+		}
+		if int64(len(rows)) < sseReplayBatch {
+			break
+		}
+	}
+	reloaded, _, rerr := service.TaskLogSnapshot(taskNo)
+	if rerr == nil {
+		status = reloaded
+	}
+	if clcTaskTerminal(status) {
+		sendEvent("done", gin.H{"task_status": status, "cursor": offset})
+		return
+	}
+
+	// 2) 再追增量:hub 广播 + 周期补差(慢消费者丢行由游标续查兜底)+ 终局检测
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return // 断开即释放 hub 订阅(defer unsub,转发协程随 close 退出,无泄漏)
+		case row, open := <-ch:
+			if !open {
+				return
+			}
+			if alive, _ := sendBatch([]map[string]any{row}); !alive {
+				return
+			}
+		case <-ticker.C:
+			rows, rerr2 := service.ReadTaskLogs(taskNo, offset, sseReplayBatch, params)
+			if rerr2 == nil {
+				alive, _ := sendBatch(rows)
+				if !alive {
+					return
+				}
+			}
+			st, _, err2 := service.TaskLogSnapshot(taskNo)
+			if err2 == nil {
+				status = st
+			}
+			if clcTaskTerminal(status) {
+				sendEvent("done", gin.H{"task_status": status, "cursor": offset})
+				return
+			}
+			if _, werr := c.Writer.WriteString(": ping\n\n"); werr == nil {
+				c.Writer.Flush()
+			}
+		}
+	}
+}
+
+// clcTaskTerminal 非 QUEUED / RUNNING 即终局(REP-13:终态任务一次性回放至末尾后停止)。
+func clcTaskTerminal(status string) bool {
+	return status != service.TaskStatusQueued && status != service.TaskStatusRunning
 }
 
 // ---------- 探活(AGG-CLC-07) ----------

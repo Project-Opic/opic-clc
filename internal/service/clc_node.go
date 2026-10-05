@@ -122,7 +122,7 @@ func addNodeTx(db *gorm.DB, clusterNo string, d map[string]any, user UserInfo) e
 	return nil
 }
 
-// AddNode FUNC-06 添加节点(登记 + ADD_NODE 任务;成功回填 K8s 节点名 INV-14)。
+// AddNode FUNC-06 添加节点(登记 PENDING + 创建 ADD_NODE 任务排队;INV-14 K8s 节点名在成功落点回填)。
 func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, error) {
 	c, err := GetCluster(clusterID)
 	if err != nil {
@@ -133,7 +133,12 @@ func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, 
 		return nil, bizRuleFail("INV-09", "集群已销毁,不可添加节点")
 	}
 	ip := strings.TrimSpace(Str(d["ip_address"]))
+	execPath := Str(d["execution_path"])
+	if execPath == "" {
+		execPath = ExecPathLocal
+	}
 	var created map[string]any
+	var taskNo string
 	err = tx(func(db *gorm.DB) error {
 		if err := addNodeTx(db, clusterNo, d, user); err != nil {
 			return err
@@ -144,28 +149,20 @@ func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, 
 			return err
 		}
 		created = row
-		// FLOW-PROC-02 A07:创建 ADD_NODE 任务(模拟本地链路执行成功:回填 K8s 节点名)
-		task, err := createTaskTx(db, clusterNo, TaskKindAddNode, ExecPathLocal, user)
+		// FLOW-PROC-02 A07:ADD_NODE 任务落 QUEUED,加入动作由交付内核执行(FLOW-PROC-06)
+		task, err := createTaskTx(db, clusterNo, TaskKindAddNode, execPath, user)
 		if err != nil {
 			return err
 		}
-		k8sName := Str(d["k8s_nodename"])
-		if k8sName == "" {
-			k8sName = strings.ToLower(clusterNo) + "-" + strings.ReplaceAll(ip, ".", "-")
-		}
-		if _, err := store.Exec(db, `
-			UPDATE clc_cluster_node SET node_status=?, k8s_nodename=?, node_health=?, node_health_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS'),
-				updated_by=?, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE id=? AND flag=1`,
-			NodeStatusAdded, k8sName, NodeHealthHealthy, user.ID, Int(created["id"])); err != nil {
-			return err
-		}
-		return finishTaskTx(db, task, TaskStatusSucceeded, nil, fmt.Sprintf("节点 %s(%s) 加入成功,K8s 节点名 %s", Str(created["node_no"]), ip, k8sName), user)
+		taskNo = Str(task["task_no"])
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	WriteAudit(nil, user.ID, user.Username, "FUNC-06", fmt.Sprintf("集群 %s 添加节点 IP %s(角色 %s)", clusterNo, Str(d["ip_address"]), Str(d["node_role"])))
-	publishClcEvent("clc.node.added", map[string]any{"cluster_no": clusterNo, "ip": Str(d["ip_address"])})
+	WriteAudit(nil, user.ID, user.Username, "FUNC-06", fmt.Sprintf("集群 %s 登记节点 IP %s(角色 %s),ADD_NODE 任务已排队(%s 链路)",
+		clusterNo, ip, Str(d["node_role"]), execPath))
+	enqueueTask(taskNo, DeliveryArgs{NodeIPs: []string{ip}, NodeName: strings.TrimSpace(Str(d["k8s_nodename"]))})
 	return GetNode(Int(created["id"]))
 }
 
@@ -181,7 +178,8 @@ func GetNode(id int64) (map[string]any, error) {
 	return row, nil
 }
 
-// RemoveNode FUNC-07 移除节点(R-03 资产下架口径:引用置空由他域事件承载;移除即终局 INV-13)。
+// RemoveNode FUNC-07 移除节点(置 REMOVING + DEL_NODE 任务排队;R-03 资产下架口径:引用置空由他域事件承载;
+// 移除即终局 INV-13,终局行在成功落点写入)。
 func RemoveNode(id int64, d map[string]any, user UserInfo) (map[string]any, error) {
 	n, err := GetNode(id)
 	if err != nil {
@@ -194,31 +192,107 @@ func RemoveNode(id int64, d map[string]any, user UserInfo) (map[string]any, erro
 		return nil, Fail(errcode.ErrState, "节点正在移除中")
 	}
 	clusterNo := Str(n["cluster_ref"])
+	ip := Str(n["ip_address"])
+	execPath := Str(d["execution_path"])
+	if execPath == "" {
+		execPath = ExecPathLocal
+	}
+	var taskNo string
 	err = tx(func(db *gorm.DB) error {
 		if _, err := store.Exec(db, `UPDATE clc_cluster_node SET node_status=?, updated_by=?,
 			updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE id=? AND flag=1`,
 			NodeStatusRemoving, user.ID, id); err != nil {
 			return err
 		}
-		// FLOW-PROC-02 A06/A09:DEL_NODE 任务(模拟执行成功)
-		task, err := createTaskTx(db, clusterNo, TaskKindDelNode, ExecPathLocal, user)
+		// FLOW-PROC-02 A06/A09:DEL_NODE 任务落 QUEUED,摘除动作由交付内核执行(FLOW-PROC-06)
+		task, err := createTaskTx(db, clusterNo, TaskKindDelNode, execPath, user)
 		if err != nil {
 			return err
 		}
-		if err := finishTaskTx(db, task, TaskStatusSucceeded, nil, fmt.Sprintf("节点 %s(%s) 移除成功", Str(n["node_no"]), Str(n["ip_address"])), user); err != nil {
-			return err
-		}
-		_, err = store.Exec(db, `UPDATE clc_cluster_node SET node_status=?, updated_by=?,
-			updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE id=? AND flag=1`,
-			NodeStatusRemoved, user.ID, id)
-		return err
+		taskNo = Str(task["task_no"])
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	WriteAudit(nil, user.ID, user.Username, "FUNC-07", fmt.Sprintf("集群 %s 移除节点 %s(%s):终局保留行", clusterNo, Str(n["node_no"]), Str(n["ip_address"])))
-	publishClcEvent("clc.node.removed", map[string]any{"cluster_no": clusterNo, "node_no": Str(n["node_no"]), "asset_ref": Str(n["asset_ref"])})
+	WriteAudit(nil, user.ID, user.Username, "FUNC-07", fmt.Sprintf("集群 %s 移除节点 %s(%s):已置 REMOVING,DEL_NODE 任务已排队(%s 链路)",
+		clusterNo, Str(n["node_no"]), ip, execPath))
+	enqueueTask(taskNo, DeliveryArgs{NodeIPs: []string{ip}})
 	return GetNode(id)
+}
+
+// ---------- 节点交付动作成功落点(FLOW-PROC-02 → FLOW-PROC-06 内核触达) ----------
+func init() {
+	taskSuccessHooks[TaskKindAddNode] = addNodeSuccessLanding
+	taskSuccessHooks[TaskKindDelNode] = delNodeSuccessLanding
+}
+
+// addNodeSuccessLanding INV-14:加入成功后回填 K8s 节点名(未声明目标版本名则按集群号 + 地址派生)。
+func addNodeSuccessLanding(db *gorm.DB, task, _ map[string]any, args DeliveryArgs, user UserInfo) error {
+	clusterNo := Str(task["cluster_ref"])
+	done, err := markNodesAddedTx(db, clusterNo, args.NodeIPs, trimEmpty(args.NodeName), user)
+	if err != nil {
+		return err
+	}
+	return finishTaskTx(db, task, TaskStatusSucceeded, nil,
+		fmt.Sprintf("节点加入完成:%d 个待加入节点已回填 K8s 节点名(INV-14)", done), user)
+}
+
+// markNodesAddedTx 待加入节点置 ADDED 并回填 K8s 节点名(INV-14)。
+// ADD_NODE 成功落点与安装类成功落点共用:ips 为空则取该集群全部 PENDING(向导登记的节点)。
+func markNodesAddedTx(db *gorm.DB, clusterNo string, ips []string, nameOverride string, user UserInfo) (int, error) {
+	if len(ips) == 0 {
+		ips = deriveNodeIPs(TaskKindAddNode, clusterNo)
+	}
+	done := 0
+	for _, ip := range ips {
+		name := trimEmpty(nameOverride)
+		if name == "" {
+			name = strings.ToLower(clusterNo) + "-" + strings.ReplaceAll(strings.TrimSpace(ip), ".", "-")
+		}
+		res, err := store.Exec(db, `
+			UPDATE clc_cluster_node SET node_status=?, k8s_nodename=?, node_health=?,
+				node_health_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS'), updated_by=?,
+				updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+			WHERE cluster_ref=? AND flag=1 AND node_status=? AND LOWER(ip_address)=LOWER(?)`,
+			NodeStatusAdded, name, NodeHealthHealthy, user.ID, clusterNo, NodeStatusPending, ip)
+		if err != nil {
+			return done, err
+		}
+		if res == 0 {
+			continue
+		}
+		done++
+		publishClcEvent("clc.node.added", map[string]any{"cluster_no": clusterNo, "ip": ip, "k8s_nodename": name})
+	}
+	return done, nil
+}
+
+// delNodeSuccessLanding INV-13:摘除成功后节点置 REMOVED(终局保留行,不物理删)。
+func delNodeSuccessLanding(db *gorm.DB, task, _ map[string]any, args DeliveryArgs, user UserInfo) error {
+	clusterNo := Str(task["cluster_ref"])
+	ips := args.NodeIPs
+	if len(ips) == 0 {
+		ips = deriveNodeIPs(TaskKindDelNode, clusterNo)
+	}
+	done := 0
+	for _, ip := range ips {
+		res, err := store.Exec(db, `
+			UPDATE clc_cluster_node SET node_status=?, updated_by=?,
+				updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+			WHERE cluster_ref=? AND flag=1 AND node_status=? AND LOWER(ip_address)=LOWER(?)`,
+			NodeStatusRemoved, user.ID, clusterNo, NodeStatusRemoving, ip)
+		if err != nil {
+			return err
+		}
+		if res == 0 {
+			continue
+		}
+		done++
+		publishClcEvent("clc.node.removed", map[string]any{"cluster_no": clusterNo, "ip": ip})
+	}
+	return finishTaskTx(db, task, TaskStatusSucceeded, nil,
+		fmt.Sprintf("节点移除完成:%d 个移除中节点置 REMOVED(INV-13 终局保留行)", done), user)
 }
 
 // RebindNode FUNC-08 节点重绑定(R-12:新资产未被占用(R-02 同口径)且登记值可反查;通过后换绑并刷新登记值)。

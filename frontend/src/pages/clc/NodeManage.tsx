@@ -54,7 +54,7 @@ export default function NodeManage() {
     setSaving(true)
     try {
       await clusterApi.addNode(values.cluster_id, values)
-      message.success('节点已添加(ADD_NODE 任务落点,K8s 节点名回填 INV-14)')
+      message.success('节点已登记为待加入,ADD_NODE 任务排队执行(成功后回填 K8s 节点名 INV-14)')
       setAddTarget(null)
       load()
     } catch (e) {
@@ -98,7 +98,7 @@ export default function NodeManage() {
               onConfirm={async () => {
                 try {
                   await nodeApi.remove(row.id)
-                  message.success('节点已移除(终局保留行)')
+                  message.success('移除已受理,节点置移除中(DEL_NODE 任务成功后置 REMOVED,终局保留行)')
                   load()
                 } catch { /* 拦截器已提示 */ }
               }}>

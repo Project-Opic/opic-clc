@@ -1,4 +1,4 @@
-import { http, type PageResult } from './request'
+import { http, clearToken, getToken, type PageResult } from './request'
 
 /** 集群域(/api/clc/*)接口封装;契约见 internal/api/business/clc.go */
 
@@ -192,6 +192,134 @@ export const taskApi = {
   list(params: { page?: number; size?: number; cluster_ref?: string; task_kind?: string; task_status?: string; keyword?: string }) {
     return http.get<PageResult<ClcTask>>('/api/clc/task', params)
   },
+  /** FUNC-33 取消执行中任务(取消 ≠ 回滚;原因必填,失败提示由统一拦截器直出后端中文 errorMsg) */
+  cancel(no: string, data: { reason: string }) {
+    return http.post<ClcTask>(`/api/clc/task/${encodeURIComponent(no)}/cancel`, data)
+  },
+  /** FUNC-34 交付步骤查询(REP-12 c1~c9;步骤权威在后端,不含整表原始日志正文) */
+  steps(no: string, params?: { step_status?: string; verdict_source?: string }) {
+    return http.get<{ list: ClcTaskStep[]; total: number }>(`/api/clc/task/${encodeURIComponent(no)}/steps`, params)
+  },
+  /** FUNC-35 日志回放·游标增量补齐(offset = 已读最大 line_no;禁整表拉取,INV-43) */
+  logs(no: string, params: { offset?: number; limit?: number; log_level?: string; step_index?: number }) {
+    return http.get<ClcTaskLogsResult>(`/api/clc/task/${encodeURIComponent(no)}/logs`, params)
+  },
+}
+
+// ---------- 交付执行内核数据契约(FUNC-33/34/35,v1.1;字段名与后端逐字对齐) ----------
+
+/** 交付步骤行(REP-12 c1~c9;internal/service/clc_delivery.go ListTaskSteps) */
+export interface ClcTaskStep {
+  step_index: number
+  step_code: string
+  step_name: string
+  step_status: string
+  command_summary: string | null
+  verdict_source: string | null
+  exit_code: number | null
+  started_at: string | null
+  ended_at: string | null
+  log_start_line: number | null
+  log_end_line: number | null
+  fail_detail: string | null
+  skip_reason: string | null
+}
+
+/** 任务日志行(REP-13;internal/service/clc_delivery.go ReadTaskLogs) */
+export interface ClcTaskLogLine {
+  line_no: number
+  step_index: number | null
+  logged_at: string
+  log_level: string
+  content: string
+}
+
+export interface ClcTaskLogsResult {
+  list: ClcTaskLogLine[]
+  total: number
+  offset: number
+  task_status: string
+}
+
+export interface TaskLogStreamHandlers {
+  onLine: (line: ClcTaskLogLine) => void
+  onDone: (payload: { task_status: string; cursor: number }) => void
+  onError: (message: string) => void
+  /** 服务端关闭读流(终局 done 或网络断开);调用方据此决定是否续播 */
+  onClose: () => void
+}
+
+/**
+ * FUNC-35 日志回放 SSE。登录态走 Authorization 头,原生 EventSource 无法携带,
+ * 故用 fetch + ReadableStream 手工按空行切帧(直连必 401)。返回关闭函数,卸载必须 abort。
+ */
+export function openTaskLogStream(taskNo: string, offset: number, handlers: TaskLogStreamHandlers): () => void {
+  const controller = new AbortController()
+  void runTaskLogStream(taskNo, offset, controller, handlers)
+  return () => controller.abort()
+}
+
+async function runTaskLogStream(taskNo: string, offset: number, controller: AbortController, handlers: TaskLogStreamHandlers): Promise<void> {
+  try {
+    const token = getToken()
+    const resp = await fetch(`/api/clc/task/${encodeURIComponent(taskNo)}/logs/stream?offset=${encodeURIComponent(String(offset))}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
+    })
+    if (resp.status === 401) {
+      clearToken()
+      window.location.href = '/login'
+      return
+    }
+    if (!resp.ok || !resp.body) {
+      handlers.onError(`日志订阅连接失败(HTTP ${resp.status})`)
+      return
+    }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let sep = buffer.indexOf('\n\n')
+      while (sep >= 0) {
+        dispatchTaskLogFrame(buffer.slice(0, sep), handlers)
+        buffer = buffer.slice(sep + 2)
+        sep = buffer.indexOf('\n\n')
+      }
+    }
+    handlers.onClose()
+  } catch (err) {
+    if (controller.signal.aborted) return
+    handlers.onError(err instanceof Error ? err.message : '日志订阅连接异常')
+  }
+}
+
+function dispatchTaskLogFrame(frame: string, handlers: TaskLogStreamHandlers): void {
+  let event = 'message'
+  const dataParts: string[] = []
+  for (const rawLine of frame.split('\n')) {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    if (!line || line.startsWith(':')) continue // 心跳注释帧(: ping)
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataParts.push(line.slice(5).replace(/^ /, ''))
+  }
+  if (dataParts.length === 0) return
+  let data: unknown
+  try {
+    data = JSON.parse(dataParts.join('\n'))
+  } catch {
+    return
+  }
+  if (event === 'log') {
+    handlers.onLine(data as ClcTaskLogLine)
+  } else if (event === 'done') {
+    const d = data as { task_status?: string; cursor?: number }
+    handlers.onDone({ task_status: d.task_status ?? '', cursor: Number(d.cursor ?? 0) })
+  } else if (event === 'error') {
+    handlers.onError(String((data as { message?: unknown }).message ?? '日志订阅异常'))
+  }
 }
 
 // ---------- 探活(AGG-CLC-07) ----------

@@ -77,6 +77,24 @@ auth:
 ontology:
   models_dir: models
 
+# ── 交付执行内核(v1.1 真实交付链,B-AUTO-10 / FLOW-PROC-06)─────────────────
+# C1 纪律:交付工具的真实挂载路径/可执行文件路径只允许出现在此配置值
+# (env 可覆盖:DELIVERY_TOOL_BIN / DELIVERY_TOOL_DIR / DELIVERY_KUBECONFIG_ENV /
+#  DELIVERY_KUBECONFIG_PATH_PATTERN / IGNITION_BASE_URL / IGNITION_TOKEN)。
+# 代码标识符、注释、界面文案与接口错误提示一律使用「交付工具 / delivery tool / 剧本汇总(recap)」中性表述。
+delivery:
+  tool_bin: /opt/opic/delivery/bin/delivery-tool      # 后端容器即执行机(本期裁定:不部署执行机 agent)
+  tool_dir: /opt/opic/delivery                        # 交付工具工作目录(挂载)
+  kubeconfig_env: KUBECONFIG                          # 执行面凭据注入的环境变量名(凭据本体只登记存放标识,绝不落库明文)
+  kubeconfig_path_pattern: "kube/{cluster}.conf"      # 凭据文件路径模板(相对 tool_dir,{cluster} 占位)
+  extra_env: []                                       # 附加环境变量(KEY=VALUE;凭据经此注入,不入库)
+  ignition_base_url: ""                               # 点火中心地址(远程链路 REMOTE_EXECUTOR;空 ⇒ 远程判失联)
+  ignition_token: ""                                  # 点火中心服务令牌(env IGNITION_TOKEN)
+  ignition_submit_path: /api/delivery/submit
+  ignition_receipt_path: /api/delivery/receipt/{ref}
+  ignition_cancel_path: /api/delivery/cancel/{ref}
+  ignition_poll_seconds: 5
+
 # 前端构建产物目录(空则不托管;开发期前端走 vite proxy;compose 走网关/nginx)
 frontend:
   dist_dir: ""

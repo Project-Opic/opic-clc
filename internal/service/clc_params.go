@@ -42,14 +42,14 @@ func SavePlatformParams(items map[string]string, user UserInfo) ([]map[string]an
 			}
 			return nil
 		},
-		"clc.snapshot_retention_days": positiveInt("REF-02", "快照保留期"),
-		"clc.probe_interval_seconds":  positiveInt("REF-03", "探活周期"),
-		"clc.probe_fail_threshold":    positiveInt("REF-03", "连续失败阈值"),
-		"clc.probe_recover_threshold": positiveInt("REF-11", "恢复健康连续成功阈值"),
-		"clc.probe_retention_days":    positiveInt("REF-08", "探活记录保留期"),
-		"clc.health_cache_seconds":    positiveInt("REF-07", "聚合健康缓存时长"),
-		"clc.wizard_default_executor": func(string) error { return nil },
-		"clc.wizard_default_version":  func(string) error { return nil },
+		"clc.snapshot_retention_days":          positiveInt("REF-02", "快照保留期"),
+		"clc.probe_interval_seconds":           positiveInt("REF-03", "探活周期"),
+		"clc.probe_fail_threshold":             positiveInt("REF-03", "连续失败阈值"),
+		"clc.probe_recover_threshold":          positiveInt("REF-11", "恢复健康连续成功阈值"),
+		"clc.probe_retention_days":             positiveInt("REF-08", "探活记录保留期"),
+		"clc.health_cache_seconds":             positiveInt("REF-07", "聚合健康缓存时长"),
+		"clc.wizard_default_executor":          func(string) error { return nil },
+		"clc.wizard_default_version":           func(string) error { return nil },
 		"clc.wizard_default_registry_instance": func(string) error { return nil },
 	}
 	err := tx(func(db *gorm.DB) error {

@@ -91,6 +91,21 @@ var Config struct {
 		// ModelsDir 七模型 YAML 目录(默认随底座的 models/,可指向应用的 models/)
 		ModelsDir string `yaml:"models_dir"`
 	} `yaml:"ontology"`
+	// Delivery 交付执行内核(第 3 层交付工具)运行前置。C1 纪律:真实挂载路径与可执行文件
+	// 路径只允许作为部署配置值出现(代码/文案零产品名,运行期按此配置直调)。
+	Delivery struct {
+		ToolBin               string   `yaml:"tool_bin"`                // 交付工具可执行文件路径
+		ToolDir               string   `yaml:"tool_dir"`                // 交付工具工作目录(挂载目录)
+		KubeconfigEnv         string   `yaml:"kubeconfig_env"`          // 执行面凭据环境变量名(如 KUBECONFIG)
+		KubeconfigPathPattern string   `yaml:"kubeconfig_path_pattern"` // 凭据文件路径模板,{cluster} 占位
+		ExtraEnv              []string `yaml:"extra_env"`               // 附加环境变量(KEY=VALUE)
+		IgnitionBaseURL       string   `yaml:"ignition_base_url"`       // 点火中心地址(远程链路;空 ⇒ 远程不可用)
+		IgnitionToken         string   `yaml:"ignition_token"`          // 点火中心服务令牌
+		IgnitionSubmitPath    string   `yaml:"ignition_submit_path"`    // 提交端点(默认 /api/delivery/submit)
+		IgnitionReceiptPath   string   `yaml:"ignition_receipt_path"`   // 回执端点模板,{ref} 占位(默认 /api/delivery/receipt/{ref})
+		IgnitionCancelPath    string   `yaml:"ignition_cancel_path"`    // 撤销端点模板,{ref} 占位(默认 /api/delivery/cancel/{ref})
+		IgnitionPollSeconds   int      `yaml:"ignition_poll_seconds"`   // 回执轮询周期(秒,默认 5)
+	} `yaml:"delivery"`
 	Frontend struct {
 		// DistDir 前端构建产物目录(空则不托管)
 		DistDir string `yaml:"dist_dir"`
@@ -334,5 +349,23 @@ func applyEnvOverrides() {
 	}
 	if v := os.Getenv("ZITADEL_REDIRECT_URL"); v != "" {
 		Config.Auth.RedirectURL = v
+	}
+	if v := os.Getenv("DELIVERY_TOOL_BIN"); v != "" {
+		Config.Delivery.ToolBin = v
+	}
+	if v := os.Getenv("DELIVERY_TOOL_DIR"); v != "" {
+		Config.Delivery.ToolDir = v
+	}
+	if v := os.Getenv("DELIVERY_KUBECONFIG_ENV"); v != "" {
+		Config.Delivery.KubeconfigEnv = v
+	}
+	if v := os.Getenv("DELIVERY_KUBECONFIG_PATH_PATTERN"); v != "" {
+		Config.Delivery.KubeconfigPathPattern = v
+	}
+	if v := os.Getenv("IGNITION_BASE_URL"); v != "" {
+		Config.Delivery.IgnitionBaseURL = v
+	}
+	if v := os.Getenv("IGNITION_TOKEN"); v != "" {
+		Config.Delivery.IgnitionToken = v
 	}
 }

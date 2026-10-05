@@ -1,5 +1,6 @@
 # opic-techbase 构建产物与运行时
-techbase
+# ⚠ 必须带前导 /：裸 `techbase` 会连 cmd/techbase/ 一起忽略，clone 后组合根丢失
+/techbase
 go-techbase
 *.log
 log/

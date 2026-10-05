@@ -102,10 +102,12 @@ func main() {
 	r.GET("/metrics", metrics.Handler())
 
 	addr := ":" + config.Config.App.Port
-	logger.Infof("opic-techbase(v3) listening %s", addr)
+	logger.Infof("%s(v3, center=%s) listening %s", config.Config.App.Name, config.Config.CenterCode, addr)
 	srv := &http.Server{Addr: addr, Handler: r}
 
 	sd := graceful.New(15 * time.Second)
+	// 交付内核后台看护(槽位释放/排队推进/孤儿清扫/日志保留期清理,B-AUTO-10~13)
+	service.StartDeliveryBackground()
 	// step1 基础设施客户端（eventbus/workflow；失败降级 nil = 纯 v1 行为）
 	infra.Init()
 	if infra.TemporalDriver() {
@@ -120,6 +122,8 @@ func main() {
 		}
 	}
 
+	// LIFO:http 先停(不再有新 SSE/提交),delivery 后台看护与在跑任务随后终止
+	sd.Register("delivery", func(ctx context.Context) error { service.StopDeliveryBackground(); return nil })
 	sd.Register("http", func(ctx context.Context) error { return srv.Shutdown(ctx) })
 	sd.Register("redis", func(ctx context.Context) error { redisx.Close(); return nil })
 	sd.Register("infra", func(ctx context.Context) error { infra.Close(); return nil })

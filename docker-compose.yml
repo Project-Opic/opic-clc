@@ -3,7 +3,7 @@
 # 重构口径（2026-10-02）：不再自起 gateway/postgres/redis，全部接入 opic-ai 生产环境
 # （192.168.3.200，*.opic-ai.ccoe.tech，见 opic-deploy 仓与 118 号生产部署方案）：
 #   - Traefik    统一入口（opic-net 外部网络，本栈只声明 labels，子域 clc.opic-ai.ccoe.tech）
-#   - PostgreSQL Pigsty 集群 haproxy :5433（库 opicdb，schema oclc —— OPIC-DB-SCHEMA-01）
+#   - PostgreSQL Pigsty 集群 haproxy :5433（库 opicdb，schema clc —— 中心 3 位缩写域码）
 #   - Redis      opic-redis（opic-net 内 :6379）
 #   - NATS       opic-nats（opic-net 内 :4222，EVENTBUS_DRIVER=nats 时）
 #   - Temporal   opic-temporal（opic-net 内 :7233，WORKFLOW_DRIVER=temporal 时）
@@ -32,7 +32,7 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-${PG_ADMIN_PASSWORD:?PG_ADMIN_PASSWORD 未配置}}
       DB_NAME: ${DB_NAME:-opicdb}
-      DB_SCHEMA: ${DB_SCHEMA:-oclc}
+      DB_SCHEMA: ${DB_SCHEMA:-clc}
       DB_SSLMODE: disable
       # ── Redis / 事件总线 / 工作流（容器网直连）──
       REDIS_ENABLED: ${REDIS_ENABLED:-true}
@@ -44,7 +44,7 @@ services:
       EVENTBUS_USERNAME: ${EVENTBUS_USERNAME:-opic}
       EVENTBUS_PASSWORD: ${EVENTBUS_PASSWORD:-${NATS_PASSWORD:?NATS_PASSWORD 未配置}}
       CENTER_CODE: ${CENTER_CODE:-clc}
-      NATS_STREAM: ${NATS_STREAM:-}
+      NATS_STREAM: ${NATS_STREAM:-clc}
       NATS_SUBJECT_PREFIX: ${NATS_SUBJECT_PREFIX:-}
       WORKFLOW_DRIVER: ${WORKFLOW_DRIVER:-temporal}
       WORKFLOW_ADDRESS: ${WORKFLOW_ADDRESS:-temporal:7233}

@@ -293,6 +293,17 @@ func createBindingsFromRefsTx(db *gorm.DB, clusterNo string, refs map[string]str
 		pairs = append(pairs, struct{ cap, kind, ref, purpose string }{CapabilityRegistry, TargetKindProject, refs["registry_project_ref"], "HARBOR_CLIENT"})
 	}
 	for _, p := range pairs {
+		// R-01 双写幂等:组合已在台账内即视为已登记(FUNC-02 修改会重提交同一组引用)，
+		// 不能走 upsertBindingTx 的 INV-16 唯一性拦截，否则集群信息维护必失败。
+		dup, err := store.One(db, `SELECT id FROM clc_binding WHERE cluster_ref=? AND flag=1
+			AND LOWER(target_capability)=LOWER(?) AND LOWER(target_kind)=LOWER(?) AND LOWER(purpose)=LOWER(?) AND LOWER(target_ref)=LOWER(?)`,
+			clusterNo, p.cap, p.kind, p.purpose, p.ref)
+		if err != nil {
+			return err
+		}
+		if dup != nil {
+			continue
+		}
 		if err := upsertBindingTx(db, clusterNo, p.cap, p.kind, p.ref, p.purpose, BindingSourceManual, "", user); err != nil {
 			return err
 		}
@@ -348,14 +359,14 @@ func DestroyImpact(clusterNo string) (map[string]any, error) {
 	// 下游引用方:其他集群引用台账中指向本域资源无法反查(跨域权威在他域),
 	// 本域口径=本集群引用台账的全部对外引用 + 证书(销毁链需吊销)。
 	return map[string]any{
-		"cluster_no":     clusterNo,
-		"nodes":          nodes,
-		"node_count":     len(nodes),
-		"bindings":       bindings,
-		"binding_count":  len(bindings),
-		"cert_refs":      certs,
-		"cert_count":     len(certs),
-		"destroy_orch":   "交付工具卸载 → 吊销本域申请的基础设施证书 → 级联清理引用台账 → 发布销毁事件 → 终态(不删他域资源,R-07)",
+		"cluster_no":    clusterNo,
+		"nodes":         nodes,
+		"node_count":    len(nodes),
+		"bindings":      bindings,
+		"binding_count": len(bindings),
+		"cert_refs":     certs,
+		"cert_count":    len(certs),
+		"destroy_orch":  "交付工具卸载 → 吊销本域申请的基础设施证书 → 级联清理引用台账 → 发布销毁事件 → 终态(不删他域资源,R-07)",
 	}, nil
 }
 
@@ -389,7 +400,10 @@ func SubmitDestroy(id int64, d map[string]any, user UserInfo) (map[string]any, e
 		return nil, bizRuleFail("INV-02", "集群已销毁(终态),不可重复申请")
 	}
 	if status == ClusterStatusDestroying {
-		return nil, Fail(errcode.ErrState, "集群正在销毁中")
+		// DESTROYING 只有在途才拦:上次销毁任务已失败/取消时允许重新申请(R-10 仍需再次审批)
+		if no, ok := destroyInFlight(clusterNo); ok {
+			return nil, Fail(errcode.ErrState, "集群正在销毁中:销毁任务 %s 排队/执行中,请等待结论", no)
+		}
 	}
 	reason := Str(d["reason"])
 	if strings.TrimSpace(reason) == "" {
@@ -439,8 +453,23 @@ func SubmitDestroy(id int64, d map[string]any, user UserInfo) (map[string]any, e
 	return GetCluster(id)
 }
 
+// destroyInFlight 集群在途(QUEUED/RUNNING)DESTROY 任务(R-10 重复提交保护的唯一依据)。
+// DESTROYING 且无在途 ⇒ 上次销毁已出失败/取消结论,可重新申请销毁(仍需审批)。
+func destroyInFlight(clusterNo string) (string, bool) {
+	row, err := qOne(`
+		SELECT task_no FROM clc_task WHERE cluster_ref=? AND flag=1 AND task_kind=?
+			AND task_status IN (?, ?) ORDER BY id DESC`,
+		clusterNo, TaskKindDestroy, TaskStatusQueued, TaskStatusRunning)
+	if err != nil || row == nil {
+		return "", false
+	}
+	return Str(row["task_no"]), true
+}
+
 // SyncClusterDestroyFromFlow 审批结果 → 销毁链(FLOW-PROC-APP-01 A07 → PROC-05)。
-// 通过:创建 DESTROY 任务(INV-33 审批通过结论为前置)并执行 R-07 销毁编排;
+// 通过:INV-33 审批通过结论为前置 ⇒ 创建 DESTROY 任务(QUEUED)+ 集群置 DESTROYING;
+// R-07 销毁编排由交付内核承载(卸载成功后进 destroySuccessLanding:级联清理 → DESTROYED);
+// 本回调在审批事务内,不抢执行权,排队由后台看护按序推进(R-18)。
 // 驳回:状态不变,意见留痕。
 func SyncClusterDestroyFromFlow(db *gorm.DB, businessKey string, flowStatus string) error {
 	c, err := store.One(db, `SELECT * FROM clc_cluster WHERE cluster_no = ? AND flag = 1`, businessKey)
@@ -449,44 +478,77 @@ func SyncClusterDestroyFromFlow(db *gorm.DB, businessKey string, flowStatus stri
 	}
 	switch flowStatus {
 	case "APPROVED":
-		// INV-33:DESTROY 类任务的创建前置 = 审批通过结论
+		if Str(c["status"]) == ClusterStatusDestroying {
+			// 上次销毁已出失败结论:同一份审批通过结论可再次排队(INV-33);在途时不重复创建(R-10)
+			if no, ok := destroyInFlight(businessKey); ok {
+				return Fail(errcode.ErrState, "销毁任务 %s 排队/执行中,不重复创建", no)
+			}
+		} else if err := checkLifecycleTransition(Str(c["status"]), ClusterStatusDestroying); err != nil {
+			return err
+		}
 		user := UserInfo{ID: 0, Username: "system"}
-		task, err := createTaskTx(db, businessKey, TaskKindDestroy, ExecPathLocal, user)
-		if err != nil {
+		if _, err := createTaskTx(db, businessKey, TaskKindDestroy, ExecPathLocal, user); err != nil {
 			return err
 		}
-		if err := finishTaskTx(db, task, TaskStatusSucceeded, nil, "销毁审批通过,执行销毁编排(R-07)", user); err != nil {
-			return err
-		}
-		// R-07 销毁编排:级联清理引用台账与参数上下文(逻辑删除) → 终态(不删他域资源)
-		if _, err := store.Exec(db, `
-			UPDATE clc_binding SET flag=0, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
-			WHERE cluster_ref=? AND flag=1`, businessKey); err != nil {
-			return err
-		}
-		if _, err := store.Exec(db, `
-			UPDATE clc_param SET flag=0, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
-			WHERE cluster_ref=? AND flag=1`, businessKey); err != nil {
-			return err
-		}
-		if err := checkLifecycleTransition(Str(c["status"]), ClusterStatusDestroying); err != nil {
-			return err
-		}
-		if _, err := store.Exec(db, `
-			UPDATE clc_cluster SET status=?, health=?, destroyed_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS'),
-				updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE id=?`,
-			ClusterStatusDestroyed, HealthUnknown, Int(c["id"])); err != nil {
-			return err
+		if Str(c["status"]) != ClusterStatusDestroying {
+			if _, err := store.Exec(db, `
+				UPDATE clc_cluster SET status=?, updated_by=?, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+				WHERE id=? AND flag=1`, ClusterStatusDestroying, user.ID, Int(c["id"])); err != nil {
+				return err
+			}
 		}
 		WriteAudit(db, 0, "system", "FUNC-31", fmt.Sprintf(
-			"销毁审批通过:集群 %s 状态 → DESTROYED(终态保留行);级联清理引用台账 %d 项与参数上下文;发布销毁事件;不删他域资源(R-07)",
-			businessKey, Int(c["binding_count"])))
-		publishClcEvent("clc.cluster.destroyed", map[string]any{
-			"cluster_no": businessKey, "destroyed_at": nowText(),
-		})
+			"销毁审批通过:集群 %s 状态 → DESTROYING,DESTROY 任务已排队(INV-33 审批前置为唯一依据);销毁编排由交付内核执行(R-07)", businessKey))
 	case "REJECTED":
 		WriteAudit(db, 0, "system", "FUNC-32", fmt.Sprintf("销毁审批驳回:集群 %s 状态不变,意见留痕", businessKey))
 	}
+	return nil
+}
+
+// DESTROY 成功落点(FLOW-PROC-05 / R-07):交付工具卸载有结论后级联清理本域台账 → 终态 DESTROYED。
+// 不删他域资源(R-07);节点台账随集群终局保留行(INV-13 口径:终局不物理删)。
+func init() {
+	taskSuccessHooks[TaskKindDestroy] = destroySuccessLanding
+}
+
+func destroySuccessLanding(db *gorm.DB, task, cluster map[string]any, _ DeliveryArgs, user UserInfo) error {
+	clusterNo := Str(task["cluster_ref"])
+	if err := finishTaskTx(db, task, TaskStatusSucceeded, nil,
+		"销毁编排完成:交付工具卸载有结论,级联清理本域台账(R-07)", user); err != nil {
+		return err
+	}
+	if cluster == nil {
+		return nil
+	}
+	bindings, err := store.Count(db, `SELECT COUNT(*) FROM clc_binding WHERE cluster_ref=? AND flag=1`, clusterNo)
+	if err != nil {
+		return err
+	}
+	if _, err := store.Exec(db, `
+		UPDATE clc_binding SET flag=0, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+		WHERE cluster_ref=? AND flag=1`, clusterNo); err != nil {
+		return err
+	}
+	if _, err := store.Exec(db, `
+		UPDATE clc_param SET flag=0, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+		WHERE cluster_ref=? AND flag=1`, clusterNo); err != nil {
+		return err
+	}
+	if err := checkLifecycleTransition(Str(cluster["status"]), ClusterStatusDestroyed); err != nil {
+		return err
+	}
+	if _, err := store.Exec(db, `
+		UPDATE clc_cluster SET status=?, health=?, destroyed_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS'),
+			updated_by=?, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE id=?`,
+		ClusterStatusDestroyed, HealthUnknown, user.ID, Int(cluster["id"])); err != nil {
+		return err
+	}
+	WriteAudit(db, user.ID, user.Username, "FUNC-31", fmt.Sprintf(
+		"集群 %s 销毁落点(R-07):状态 → DESTROYED(终态保留行);级联清理引用台账 %d 项与参数上下文;发布销毁事件;不删他域资源",
+		clusterNo, bindings))
+	publishClcEvent("clc.cluster.destroyed", map[string]any{
+		"cluster_no": clusterNo, "destroyed_at": nowText(),
+	})
 	return nil
 }
 
