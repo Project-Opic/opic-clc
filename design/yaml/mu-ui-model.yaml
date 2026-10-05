@@ -1,0 +1,740 @@
+model_type: UI
+version: '1.0'
+domain: 集群域
+application:
+  name: OPIC-集群域
+  menus:
+  - menuId: menu-l1-01
+    name: 集群管理
+    children:
+    - menuId: menu-clc-cluster
+      name: 集群台账
+      screenRef: frmClcCluster
+    - menuId: menu-clc-node
+      name: 节点管理
+      screenRef: frmClcNode
+    - menuId: menu-clc-orch
+      name: 交付编排
+      screenRef: frmClcOrch
+    - menuId: menu-clc-ref
+      name: 引用与参数
+      screenRef: frmClcRef
+    - menuId: menu-clc-snap
+      name: 快照与回滚
+      screenRef: frmClcSnap
+    - menuId: menu-clc-health
+      name: 健康探活
+      screenRef: frmClcHealth
+  - menuId: menu-l1-02
+    name: 运行观测
+    children:
+    - menuId: menu-clc-ops
+      name: 运行观测
+      screenRef: frmClcOps
+screens:
+- screenId: frmClcCluster
+  name: 集群列表维护
+  screenType: LIST_MAINTENANCE
+  layout: ''
+  elements:
+  - id: el01
+    type: SELECT
+    label: 生命周期状态
+    io: I
+    required: false
+    dataBinding: Cluster.status
+    role: QUERY
+  - id: el02
+    type: SELECT
+    label: 运行模式
+    io: I
+    required: false
+    dataBinding: 同左
+    role: QUERY
+  - id: el03
+    type: SELECT
+    label: 健康
+    io: I
+    required: false
+    dataBinding: 同左
+    role: QUERY
+  - id: el04
+    type: BUTTON
+    label: 创建集群（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el05
+    type: TEXT
+    label: 集群编号
+    io: O
+    required: false
+    dataBinding: Cluster / 节点聚合
+  - id: el06
+    type: TEXT
+    label: 名称
+    io: O
+    required: false
+    dataBinding: Cluster / 节点聚合
+  - id: el07
+    type: TEXT
+    label: 节点数
+    io: O
+    required: false
+    dataBinding: Cluster / 节点聚合
+  - id: el08
+    type: TEXT
+    label: 健康（来源 ｜ 时间）
+    io: O
+    required: false
+    dataBinding: 探活 / 事件 / 恢复
+  - id: el09
+    type: BUTTON
+    label: 显式恢复（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el10
+    type: BUTTON
+    label: 发起升级（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  actions:
+  - actionId: act-FUNC-01
+    name: 创建集群（四步向导提交）
+    actionType: DRAFT
+    behaviorRef: FUNC-01
+    permissionRef:
+    - PERM-FUNC-01
+  - actionId: act-FUNC-02
+    name: 集群信息修改
+    actionType: OTHER
+    behaviorRef: FUNC-02
+    permissionRef:
+    - PERM-FUNC-02
+  - actionId: act-FUNC-19
+    name: 集群列表查询
+    actionType: QUERY
+    behaviorRef: FUNC-19
+    permissionRef:
+    - PERM-FUNC-19
+  - actionId: act-FUNC-20
+    name: 集群详情查询
+    actionType: QUERY
+    behaviorRef: FUNC-20
+    permissionRef:
+    - PERM-FUNC-20
+- screenId: frmClcNode
+  name: 节点清单维护
+  screenType: LIST_MAINTENANCE
+  layout: ''
+  elements:
+  - id: el01
+    type: SELECT
+    label: 集群
+    io: I
+    required: false
+    dataBinding: ClusterNode.clusterRef
+    role: QUERY
+  - id: el02
+    type: SELECT
+    label: 节点角色
+    io: I
+    required: false
+    dataBinding: 同左
+    role: QUERY
+  - id: el03
+    type: BUTTON
+    label: 添加节点（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el04
+    type: TEXT
+    label: 节点编号
+    io: O
+    required: false
+    dataBinding: ClusterNode
+  - id: el05
+    type: TEXT
+    label: 角色
+    io: O
+    required: false
+    dataBinding: ClusterNode
+  - id: el06
+    type: TEXT
+    label: IP
+    io: O
+    required: false
+    dataBinding: ClusterNode
+  - id: el07
+    type: TEXT
+    label: K8s 节点名
+    io: O
+    required: false
+    dataBinding: ClusterNode
+  - id: el08
+    type: TEXT
+    label: 资产引用（跳转资产域）
+    io: O
+    required: false
+    dataBinding: assetRef
+  - id: el09
+    type: TEXT
+    label: 健康（时间）
+    io: O
+    required: false
+    dataBinding: nodeHealth
+  - id: el10
+    type: BUTTON
+    label: 移除（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el11
+    type: BUTTON
+    label: 重绑定（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  actions:
+  - actionId: act-FUNC-06
+    name: 添加节点
+    actionType: OTHER
+    behaviorRef: FUNC-06
+    permissionRef:
+    - PERM-FUNC-06
+  - actionId: act-FUNC-07
+    name: 移除节点
+    actionType: OTHER
+    behaviorRef: FUNC-07
+    permissionRef:
+    - PERM-FUNC-07
+  - actionId: act-FUNC-08
+    name: 节点重绑定
+    actionType: OTHER
+    behaviorRef: FUNC-08
+    permissionRef:
+    - PERM-FUNC-08
+  - actionId: act-FUNC-21
+    name: 节点清单查询
+    actionType: QUERY
+    behaviorRef: FUNC-21
+    permissionRef:
+    - PERM-FUNC-21
+- screenId: frmClcOrch
+  name: 编排操作台
+  screenType: SINGLE_FORM
+  layout: ''
+  elements:
+  - id: el01
+    type: SELECT
+    label: 集群
+    io: I
+    required: false
+    dataBinding: ClusterTask
+    role: QUERY
+  - id: el02
+    type: SELECT
+    label: 任务类别
+    io: I
+    required: false
+    dataBinding: ClusterTask
+  - id: el03
+    type: BUTTON
+    label: 发起安装（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el04
+    type: BUTTON
+    label: 升级
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el05
+    type: BUTTON
+    label: 备份
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el06
+    type: TEXT
+    label: 任务编号
+    io: O
+    required: false
+    dataBinding: ClusterTask
+  - id: el07
+    type: TEXT
+    label: 类别
+    io: O
+    required: false
+    dataBinding: ClusterTask
+  - id: el08
+    type: TEXT
+    label: 执行位置
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el09
+    type: TEXT
+    label: 失败步骤
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el10
+    type: TEXT
+    label: 原因
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el11
+    type: BUTTON
+    label: 续跑（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el12
+    type: BUTTON
+    label: 重试 ｜ 显式换机（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el13
+    type: TEXT
+    label: 集群
+    io: O
+    required: false
+    dataBinding: 聚合
+  - id: el14
+    type: TEXT
+    label: 下游引用方
+    io: O
+    required: false
+    dataBinding: 聚合
+  - id: el15
+    type: TEXT
+    label: 节点清单
+    io: O
+    required: false
+    dataBinding: 聚合
+  - id: el16
+    type: TEXT
+    label: 基础设施证书
+    io: O
+    required: false
+    dataBinding: 聚合
+  - id: el17
+    type: TEXTBOX
+    label: 强制原因
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el18
+    type: BUTTON
+    label: 提交申请（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  actions:
+  - actionId: act-FUNC-03
+    name: 发起安装
+    actionType: OTHER
+    behaviorRef: FUNC-03
+    permissionRef:
+    - PERM-FUNC-03
+  - actionId: act-FUNC-04
+    name: 安装续跑
+    actionType: OTHER
+    behaviorRef: FUNC-04
+    permissionRef:
+    - PERM-FUNC-04
+  - actionId: act-FUNC-05
+    name: 集群销毁 · 提交申请
+    actionType: DRAFT
+    behaviorRef: FUNC-05
+    permissionRef:
+    - PERM-FUNC-05
+  - actionId: act-FUNC-09
+    name: 发起升级
+    actionType: OTHER
+    behaviorRef: FUNC-09
+    permissionRef:
+    - PERM-FUNC-09
+  - actionId: act-FUNC-10
+    name: 发起备份
+    actionType: OTHER
+    behaviorRef: FUNC-10
+    permissionRef:
+    - PERM-FUNC-10
+  - actionId: act-FUNC-11
+    name: 发起恢复
+    actionType: OTHER
+    behaviorRef: FUNC-11
+    permissionRef:
+    - PERM-FUNC-11
+  - actionId: act-FUNC-12
+    name: 集群启停
+    actionType: OTHER
+    behaviorRef: FUNC-12
+    permissionRef:
+    - PERM-FUNC-12
+  - actionId: act-FUNC-25
+    name: 任务台账查询
+    actionType: QUERY
+    behaviorRef: FUNC-25
+    permissionRef:
+    - PERM-FUNC-25
+  - actionId: act-FUNC-31
+    name: 集群销毁 · 通过
+    actionType: OTHER
+    behaviorRef: FUNC-31
+    permissionRef:
+    - PERM-FUNC-31
+  - actionId: act-FUNC-32
+    name: 集群销毁 · 驳回
+    actionType: OTHER
+    behaviorRef: FUNC-32
+    permissionRef:
+    - PERM-FUNC-32
+- screenId: frmClcRef
+  name: 引用与参数台
+  screenType: LIST_MAINTENANCE
+  layout: ''
+  elements:
+  - id: el01
+    type: SELECT
+    label: 目标能力
+    io: I
+    required: false
+    dataBinding: ClusterBinding
+    role: QUERY
+  - id: el02
+    type: SELECT
+    label: 用途
+    io: I
+    required: false
+    dataBinding: ClusterBinding
+  - id: el03
+    type: BUTTON
+    label: 调整引用（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el04
+    type: TEXT
+    label: 资源标识（跳转原域）
+    io: O
+    required: false
+    dataBinding: targetRef
+  - id: el05
+    type: TEXT
+    label: 来源
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el06
+    type: TAB
+    label: 参数清单（页签）
+    io: I
+    required: false
+    dataBinding: ClusterParam
+  - id: el07
+    type: TAB
+    label: 待同步（页签）
+    io: I
+    required: false
+    dataBinding: 同左
+  actions:
+  - actionId: act-FUNC-13
+    name: 调整中心引用
+    actionType: OTHER
+    behaviorRef: FUNC-13
+    permissionRef:
+    - PERM-FUNC-13
+  - actionId: act-FUNC-14
+    name: 参数人工覆写
+    actionType: OTHER
+    behaviorRef: FUNC-14
+    permissionRef:
+    - PERM-FUNC-14
+  - actionId: act-FUNC-15
+    name: 触发参数同步（确认执行）
+    actionType: OTHER
+    behaviorRef: FUNC-15
+    permissionRef:
+    - PERM-FUNC-15
+  - actionId: act-FUNC-22
+    name: 引用台账查询
+    actionType: QUERY
+    behaviorRef: FUNC-22
+    permissionRef:
+    - PERM-FUNC-22
+  - actionId: act-FUNC-23
+    name: 参数清单查询
+    actionType: QUERY
+    behaviorRef: FUNC-23
+    permissionRef:
+    - PERM-FUNC-23
+- screenId: frmClcSnap
+  name: 快照与回滚台
+  screenType: QUERY_LIST
+  layout: ''
+  elements:
+  - id: el01
+    type: SELECT
+    label: 集群
+    io: I
+    required: false
+    dataBinding: ClusterSnapshot
+    role: QUERY
+  - id: el02
+    type: SELECT
+    label: 快照类型
+    io: I
+    required: false
+    dataBinding: ClusterSnapshot
+  - id: el03
+    type: BUTTON
+    label: 创建快照（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el04
+    type: TEXT
+    label: 快照编号
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el05
+    type: TEXT
+    label: 序号
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el06
+    type: TEXT
+    label: 类型
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el07
+    type: TEXT
+    label: 变更摘要
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el08
+    type: TEXT
+    label: 创建时间
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el09
+    type: TEXT
+    label: 可回滚（即时判定）
+    io: O
+    required: false
+    dataBinding: 派生
+  - id: el10
+    type: BUTTON
+    label: 回滚到此版（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el11
+    type: BUTTON
+    label: 放弃引用回滚（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  actions:
+  - actionId: act-FUNC-17
+    name: 创建版本快照
+    actionType: OTHER
+    behaviorRef: FUNC-17
+    permissionRef:
+    - PERM-FUNC-17
+  - actionId: act-FUNC-18
+    name: 版本回滚
+    actionType: OTHER
+    behaviorRef: FUNC-18
+    permissionRef:
+    - PERM-FUNC-18
+  - actionId: act-FUNC-24
+    name: 快照清单查询
+    actionType: QUERY
+    behaviorRef: FUNC-24
+    permissionRef:
+    - PERM-FUNC-24
+- screenId: frmClcHealth
+  name: 健康与恢复台
+  screenType: MASTER_DETAIL_FORM
+  layout: ''
+  elements:
+  - id: el01
+    type: TEXT
+    label: 探活时间
+    io: O
+    required: false
+    dataBinding: HealthProbe
+  - id: el02
+    type: TEXT
+    label: 触发方式
+    io: O
+    required: false
+    dataBinding: HealthProbe
+  - id: el03
+    type: TEXT
+    label: 控制面
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el04
+    type: TEXT
+    label: TLS
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el05
+    type: TEXT
+    label: 就绪节点
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el06
+    type: TEXT
+    label: 结论
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el07
+    type: TEXT
+    label: 显式恢复（弹窗）
+    io: O
+    required: false
+    dataBinding: ''
+  - id: el08
+    type: SELECT
+    label: 恢复方式
+    io: I
+    required: true
+    dataBinding: ''
+    role: QUERY
+  - id: el09
+    type: TEXT
+    label: 新镜像源实例
+    io: O
+    required: false
+    dataBinding: 上游校验
+  actions:
+  - actionId: act-FUNC-16
+    name: 显式恢复（重绑定 / 确认）
+    actionType: OTHER
+    behaviorRef: FUNC-16
+    permissionRef:
+    - PERM-FUNC-16
+  - actionId: act-FUNC-26
+    name: 探活历史查询
+    actionType: QUERY
+    behaviorRef: FUNC-26
+    permissionRef:
+    - PERM-FUNC-26
+  - actionId: act-FUNC-27
+    name: 聚合健康查询
+    actionType: QUERY
+    behaviorRef: FUNC-27
+    permissionRef:
+    - PERM-FUNC-27
+- screenId: frmClcOps
+  name: 统计与参数
+  screenType: QUERY_LIST
+  layout: ''
+  elements:
+  - id: el01
+    type: TEXT
+    label: 集群总数
+    io: O
+    required: false
+    dataBinding: Cluster / ClusterParam 聚合
+  - id: el02
+    type: TEXT
+    label: 运行中
+    io: O
+    required: false
+    dataBinding: Cluster / ClusterParam 聚合
+  - id: el03
+    type: TEXT
+    label: 降级
+    io: O
+    required: false
+    dataBinding: Cluster / ClusterParam 聚合
+  - id: el04
+    type: TEXT
+    label: 待同步
+    io: O
+    required: false
+    dataBinding: Cluster / ClusterParam 聚合
+  - id: el05
+    type: TEXT
+    label: 挂起吊销证书
+    io: O
+    required: false
+    dataBinding: 吊销记录
+  - id: el06
+    type: TEXT
+    label: 探活失败率
+    io: O
+    required: false
+    dataBinding: HealthProbe 聚合
+  - id: el07
+    type: TEXT
+    label: legacy 模式开关
+    io: O
+    required: false
+    dataBinding: O-SYS 配置
+  - id: el08
+    type: TEXT
+    label: 快照保留期（天）
+    io: O
+    required: false
+    dataBinding: 同左
+  - id: el09
+    type: BUTTON
+    label: 保存运行参数（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  actions:
+  - actionId: act-FUNC-29
+    name: 统计总览查询
+    actionType: QUERY
+    behaviorRef: FUNC-29
+    permissionRef:
+    - PERM-FUNC-29
+  - actionId: act-FUNC-30
+    name: 运行参数维护
+    actionType: OTHER
+    behaviorRef: FUNC-30
+    permissionRef:
+    - PERM-FUNC-30
+- screenId: frmPublicEntry01
+  name: 跨中心集群视图
+  screenType: LIST_MAINTENANCE
+  layout: ''
+  elements:
+  - id: pending01
+    type: TEXT
+    label: 跨中心集群视图
+    io: O
+    required: false
+    dataBinding: ''
+    sourceNote: 规格声明本屏界面原型未含（建模阶段补充）
+  actions:
+  - actionId: act-FUNC-28
+    name: 跨中心集群查询（多用途）
+    actionType: QUERY
+    behaviorRef: FUNC-28
+    permissionRef:
+    - PERM-FUNC-28
