@@ -465,6 +465,42 @@ func TestInstallSuccessChainLocal(t *testing.T) {
 	waitAllSlotsFree(t, rt)
 }
 
+// TestStepLogWindowMatchesOwnRows A08/REP-12 c7:步骤的日志游标区间必须精确覆盖本步行 ——
+// 区间左界=本步首行(开始行)、右界=本步末行、区间内无空洞号(游标不得为探测区间而空占号)。
+func TestStepLogWindowMatchesOwnRows(t *testing.T) {
+	requireDB(t)
+	rt := useTool(t, `echo "step $3 running"`+"\n"+
+		`echo "PLAY RECAP ****"`+"\n"+
+		`echo "node-1 : ok=4 changed=2 unreachable=0 failed=0 skipped=0"`, time.Minute)
+	newFakeRemote([]string{"UNUSED"}, "IGN-NA").attach(t, rt)
+
+	clusterNo := seedCluster(t, ClusterStatusInstalling)
+	taskNo := seedTask(t, clusterNo, TaskKindInstall, TaskStatusQueued, ExecPathLocal)
+	expandSteps(t, taskNo, TaskKindInstall, clusterNo, 0, nil)
+	enqueueTask(taskNo, DeliveryArgs{})
+	waitTaskStatuses(t, taskNo, TaskStatusSucceeded)
+
+	for _, s := range stepsByStatus(t, taskNo, StepStatusSucceeded) {
+		idx := int(paramInt(s["step_index"]))
+		rows, err := qList(`SELECT line_no FROM clc_task_log WHERE task_ref=? AND step_index=? AND flag=1 ORDER BY line_no`,
+			taskNo, idx)
+		if err != nil || len(rows) == 0 {
+			t.Fatalf("步骤 %d 应有日志行(rows=%d err=%v)", idx, len(rows), err)
+		}
+		first := int(paramInt(rows[0]["line_no"]))
+		last := int(paramInt(rows[len(rows)-1]["line_no"]))
+		start := int(paramInt(s["log_start_line"]))
+		end := int(paramInt(s["log_end_line"]))
+		if start != first || end != last {
+			t.Fatalf("步骤 %d 日志区间应为本步行实际范围 [%d,%d],登记 [%d,%d]", idx, first, last, start, end)
+		}
+		if end-start+1 != len(rows) {
+			t.Fatalf("INV-43:步骤 %d 区间 [%d,%d] 含空洞号(实际 %d 行)", idx, start, end, len(rows))
+		}
+	}
+	waitAllSlotsFree(t, rt)
+}
+
 func TestRecapVerdictOverridesExitCodeZero(t *testing.T) {
 	requireDB(t)
 	// 退出码 0 但剧本汇总有失败 ⇒ 判失败(B-AUTO-10 / A13 判定网关)

@@ -355,19 +355,27 @@ func cancelPendingStepsTx(db *gorm.DB, taskNo string, fromIdx int) error {
 
 // ---------- 日志落库(掩码 + 游标 + SSE 总线) ----------
 
-// nextLineNo 任务内日志游标(只增,INV-43;首用自 DB MAX+1 装载,断线重放与重启续写安全)。
+// nextLineNo 任务内日志游标取号(只增,INV-43;插入失败也不回退,重放端以 DB 续查补差)。
 func (rt *deliveryRuntime) nextLineNo(taskNo string) int {
-	rt.mu.Lock()
-	lg, ok := rt.loggers[taskNo]
-	rt.mu.Unlock()
-	if !ok {
-		lg = &taskLogger{}
-		rt.mu.Lock()
-		rt.loggers[taskNo] = lg
-		rt.mu.Unlock()
-	}
+	lg := rt.loggerFor(taskNo)
 	lg.mu.Lock()
 	defer lg.mu.Unlock()
+	n := rt.cursor(lg, taskNo)
+	lg.next++
+	return n
+}
+
+// peekLineNo 预读下一个游标号而不占用:日志区间左界定位用(A08),
+// 否则区间会漏掉本步开始行并留下无日志行的空洞号。
+func (rt *deliveryRuntime) peekLineNo(taskNo string) int {
+	lg := rt.loggerFor(taskNo)
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	return rt.cursor(lg, taskNo)
+}
+
+// cursor 当前待分配游标(须持 lg.mu;首用自 DB MAX+1 装载,断线重放与重启续写安全)。
+func (rt *deliveryRuntime) cursor(lg *taskLogger, taskNo string) int {
 	if lg.next == 0 {
 		if row, err := qOne(`SELECT COALESCE(MAX(line_no),0)+1 AS nx FROM clc_task_log WHERE task_ref=?`, taskNo); err == nil {
 			lg.next = int(Int(row["nx"]))
@@ -375,9 +383,19 @@ func (rt *deliveryRuntime) nextLineNo(taskNo string) int {
 			lg.next = 1
 		}
 	}
-	n := lg.next
-	lg.next++ // 游标只增(INV-43),插入失败也不回退(重放端以 DB 续查补差)
-	return n
+	return lg.next
+}
+
+// loggerFor 任务日志游标(懒建,同一任务只对应一个游标实例)。
+func (rt *deliveryRuntime) loggerFor(taskNo string) *taskLogger {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	lg, ok := rt.loggers[taskNo]
+	if !ok {
+		lg = &taskLogger{}
+		rt.loggers[taskNo] = lg
+	}
+	return lg
 }
 
 // writeTaskLog 单行日志落库:掩码在写之前(INV-42,原文不留存),超长截断标注;
@@ -593,10 +611,11 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 			writeTaskLog(taskNo, &stepIdx, delivery.LevelError, "步骤状态回写失败: "+err.Error())
 			continue
 		}
+		// 游标区间起点(A08):开始行自身即本步日志首行,预读取号不占号
+		startLine := rt.peekLineNo(taskNo)
 		writeTaskLog(taskNo, &stepIdx, delivery.LevelInfo,
 			fmt.Sprintf("步骤 %02d %s 开始(命令面: %s)", idx, stepCode, Str(step["command_summary"])))
-		// 游标区间起点(A08):步骤开始时的下一行号即区间起点
-		rt.markLogStart(taskNo, idx, rt.nextLineNo(taskNo))
+		rt.markLogStart(taskNo, idx, startLine)
 
 		if args.FailStep == idx {
 			// 故障注入(仅验证用):该步不落交付工具,直接按失败结论走回写链(R-09/INV-30/R-14)
