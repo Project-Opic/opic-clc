@@ -1,33 +1,600 @@
-# M2 行为模型 - 客户示例域
 model_type: BEHAVIOR
-version: "1.0"
-domain: "客户管理"
-
+version: '1.0'
+domain: 集群域
 behaviors:
-  - id: Customer_SaveAsDraft
-    name: 客户申请暂存
-    behaviorType: COMMAND
-    targetAggregate: AGG-CUSTOMER-001
-    description: 保存客户申请为草稿
-  - id: Customer_Submit
-    name: 客户申请提交
-    behaviorType: COMMAND
-    targetAggregate: AGG-CUSTOMER-001
-    description: 提交客户申请并启动客户审批流
-    syncTriggers:
-      - flowRef: FLOW-CUSTOMER-APPROVAL
-  - id: Customer_QueryList
-    name: 客户查询
-    behaviorType: QUERY
-    targetAggregate: AGG-CUSTOMER-001
-    description: 按条件查询客户列表
-  - id: Customer_ApproveManager
-    name: 客户经理审批
-    behaviorType: COMMAND
-    targetAggregate: AGG-CUSTOMER-001
-    description: 客户经理审批节点
-  - id: Customer_ApproveGM
-    name: 部门总经理审批
-    behaviorType: COMMAND
-    targetAggregate: AGG-CUSTOMER-001
-    description: 部门总经理审批节点
+- id: FUNC-01
+  name: 创建集群（四步向导提交）
+  ownerEntity: AGG-CLC-01
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-01
+  - INV-02
+  - INV-03
+  - INV-04
+  - INV-05
+  - INV-06
+  - INV-07
+  - INV-08
+  - INV-09
+  - R-05
+  - R-08
+  - R-13
+  requiredPermissions:
+  - PERM-FUNC-01
+  syncTriggers: []
+- id: FUNC-02
+  name: 集群信息修改
+  ownerEntity: AGG-CLC-01
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-01
+  - INV-02
+  - INV-03
+  - INV-04
+  - INV-05
+  - INV-06
+  - INV-07
+  - INV-08
+  - INV-09
+  - R-05
+  - R-08
+  - R-13
+  requiredPermissions:
+  - PERM-FUNC-02
+  syncTriggers: []
+- id: FUNC-03
+  name: 发起安装
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-03
+  syncTriggers: []
+- id: FUNC-04
+  name: 安装续跑
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-04
+  syncTriggers: []
+- id: FUNC-05
+  name: 集群销毁 · 提交申请
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-05
+  syncTriggers: []
+- id: FUNC-06
+  name: 添加节点
+  ownerEntity: AGG-CLC-02
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-10
+  - INV-11
+  - INV-12
+  - INV-13
+  - INV-14
+  - INV-15
+  - R-02
+  - R-03
+  - R-12
+  requiredPermissions:
+  - PERM-FUNC-06
+  syncTriggers: []
+- id: FUNC-07
+  name: 移除节点
+  ownerEntity: AGG-CLC-02
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-10
+  - INV-11
+  - INV-12
+  - INV-13
+  - INV-14
+  - INV-15
+  - R-02
+  - R-03
+  - R-12
+  requiredPermissions:
+  - PERM-FUNC-07
+  syncTriggers: []
+- id: FUNC-08
+  name: 节点重绑定
+  ownerEntity: AGG-CLC-02
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-10
+  - INV-11
+  - INV-12
+  - INV-13
+  - INV-14
+  - INV-15
+  - R-02
+  - R-03
+  - R-12
+  requiredPermissions:
+  - PERM-FUNC-08
+  syncTriggers: []
+- id: FUNC-09
+  name: 发起升级
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-09
+  syncTriggers: []
+- id: FUNC-10
+  name: 发起备份
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-10
+  syncTriggers: []
+- id: FUNC-11
+  name: 发起恢复
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-11
+  syncTriggers: []
+- id: FUNC-12
+  name: 集群启停
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-12
+  syncTriggers: []
+- id: FUNC-13
+  name: 调整中心引用
+  ownerEntity: AGG-CLC-03
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-16
+  - INV-17
+  - INV-18
+  - INV-19
+  - R-01
+  - R-07
+  requiredPermissions:
+  - PERM-FUNC-13
+  syncTriggers: []
+- id: FUNC-14
+  name: 参数人工覆写
+  ownerEntity: AGG-CLC-03
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-16
+  - INV-17
+  - INV-18
+  - INV-19
+  - R-01
+  - R-07
+  requiredPermissions:
+  - PERM-FUNC-14
+  syncTriggers: []
+- id: FUNC-15
+  name: 触发参数同步（确认执行）
+  ownerEntity: AGG-CLC-03
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-16
+  - INV-17
+  - INV-18
+  - INV-19
+  - R-01
+  - R-07
+  requiredPermissions:
+  - PERM-FUNC-15
+  syncTriggers: []
+- id: FUNC-16
+  name: 显式恢复（重绑定 / 确认）
+  ownerEntity: AGG-CLC-07
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-34
+  - INV-35
+  - INV-36
+  requiredPermissions:
+  - PERM-FUNC-16
+  syncTriggers: []
+- id: FUNC-17
+  name: 创建版本快照
+  ownerEntity: AGG-CLC-05
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-24
+  - INV-25
+  - INV-26
+  - INV-27
+  - R-04
+  - R-06
+  requiredPermissions:
+  - PERM-FUNC-17
+  syncTriggers: []
+- id: FUNC-18
+  name: 版本回滚
+  ownerEntity: AGG-CLC-05
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-24
+  - INV-25
+  - INV-26
+  - INV-27
+  - R-04
+  - R-06
+  requiredPermissions:
+  - PERM-FUNC-18
+  syncTriggers: []
+- id: FUNC-19
+  name: 集群列表查询
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-01
+  - INV-02
+  - INV-03
+  - INV-04
+  - INV-05
+  - INV-06
+  - INV-07
+  - INV-08
+  - INV-09
+  - R-05
+  - R-08
+  - R-13
+  requiredPermissions:
+  - PERM-FUNC-19
+  syncTriggers: []
+  queryReportRef: REP-01
+- id: FUNC-20
+  name: 集群详情查询
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-01
+  - INV-02
+  - INV-03
+  - INV-04
+  - INV-05
+  - INV-06
+  - INV-07
+  - INV-08
+  - INV-09
+  - R-05
+  - R-08
+  - R-13
+  requiredPermissions:
+  - PERM-FUNC-20
+  syncTriggers: []
+  queryReportRef: REP-02
+- id: FUNC-21
+  name: 节点清单查询
+  ownerEntity: AGG-CLC-02
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-10
+  - INV-11
+  - INV-12
+  - INV-13
+  - INV-14
+  - INV-15
+  - R-02
+  - R-03
+  - R-12
+  requiredPermissions:
+  - PERM-FUNC-21
+  syncTriggers: []
+  queryReportRef: REP-03
+- id: FUNC-22
+  name: 引用台账查询
+  ownerEntity: AGG-CLC-03
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-16
+  - INV-17
+  - INV-18
+  - INV-19
+  - R-01
+  - R-07
+  requiredPermissions:
+  - PERM-FUNC-22
+  syncTriggers: []
+  queryReportRef: REP-04
+- id: FUNC-23
+  name: 参数清单查询
+  ownerEntity: AGG-CLC-03
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-16
+  - INV-17
+  - INV-18
+  - INV-19
+  - R-01
+  - R-07
+  requiredPermissions:
+  - PERM-FUNC-23
+  syncTriggers: []
+  queryReportRef: REP-05
+- id: FUNC-24
+  name: 快照清单查询
+  ownerEntity: AGG-CLC-05
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-24
+  - INV-25
+  - INV-26
+  - INV-27
+  - R-04
+  - R-06
+  requiredPermissions:
+  - PERM-FUNC-24
+  syncTriggers: []
+  queryReportRef: REP-06
+- id: FUNC-25
+  name: 任务台账查询
+  ownerEntity: AGG-CLC-06
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-25
+  syncTriggers: []
+  queryReportRef: REP-07
+- id: FUNC-26
+  name: 探活历史查询
+  ownerEntity: AGG-CLC-07
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-34
+  - INV-35
+  - INV-36
+  requiredPermissions:
+  - PERM-FUNC-26
+  syncTriggers: []
+  queryReportRef: REP-08
+- id: FUNC-27
+  name: 聚合健康查询
+  ownerEntity: AGG-CLC-07
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-34
+  - INV-35
+  - INV-36
+  requiredPermissions:
+  - PERM-FUNC-27
+  syncTriggers: []
+  queryReportRef: REP-09
+- id: FUNC-28
+  name: 跨中心集群查询（多用途）
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-01
+  - INV-02
+  - INV-03
+  - INV-04
+  - INV-05
+  - INV-06
+  - INV-07
+  - INV-08
+  - INV-09
+  - R-05
+  - R-08
+  - R-13
+  requiredPermissions:
+  - PERM-FUNC-28
+  syncTriggers: []
+  queryReportRef: REP-10
+- id: FUNC-29
+  name: 统计总览查询
+  ownerEntity: AGG-DERIVED-VIEW
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules: []
+  requiredPermissions:
+  - PERM-FUNC-29
+  syncTriggers: []
+  queryReportRef: REP-11
+- id: FUNC-30
+  name: 运行参数维护
+  ownerEntity: AGG-DERIVED-VIEW
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules: []
+  requiredPermissions:
+  - PERM-FUNC-30
+  syncTriggers: []
+- id: FUNC-31
+  name: 集群销毁 · 通过
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-31
+  syncTriggers: []
+- id: FUNC-32
+  name: 集群销毁 · 驳回
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions: []
+  postconditions: []
+  appliedRules:
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-33
+  - R-09
+  - R-10
+  requiredPermissions:
+  - PERM-FUNC-32
+  syncTriggers: []

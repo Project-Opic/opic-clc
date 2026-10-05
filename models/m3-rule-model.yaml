@@ -1,0 +1,431 @@
+model_type: RULE
+version: '1.0'
+domain: 集群域
+rules:
+- id: REF-01
+  name: legacy 模式开关取平台配置（禁用时创建必须至少一项中心引用）
+  ruleType: FORMAT
+  description: Cluster.runMode
+  expression: Cluster.runMode
+  reusedBy: []
+  version: '1.0'
+- id: REF-02
+  name: 快照保留期取平台配置（缺省 365 天）
+  ruleType: FORMAT
+  description: ClusterSnapshot.createdAt
+  expression: ClusterSnapshot.createdAt
+  reusedBy: []
+  version: '1.0'
+- id: REF-03
+  name: 探活周期与连续失败阈值取平台配置（缺省 60 秒 / 3 次）
+  ruleType: FORMAT
+  description: B-AUTO-01 调度基准
+  expression: B-AUTO-01 调度基准
+  reusedBy: []
+  version: '1.0'
+- id: REF-04
+  name: 创建向导默认引用取平台配置（默认执行机 / 版本 / 仓库实例）
+  ruleType: FORMAT
+  description: FUNC-01 第三步
+  expression: FUNC-01 第三步
+  reusedBy: []
+  version: '1.0'
+- id: REF-05
+  name: 交付版本引用必须命中 O-IGN 未归档且就绪及之后的版本（禁用版本拦截）
+  ruleType: FORMAT
+  description: Cluster.versionRef
+  expression: Cluster.versionRef
+  reusedBy: []
+  version: '1.0'
+- id: REF-06
+  name: 镜像源派生规则为固定映射模板（实例 + 项目 → 镜像源地址与工具镜像引用）
+  ruleType: FORMAT
+  description: ClusterParam 派生
+  expression: ClusterParam 派生
+  reusedBy: []
+  version: '1.0'
+- id: REF-07
+  name: 聚合健康响应缓存时长取平台配置（缺省 60 秒，防下游穿透）
+  ruleType: FORMAT
+  description: FUNC-27
+  expression: FUNC-27
+  reusedBy: []
+  version: '1.0'
+- id: REF-08
+  name: 探活记录保留期取平台配置
+  ruleType: FORMAT
+  description: HealthProbe.probedAt
+  expression: HealthProbe.probedAt
+  reusedBy: []
+  version: '1.0'
+- id: REF-09
+  name: 降级原因与订阅事件的映射为固定枚举映射
+  ruleType: FORMAT
+  description: Cluster.degradedReason
+  expression: Cluster.degradedReason
+  reusedBy: []
+  version: '1.0'
+- id: REF-10
+  name: 待同步参数的提示口径固定（banner + diff 呈现 + 显式确认入口）
+  ruleType: FORMAT
+  description: FUNC-15
+  expression: FUNC-15
+  reusedBy: []
+  version: '1.0'
+- id: REF-11
+  name: 探活恢复健康需连续成功达到阈值（平台配置，防抖动）
+  ruleType: FORMAT
+  description: Cluster.health 转换
+  expression: Cluster.health 转换
+  reusedBy: []
+  version: '1.0'
+- id: REF-12
+  name: 交付动作日志复用平台统一任务通道回放（不在本域另建日志存储）
+  ruleType: FORMAT
+  description: FUNC-25
+  expression: FUNC-25
+  reusedBy: []
+  version: '1.0'
+- id: INV-01
+  name: 集群名称在未销毁范围内唯一（保存即校验）
+  ruleType: INVARIANT
+  description: 集群：集群名称在未销毁范围内唯一（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-02
+  name: 生命周期状态迁移固定单向；DESTROYED 为终态且行保留（仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群：生命周期状态迁移固定单向；DESTROYED 为终态且行保留（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-03
+  name: INSTALL_FAILED 必须携带失败步骤索引；续跑从该索引继续、不重跑已成
+  ruleType: INVARIANT
+  description: 集群：INSTALL_FAILED 必须携带失败步骤索引；续跑从该索引继续、不重跑已成功步骤（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-04
+  name: 运行模式为 LEGACY ⇔ 四类中心引用全部为空；MCC 模式至少一项非空（平
+  ruleType: INVARIANT
+  description: 集群：运行模式为 LEGACY ⇔ 四类中心引用全部为空；MCC 模式至少一项非空（平台配置可强制禁用 legacy；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-05
+  name: 镜像仓库项目引用与实例引用成对出现或同时为空（保存即校验）
+  ruleType: INVARIANT
+  description: 集群：镜像仓库项目引用与实例引用成对出现或同时为空（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-06
+  name: 健康写入口径：DEGRADED 只能被显式恢复清除；探活只写 UNKNOWN /
+  ruleType: INVARIANT
+  description: 集群：健康写入口径：DEGRADED 只能被显式恢复清除；探活只写 UNKNOWN / UNREACHABLE / HEALTHY 的转换并刷新最近探活时间（写权限由 R-08 承载，此处声明口径；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-07
+  name: 主控入口与访问凭据存放标识仅当状态进入 RUNNING 及之后非空（保存即校验）
+  ruleType: INVARIANT
+  description: 集群：主控入口与访问凭据存放标识仅当状态进入 RUNNING 及之后非空（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-08
+  name: 访问凭据存放标识只允许存放位置标识，kubeconfig 内容与任何凭据值不得进
+  ruleType: INVARIANT
+  description: 集群：访问凭据存放标识只允许存放位置标识，kubeconfig 内容与任何凭据值不得进入本对象、任何接口响应、事件、报表与导出（输出面约束）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-09
+  name: DESTROYED 冻结全部登记字段（终态；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群：DESTROYED 冻结全部登记字段（终态；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-10
+  name: 同一集群内 IP 地址唯一；K8s 节点名（非空时）集群内唯一（保存即校验）
+  ruleType: INVARIANT
+  description: 集群节点：同一集群内 IP 地址唯一；K8s 节点名（非空时）集群内唯一（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-11
+  name: 节点角色取值必须命中 CLC_NODE_ROLE 字典（保存即校验）
+  ruleType: INVARIANT
+  description: 集群节点：节点角色取值必须命中 CLC_NODE_ROLE 字典（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-12
+  name: '裸机模式（无资产引用）必须可凭登记 IP 人工接管 —— 资产引用置空时 IP '
+  ruleType: INVARIANT
+  description: 集群节点：裸机模式（无资产引用）必须可凭登记 IP 人工接管 —— 资产引用置空时 IP 地址与登记值保留不清洗（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-13
+  name: REMOVED 为该行终局；重新加入 = 登记新行（仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群节点：REMOVED 为该行终局；重新加入 = 登记新行（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-14
+  name: ADDED 状态必须已有 K8s 节点名（加入成功的登记落点；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群节点：ADDED 状态必须已有 K8s 节点名（加入成功的登记落点；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-15
+  name: PENDING 状态的节点不得作为交付动作的目标（未加入集群；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群节点：PENDING 状态的节点不得作为交付动作的目标（未加入集群；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-16
+  name: 同一集群内「目标能力 + 资源类型 + 用途 + 资源标识」组合唯一（保存即校验
+  ruleType: INVARIANT
+  description: 中心引用绑定：同一集群内「目标能力 + 资源类型 + 用途 + 资源标识」组合唯一（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-17
+  name: 目标能力与资源类型的组合必须合法（枚举映射：IGNITION→EXECUTOR/
+  ruleType: INVARIANT
+  description: 中心引用绑定：目标能力与资源类型的组合必须合法（枚举映射：IGNITION→EXECUTOR/VERSION；REGISTRY→INSTANCE/PROJECT；CERT→CERTIFICATE；ASSET→ASSET；保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-18
+  name: EVENT_SYNC 行的变更必须携带对账注记（哪些事件维护了它；仅提交时强制校
+  ruleType: INVARIANT
+  description: 中心引用绑定：EVENT_SYNC 行的变更必须携带对账注记（哪些事件维护了它；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-19
+  name: 引用台账行在集群销毁时级联清理、但不触发他域资源删除（R-07 承载；此处声明范
+  ruleType: INVARIANT
+  description: 中心引用绑定：引用台账行在集群销毁时级联清理、但不触发他域资源删除（R-07 承载；此处声明范围）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-20
+  name: 参数键在同一集群内唯一（保存即校验）
+  ruleType: INVARIANT
+  description: 集群参数：参数键在同一集群内唯一（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-21
+  name: 参数来源为 DERIVED 时派生来源必填；MANUAL_OVERRIDE 的每
+  ruleType: INVARIANT
+  description: 集群参数：参数来源为 DERIVED 时派生来源必填；MANUAL_OVERRIDE 的每次修改必须留痕（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-22
+  name: 待同步标记为真时必须存在对应的派生注记（哪个上游、什么变更；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群参数：待同步标记为真时必须存在对应的派生注记（哪个上游、什么变更；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-23
+  name: 派生写入不得覆盖 MANUAL_OVERRIDE 行 —— 冲突时保留覆写值、登
+  ruleType: INVARIANT
+  description: 集群参数：派生写入不得覆盖 MANUAL_OVERRIDE 行 —— 冲突时保留覆写值、登记冲突提示（由 R-04 承载，此处声明口径）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-24
+  name: 快照序号在同一集群内单调递增、不可复用（保存即校验）
+  ruleType: INVARIANT
+  description: 版本快照：快照序号在同一集群内单调递增、不可复用（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-25
+  name: 快照创建后不可修改（终态记录；回滚产生新快照、不覆盖旧快照；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 版本快照：快照创建后不可修改（终态记录；回滚产生新快照、不覆盖旧快照；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-26
+  name: 回滚动作的前置 = 目标快照引用的资源仍然存在；不存在时拒绝或显式「放弃引用回滚
+  ruleType: INVARIANT
+  description: 版本快照：回滚动作的前置 = 目标快照引用的资源仍然存在；不存在时拒绝或显式「放弃引用回滚」（引用置空、留痕）—— 由 R-06 承载，此处声明口径
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-27
+  name: 快照清理仅按平台保留期执行、清理动作留痕（B-AUTO 承载；仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 版本快照：快照清理仅按平台保留期执行、清理动作留痕（B-AUTO 承载；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-28
+  name: STALLED 与 FAILED 分列 —— 失联挂起（可重试或换执行机）与确定
+  ruleType: INVARIANT
+  description: 集群任务：STALLED 与 FAILED 分列 —— 失联挂起（可重试或换执行机）与确定失败（需排查）恢复路径不同（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-29
+  name: 终态必须有结束时间与结果摘要；FAILED 必填失败原因（仅提交时强制校验）
+  ruleType: INVARIANT
+  description: 集群任务：终态必须有结束时间与结果摘要；FAILED 必填失败原因（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-30
+  name: INSTALL / RETRY_INSTALL 失败必须携带失败步骤索引，且同步
+  ruleType: INVARIANT
+  description: 集群任务：INSTALL / RETRY_INSTALL 失败必须携带失败步骤索引，且同步写回所属集群（R-09 承载写回；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-31
+  name: 任务记录创建后不可改写（对账修正除外、必须留痕）；重试 = 新任务或续跑登记（仅
+  ruleType: INVARIANT
+  description: 集群任务：任务记录创建后不可改写（对账修正除外、必须留痕）；重试 = 新任务或续跑登记（仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-32
+  name: 执行位置的登记值必须与真实执行位置一致 —— 远程执行机失联不得改写为 LOCA
+  ruleType: INVARIANT
+  description: 集群任务：执行位置的登记值必须与真实执行位置一致 —— 远程执行机失联不得改写为 LOCAL 继续（绝不静默切换；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-33
+  name: DESTROY 类任务的创建前置 = 审批通过结论（R-10 承载；仅提交时强制
+  ruleType: INVARIANT
+  description: 集群任务：DESTROY 类任务的创建前置 = 审批通过结论（R-10 承载；仅提交时强制校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-34
+  name: 探活结论为 FAILED 时失败原因必填；就绪节点数不得大于总节点数（保存即校验
+  ruleType: INVARIANT
+  description: 探活记录：探活结论为 FAILED 时失败原因必填；就绪节点数不得大于总节点数（保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-35
+  name: 探活记录创建后不可修改（健康结论的后续由新记录与规则表达；保存即校验）
+  ruleType: INVARIANT
+  description: 探活记录：探活记录创建后不可修改（健康结论的后续由新记录与规则表达；保存即校验）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: INV-36
+  name: 探活记录只读探测、探测过程不得向集群写入任何内容（与 O-AST 巡检同纪律；设
+  ruleType: INVARIANT
+  description: 探活记录：探活记录只读探测、探测过程不得向集群写入任何内容（与 O-AST 巡检同纪律；设计约束）
+  expression: ''
+  reusedBy: []
+  version: '1.0'
+- id: R-01
+  name: 内联引用列与引用台账双写同步
+  ruleType: CROSS_OBJECT
+  description: 内联引用列与引用台账双写同步：创建与调整引用时两处同时写；不一致以台账为准（全量权威、支持反查）
+  expression: 内联引用列与引用台账双写同步：创建与调整引用时两处同时写；不一致以台账为准（全量权威、支持反查）
+  reusedBy: []
+  version: '1.0'
+- id: R-02
+  name: 资产占用拦截
+  ruleType: CROSS_OBJECT
+  description: 资产占用拦截：一台资产同时只服务一个活跃集群 —— 添加 / 重绑定时读其他集群的节点占用（含 O-AST 引用声明），被占用阻断并列出占用集群
+  expression: 资产占用拦截：一台资产同时只服务一个活跃集群 —— 添加 / 重绑定时读其他集群的节点占用（含 O-AST 引用声明），被占用阻断并列出占用集群
+  reusedBy: []
+  version: '1.0'
+- id: R-03
+  name: 资产下架处置
+  ruleType: CROSS_OBJECT
+  description: 资产下架处置：节点引用置空、IP 与登记值保留（人工接管）、所属集群降级归因（ASSET_DECOMMISSIONED）
+  expression: 资产下架处置：节点引用置空、IP 与登记值保留（人工接管）、所属集群降级归因（ASSET_DECOMMISSIONED）
+  reusedBy: []
+  version: '1.0'
+- id: R-04
+  name: 参数派生与覆写保护
+  ruleType: CROSS_OBJECT
+  description: 参数派生与覆写保护：上游变更派生新参数 + 打快照 + 置待同步；不覆盖 MANUAL_OVERRIDE 行（冲突提示）；不自动执行同步
+  expression: 参数派生与覆写保护：上游变更派生新参数 + 打快照 + 置待同步；不覆盖 MANUAL_OVERRIDE 行（冲突提示）；不自动执行同步
+  reusedBy: []
+  version: '1.0'
+- id: R-05
+  name: 引用资源消失 ⇒ 集群降级归因（EXECUTOR_LOST / IGNITION_UNAVAILABLE / REGISTRY_REMOVED）；恢复事件不自动清除降级
+  ruleType: CROSS_OBJECT
+  description: 引用资源消失 ⇒ 集群降级归因（EXECUTOR_LOST / IGNITION_UNAVAILABLE / REGISTRY_REMOVED）；恢复事件不自动清除降级
+  expression: 引用资源消失 ⇒ 集群降级归因（EXECUTOR_LOST / IGNITION_UNAVAILABLE / REGISTRY_REMOVED）；恢复事件不自动清除降级
+  reusedBy: []
+  version: '1.0'
+- id: R-06
+  name: 快照回滚校验
+  ruleType: CROSS_OBJECT
+  description: 快照回滚校验：目标快照引用的资源现存性校验，缺失即拒绝并列出；显式放弃引用回滚时引用置空并留痕
+  expression: 快照回滚校验：目标快照引用的资源现存性校验，缺失即拒绝并列出；显式放弃引用回滚时引用置空并留痕
+  reusedBy: []
+  version: '1.0'
+- id: R-07
+  name: 销毁编排
+  ruleType: CROSS_OBJECT
+  description: 销毁编排：交付工具卸载 → 吊销本域申请的基础设施证书（失败挂起重试、残留可见）→ 级联清理引用台账 → 发布销毁事件 → 终态；不删他域资源
+  expression: 销毁编排：交付工具卸载 → 吊销本域申请的基础设施证书（失败挂起重试、残留可见）→ 级联清理引用台账 → 发布销毁事件 → 终态；不删他域资源
+  reusedBy: []
+  version: '1.0'
+- id: R-08
+  name: 健康双源写入口径
+  ruleType: CROSS_OBJECT
+  description: 健康双源写入口径：探活连续失败 ⇒ UNREACHABLE；探活连续成功 ⇒ HEALTHY（防抖阈值 REF-11）；探活不覆盖 DEGRADED；DEGRADED 只能被显式恢复清除
+  expression: 健康双源写入口径：探活连续失败 ⇒ UNREACHABLE；探活连续成功 ⇒ HEALTHY（防抖阈值 REF-11）；探活不覆盖 DEGRADED；DEGRADED 只能被显式恢复清除
+  reusedBy: []
+  version: '1.0'
+- id: R-09
+  name: 任务失败写回集群
+  ruleType: CROSS_OBJECT
+  description: 任务失败写回集群：失败步骤索引同步、STALLED ⇒ 降级归因（EXECUTOR_LOST）；执行位置不得改写（绝不静默切换）
+  expression: 任务失败写回集群：失败步骤索引同步、STALLED ⇒ 降级归因（EXECUTOR_LOST）；执行位置不得改写（绝不静默切换）
+  reusedBy: []
+  version: '1.0'
+- id: R-10
+  name: 销毁任务的前置 = 审批通过结论；影响面 = 下游引用方聚合（强制不免审批）
+  ruleType: CROSS_OBJECT
+  description: 销毁任务的前置 = 审批通过结论；影响面 = 下游引用方聚合（强制不免审批）
+  expression: 销毁任务的前置 = 审批通过结论；影响面 = 下游引用方聚合（强制不免审批）
+  reusedBy: []
+  version: '1.0'
+- id: R-11
+  name: 显式恢复校验
+  ruleType: CROSS_OBJECT
+  description: 显式恢复校验：仅 DEGRADED 可调用；新引用必须存在且可用；通过后更新引用（双写）+ 派生参数 + 清除降级
+  expression: 显式恢复校验：仅 DEGRADED 可调用；新引用必须存在且可用；通过后更新引用（双写）+ 派生参数 + 清除降级
+  reusedBy: []
+  version: '1.0'
+- id: R-12
+  name: 节点重绑定校验
+  ruleType: CROSS_OBJECT
+  description: 节点重绑定校验：新资产未被占用（R-02 同口径）且登记值可反查；通过后换绑并刷新登记值
+  expression: 节点重绑定校验：新资产未被占用（R-02 同口径）且登记值可反查；通过后换绑并刷新登记值
+  reusedBy: []
+  version: '1.0'
+- id: R-13
+  name: 安装成功落点
+  ruleType: CROSS_OBJECT
+  description: 安装成功落点：kubeconfig 存放标识登记（内容不入库）+ 主控入口登记 + 状态置运行中 + 发布安装完成事件
+  expression: 安装成功落点：kubeconfig 存放标识登记（内容不入库）+ 主控入口登记 + 状态置运行中 + 发布安装完成事件
+  reusedBy: []
+  version: '1.0'

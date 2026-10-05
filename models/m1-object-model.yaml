@@ -1,102 +1,942 @@
-# M1 对象模型 - 客户示例域
 model_type: OBJECT
-version: "1.0"
-domain: "客户管理"
-
+version: '1.0'
+domain: 集群域
 aggregates:
-  - id: AGG-CUSTOMER-001
-    name: 客户
-    alias: Customer
-    aggregateType: AGGREGATE_ROOT
-    description: 客户申请登记对象（示例业务，用于验证技术底座）
-    lifecycle: [草稿, 待客户经理审批, 待部门总经理审批, 已通过, 已驳回]
-    tags: [示例域]
-    attributes:
-      - name: customerNo
-        label: 客户编号
-        type: String
-        required: true
-        unique: true
-      - name: customerName
-        label: 客户名称
-        type: String
-        required: true
-      - name: customerType
-        label: 客户类型
-        type: DictionaryRef
-        dictionaryRef:
-          dictionaryId: DICT-CUSTOMER-TYPE
-          typeCode: CUSTOMER_TYPE
-        required: true
-      - name: industry
-        label: 所属行业
-        type: String
-        required: false
-      - name: contactPerson
-        label: 联系人
-        type: String
-        required: false
-      - name: contactPhone
-        label: 联系电话
-        type: String
-        required: false
-      - name: customerLevel
-        label: 客户等级
-        type: DictionaryRef
-        dictionaryRef:
-          dictionaryId: DICT-CUSTOMER-LEVEL
-          typeCode: CUSTOMER_LEVEL
-        required: true
-      - name: address
-        label: 客户地址
-        type: String
-        required: false
-      - name: remark
-        label: 备注
-        type: String
-        required: false
-      - name: status
-        label: 审批状态
-        type: Enum
-        enumValues: [草稿, 待客户经理审批, 待部门总经理审批, 已通过, 已驳回]
-        required: true
-        defaultValue: 草稿
-
+- id: AGG-CLC-01
+  name: 集群
+  alias: Cluster
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: clusterNo
+    label: 集群编号
+    type: String
+    required: true
+    unique: true
+  - name: name
+    label: 集群名称
+    type: String
+    required: true
+    unique: true
+  - name: description
+    label: 说明
+    type: String
+    required: false
+    unique: false
+  - name: clusterDnsDomain
+    label: 集群 DNS 域名
+    type: String
+    required: false
+    unique: false
+  - name: versionRef
+    label: 交付版本引用
+    type: Ref
+    required: false
+    unique: false
+  - name: executorRef
+    label: 交付执行机引用
+    type: Ref
+    required: false
+    unique: false
+  - name: registryRef
+    label: 镜像仓库实例引用
+    type: Ref
+    required: false
+    unique: false
+  - name: registryProjectRef
+    label: 镜像仓库项目引用
+    type: Ref
+    required: false
+    unique: false
+  - name: runMode
+    label: 运行模式
+    type: Dict
+    required: true
+    unique: false
+  - name: status
+    label: 生命周期状态
+    type: Dict
+    required: true
+    unique: false
+  - name: installStepIndex
+    label: 失败步骤索引
+    type: Integer
+    required: false
+    unique: false
+  - name: health
+    label: 健康结论
+    type: Dict
+    required: true
+    unique: false
+  - name: degradedReason
+    label: 降级原因
+    type: Dict
+    required: false
+    unique: false
+  - name: lastProbeAt
+    label: 最近探活时间
+    type: DateTime
+    required: false
+    unique: false
+  - name: kubeconfigRef
+    label: 访问凭据存放标识
+    type: String
+    required: false
+    unique: false
+  - name: masterEndpoints
+    label: 主控入口
+    type: String
+    required: false
+    unique: false
+  - name: createdBy
+    label: 创建人
+    type: String
+    required: true
+    unique: false
+  - name: createdAt
+    label: 登记时间
+    type: DateTime
+    required: true
+    unique: false
+  - name: destroyedAt
+    label: 销毁时间
+    type: DateTime
+    required: false
+    unique: false
+  entities: []
+- id: AGG-CLC-02
+  name: 集群节点
+  alias: ClusterNode
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: nodeNo
+    label: 节点编号
+    type: String
+    required: true
+    unique: true
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: false
+  - name: assetRef
+    label: 资产标识
+    type: Ref
+    required: false
+    unique: false
+  - name: nodeRole
+    label: 节点角色
+    type: Dict
+    required: true
+    unique: false
+  - name: ipAddress
+    label: IP 地址
+    type: String
+    required: true
+    unique: false
+  - name: k8sNodename
+    label: K8s 节点名
+    type: String
+    required: false
+    unique: false
+  - name: nodeStatus
+    label: 节点状态
+    type: Dict
+    required: true
+    unique: false
+  - name: nodeHealth
+    label: 节点健康结论
+    type: Dict
+    required: true
+    unique: false
+  - name: nodeHealthAt
+    label: 最近健康时间
+    type: DateTime
+    required: false
+    unique: false
+  - name: createdAt
+    label: 登记时间
+    type: DateTime
+    required: true
+    unique: false
+  - name: updatedAt
+    label: 更新时间
+    type: DateTime
+    required: true
+    unique: false
+  - name: remark
+    label: 备注
+    type: String
+    required: false
+    unique: false
+  entities: []
+- id: AGG-CLC-03
+  name: 中心引用绑定
+  alias: ClusterBinding
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: bindingNo
+    label: 绑定编号
+    type: String
+    required: true
+    unique: true
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: false
+  - name: targetCapability
+    label: 目标能力
+    type: Dict
+    required: true
+    unique: false
+  - name: targetKind
+    label: 资源类型
+    type: Dict
+    required: true
+    unique: false
+  - name: targetRef
+    label: 资源标识
+    type: String
+    required: true
+    unique: false
+  - name: purpose
+    label: 用途
+    type: Dict
+    required: true
+    unique: false
+  - name: bindingSource
+    label: 登记来源
+    type: Dict
+    required: true
+    unique: false
+  - name: createdAt
+    label: 登记时间
+    type: DateTime
+    required: true
+    unique: false
+  - name: updatedAt
+    label: 更新时间
+    type: DateTime
+    required: true
+    unique: false
+  entities: []
+- id: AGG-CLC-04
+  name: 集群参数
+  alias: ClusterParam
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: true
+  - name: paramKey
+    label: 参数键
+    type: String
+    required: true
+    unique: true
+  - name: paramValue
+    label: 参数值
+    type: String
+    required: true
+    unique: false
+  - name: paramSource
+    label: 参数来源
+    type: Dict
+    required: true
+    unique: false
+  - name: derivedFrom
+    label: 派生来源
+    type: Dict
+    required: false
+    unique: false
+  - name: syncPending
+    label: 待同步标记
+    type: Boolean
+    required: true
+    unique: false
+  - name: updatedBy
+    label: 更新人
+    type: String
+    required: true
+    unique: false
+  - name: updatedAt
+    label: 更新时间
+    type: DateTime
+    required: true
+    unique: false
+  entities: []
+- id: AGG-CLC-05
+  name: 版本快照
+  alias: ClusterSnapshot
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: snapshotNo
+    label: 快照编号
+    type: String
+    required: true
+    unique: true
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: false
+  - name: revisionNo
+    label: 快照序号
+    type: Integer
+    required: true
+    unique: false
+  - name: changeSummary
+    label: 变更摘要
+    type: String
+    required: true
+    unique: false
+  - name: contentSnapshot
+    label: 内容快照
+    type: String
+    required: true
+    unique: false
+  - name: bindingSnapshot
+    label: 引用快照
+    type: String
+    required: true
+    unique: false
+  - name: snapshotType
+    label: 快照类型
+    type: Dict
+    required: true
+    unique: false
+  - name: createdBy
+    label: 创建人
+    type: String
+    required: true
+    unique: false
+  - name: createdAt
+    label: 创建时间
+    type: DateTime
+    required: true
+    unique: false
+  entities: []
+- id: AGG-CLC-06
+  name: 集群任务
+  alias: ClusterTask
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: taskNo
+    label: 任务编号
+    type: String
+    required: true
+    unique: true
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: false
+  - name: taskKind
+    label: 任务类别
+    type: Dict
+    required: true
+    unique: false
+  - name: taskStatus
+    label: 任务状态
+    type: Dict
+    required: true
+    unique: false
+  - name: executionPath
+    label: 执行位置
+    type: Dict
+    required: true
+    unique: false
+  - name: remoteTaskRef
+    label: 远端任务引用
+    type: String
+    required: false
+    unique: false
+  - name: failStepIndex
+    label: 失败步骤索引
+    type: Integer
+    required: false
+    unique: false
+  - name: failReason
+    label: 失败原因
+    type: Dict
+    required: false
+    unique: false
+  - name: resultSummary
+    label: 结果摘要
+    type: String
+    required: false
+    unique: false
+  - name: startedAt
+    label: 开始时间
+    type: DateTime
+    required: false
+    unique: false
+  - name: endedAt
+    label: 结束时间
+    type: DateTime
+    required: false
+    unique: false
+  - name: submittedBy
+    label: 提交人
+    type: String
+    required: true
+    unique: false
+  - name: createdAt
+    label: 创建时间
+    type: DateTime
+    required: true
+    unique: false
+  entities: []
+- id: AGG-CLC-07
+  name: 探活记录
+  alias: HealthProbe
+  aggregateType: AGGREGATE_ROOT
+  description: 对象分类
+  lifecycle:
+  - 启用
+  - 停用
+  tags:
+  - 对象分类
+  attributes:
+  - name: probeNo
+    label: 记录编号
+    type: String
+    required: true
+    unique: true
+  - name: clusterRef
+    label: 所属集群
+    type: Ref
+    required: true
+    unique: false
+  - name: probedAt
+    label: 探活时间
+    type: DateTime
+    required: true
+    unique: false
+  - name: triggerSource
+    label: 触发方式
+    type: Dict
+    required: true
+    unique: false
+  - name: apiserverReachable
+    label: 控制面可达
+    type: Boolean
+    required: true
+    unique: false
+  - name: tlsHandshakeOk
+    label: TLS 握手通过
+    type: Boolean
+    required: true
+    unique: false
+  - name: readyNodes
+    label: 就绪节点数
+    type: Integer
+    required: true
+    unique: false
+  - name: totalNodes
+    label: 总节点数
+    type: Integer
+    required: true
+    unique: false
+  - name: probeResult
+    label: 探活结论
+    type: Dict
+    required: true
+    unique: false
+  - name: failReason
+    label: 失败原因
+    type: String
+    required: false
+    unique: false
+  entities: []
 data_dictionaries:
-  - id: DICT-CUSTOMER-TYPE
-    name: 客户类型字典
-    types:
-      - typeCode: CUSTOMER_TYPE
-        typeName: 客户类型
-        items:
-          - code: PERSONAL
-            label: 个人客户
-            enabled: true
-            sortOrder: 10
-          - code: ENTERPRISE
-            label: 企业客户
-            enabled: true
-            sortOrder: 20
-          - code: GOVERNMENT
-            label: 政府客户
-            enabled: true
-            sortOrder: 30
-
-  - id: DICT-CUSTOMER-LEVEL
-    name: 客户等级字典
-    types:
-      - typeCode: CUSTOMER_LEVEL
-        typeName: 客户等级
-        items:
-          - code: NORMAL
-            label: 普通客户
-            enabled: true
-            sortOrder: 10
-          - code: IMPORTANT
-            label: 重要客户
-            enabled: true
-            sortOrder: 20
-          - code: STRATEGIC
-            label: 战略客户
-            enabled: true
-            sortOrder: 30
+- id: DICT-CLC_CLUSTER_STATUS
+  name: CLC_CLUSTER_STATUS
+  types:
+  - typeCode: CLC_CLUSTER_STATUS
+    typeName: CLC_CLUSTER_STATUS
+    items:
+    - code: DRAFT
+      label: 草稿
+      enabled: true
+      sortOrder: 10
+    - code: INSTALLING
+      label: 安装中
+      enabled: true
+      sortOrder: 20
+    - code: RUNNING
+      label: 运行中
+      enabled: true
+      sortOrder: 30
+    - code: INSTALL_FAILED
+      label: 安装失败
+      enabled: true
+      sortOrder: 40
+    - code: DESTROYING
+      label: 销毁中
+      enabled: true
+      sortOrder: 50
+    - code: DESTROYED
+      label: 已销毁（终态）
+      enabled: true
+      sortOrder: 60
+- id: DICT-CLC_HEALTH
+  name: CLC_HEALTH
+  types:
+  - typeCode: CLC_HEALTH
+    typeName: CLC_HEALTH
+    items:
+    - code: UNKNOWN
+      label: 未知
+      enabled: true
+      sortOrder: 10
+    - code: HEALTHY
+      label: 健康
+      enabled: true
+      sortOrder: 20
+    - code: DEGRADED
+      label: 已降级（须显式恢复）
+      enabled: true
+      sortOrder: 30
+    - code: UNREACHABLE
+      label: 不可达
+      enabled: true
+      sortOrder: 40
+- id: DICT-CLC_DEGRADED_REASON
+  name: CLC_DEGRADED_REASON
+  types:
+  - typeCode: CLC_DEGRADED_REASON
+    typeName: CLC_DEGRADED_REASON
+    items:
+    - code: EXECUTOR_LOST
+      label: 执行机失联
+      enabled: true
+      sortOrder: 10
+    - code: IGNITION_UNAVAILABLE
+      label: 交付域不可用
+      enabled: true
+      sortOrder: 20
+    - code: REGISTRY_REMOVED
+      label: 镜像源移除
+      enabled: true
+      sortOrder: 30
+    - code: ASSET_DECOMMISSIONED
+      label: 节点资产下架
+      enabled: true
+      sortOrder: 40
+- id: DICT-CLC_NODE_STATUS
+  name: CLC_NODE_STATUS
+  types:
+  - typeCode: CLC_NODE_STATUS
+    typeName: CLC_NODE_STATUS
+    items:
+    - code: PENDING
+      label: 待加入
+      enabled: true
+      sortOrder: 10
+    - code: ADDED
+      label: 已加入
+      enabled: true
+      sortOrder: 20
+    - code: REMOVING
+      label: 移除中
+      enabled: true
+      sortOrder: 30
+    - code: REMOVED
+      label: 已移除（终局）
+      enabled: true
+      sortOrder: 40
+- id: DICT-CLC_NODE_HEALTH
+  name: CLC_NODE_HEALTH
+  types:
+  - typeCode: CLC_NODE_HEALTH
+    typeName: CLC_NODE_HEALTH
+    items:
+    - code: UNKNOWN
+      label: 未知
+      enabled: true
+      sortOrder: 10
+    - code: HEALTHY
+      label: 健康
+      enabled: true
+      sortOrder: 20
+    - code: UNREACHABLE
+      label: 不可达
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_TASK_STATUS
+  name: CLC_TASK_STATUS
+  types:
+  - typeCode: CLC_TASK_STATUS
+    typeName: CLC_TASK_STATUS
+    items:
+    - code: QUEUED
+      label: 排队中
+      enabled: true
+      sortOrder: 10
+    - code: RUNNING
+      label: 执行中
+      enabled: true
+      sortOrder: 20
+    - code: SUCCEEDED
+      label: 成功
+      enabled: true
+      sortOrder: 30
+    - code: FAILED
+      label: 失败
+      enabled: true
+      sortOrder: 40
+    - code: CANCELLED
+      label: 已取消
+      enabled: true
+      sortOrder: 50
+    - code: STALLED
+      label: 失联挂起
+      enabled: true
+      sortOrder: 60
+- id: DICT-CLC_TASK_FAIL_REASON
+  name: CLC_TASK_FAIL_REASON
+  types:
+  - typeCode: CLC_TASK_FAIL_REASON
+    typeName: CLC_TASK_FAIL_REASON
+    items:
+    - code: STEP_FAILED
+      label: 步骤失败
+      enabled: true
+      sortOrder: 10
+    - code: EXECUTOR_LOST
+      label: 执行机失联
+      enabled: true
+      sortOrder: 20
+    - code: IGNITION_UNAVAILABLE
+      label: 交付域不可用
+      enabled: true
+      sortOrder: 30
+    - code: ACTION_DENIED
+      label: 动作被拒绝
+      enabled: true
+      sortOrder: 40
+    - code: EXECUTOR_ERROR
+      label: 执行机执行错误
+      enabled: true
+      sortOrder: 50
+- id: DICT-CLC_PROBE_RESULT
+  name: CLC_PROBE_RESULT
+  types:
+  - typeCode: CLC_PROBE_RESULT
+    typeName: CLC_PROBE_RESULT
+    items:
+    - code: HEALTHY
+      label: 通过
+      enabled: true
+      sortOrder: 10
+    - code: FAILED
+      label: 失败
+      enabled: true
+      sortOrder: 20
+- id: DICT-CLC_RUN_MODE
+  name: CLC_RUN_MODE
+  types:
+  - typeCode: CLC_RUN_MODE
+    typeName: CLC_RUN_MODE
+    items:
+    - code: MCC
+      label: 中心引用模式
+      enabled: true
+      sortOrder: 10
+    - code: LEGACY
+      label: 兼容模式（显式声明）
+      enabled: true
+      sortOrder: 20
+- id: DICT-CLC_NODE_ROLE
+  name: CLC_NODE_ROLE
+  types:
+  - typeCode: CLC_NODE_ROLE
+    typeName: CLC_NODE_ROLE
+    items:
+    - code: MASTER
+      label: 控制面
+      enabled: true
+      sortOrder: 10
+    - code: WORKER
+      label: 工作负载
+      enabled: true
+      sortOrder: 20
+    - code: INFRA
+      label: 基础设施
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_TARGET_CAPABILITY
+  name: CLC_TARGET_CAPABILITY
+  types:
+  - typeCode: CLC_TARGET_CAPABILITY
+    typeName: CLC_TARGET_CAPABILITY
+    items:
+    - code: IGNITION
+      label: 交付执行
+      enabled: true
+      sortOrder: 10
+    - code: REGISTRY
+      label: 制品仓库
+      enabled: true
+      sortOrder: 20
+    - code: CERT
+      label: 证书信任
+      enabled: true
+      sortOrder: 30
+    - code: ASSET
+      label: 资产
+      enabled: true
+      sortOrder: 40
+- id: DICT-CLC_TARGET_KIND
+  name: CLC_TARGET_KIND
+  types:
+  - typeCode: CLC_TARGET_KIND
+    typeName: CLC_TARGET_KIND
+    items:
+    - code: EXECUTOR
+      label: 执行机
+      enabled: true
+      sortOrder: 10
+    - code: VERSION
+      label: 交付版本
+      enabled: true
+      sortOrder: 20
+    - code: INSTANCE
+      label: 仓库实例
+      enabled: true
+      sortOrder: 30
+    - code: PROJECT
+      label: 仓库项目
+      enabled: true
+      sortOrder: 40
+    - code: CERTIFICATE
+      label: 证书
+      enabled: true
+      sortOrder: 50
+    - code: ASSET
+      label: 资产
+      enabled: true
+      sortOrder: 60
+- id: DICT-CLC_BINDING_PURPOSE
+  name: CLC_BINDING_PURPOSE
+  types:
+  - typeCode: CLC_BINDING_PURPOSE
+    typeName: CLC_BINDING_PURPOSE
+    items:
+    - code: EXECUTOR_RUNTIME
+      label: 交付运行时
+      enabled: true
+      sortOrder: 10
+    - code: VERSION_BASE
+      label: 版本基座
+      enabled: true
+      sortOrder: 20
+    - code: IMAGE_MIRROR
+      label: 镜像源
+      enabled: true
+      sortOrder: 30
+    - code: HARBOR_CLIENT
+      label: 镜像源客户端凭据
+      enabled: true
+      sortOrder: 40
+    - code: MONITORING_MTLS
+      label: 监控 mTLS
+      enabled: true
+      sortOrder: 50
+    - code: INGRESS_WILDCARD
+      label: 入口泛域名
+      enabled: true
+      sortOrder: 60
+    - code: NODE_ASSET
+      label: 节点资产
+      enabled: true
+      sortOrder: 70
+- id: DICT-CLC_BINDING_SOURCE
+  name: CLC_BINDING_SOURCE
+  types:
+  - typeCode: CLC_BINDING_SOURCE
+    typeName: CLC_BINDING_SOURCE
+    items:
+    - code: MANUAL
+      label: 人工
+      enabled: true
+      sortOrder: 10
+    - code: AUTO_DERIVED
+      label: 派生
+      enabled: true
+      sortOrder: 20
+    - code: EVENT_SYNC
+      label: 事件对账
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_PARAM_SOURCE
+  name: CLC_PARAM_SOURCE
+  types:
+  - typeCode: CLC_PARAM_SOURCE
+    typeName: CLC_PARAM_SOURCE
+    items:
+    - code: DERIVED
+      label: 派生
+      enabled: true
+      sortOrder: 10
+    - code: TEMPLATE
+      label: 模板
+      enabled: true
+      sortOrder: 20
+    - code: MANUAL_OVERRIDE
+      label: 人工覆写
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_PARAM_DERIVED_FROM
+  name: CLC_PARAM_DERIVED_FROM
+  types:
+  - typeCode: CLC_PARAM_DERIVED_FROM
+    typeName: CLC_PARAM_DERIVED_FROM
+    items:
+    - code: REGISTRY
+      label: 镜像仓库
+      enabled: true
+      sortOrder: 10
+    - code: VERSION
+      label: 交付版本
+      enabled: true
+      sortOrder: 20
+    - code: CERT
+      label: 证书
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_SNAPSHOT_TYPE
+  name: CLC_SNAPSHOT_TYPE
+  types:
+  - typeCode: CLC_SNAPSHOT_TYPE
+    typeName: CLC_SNAPSHOT_TYPE
+    items:
+    - code: CHANGE
+      label: 变更快照
+      enabled: true
+      sortOrder: 10
+    - code: AUTO_DERIVED
+      label: 派生快照
+      enabled: true
+      sortOrder: 20
+    - code: ROLLBACK
+      label: 回滚快照
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_TASK_KIND
+  name: CLC_TASK_KIND
+  types:
+  - typeCode: CLC_TASK_KIND
+    typeName: CLC_TASK_KIND
+    items:
+    - code: INSTALL
+      label: 安装
+      enabled: true
+      sortOrder: 10
+    - code: RETRY_INSTALL
+      label: 续跑安装
+      enabled: true
+      sortOrder: 20
+    - code: UPGRADE
+      label: 升级
+      enabled: true
+      sortOrder: 30
+    - code: ADD_NODE
+      label: 加节点
+      enabled: true
+      sortOrder: 40
+    - code: DEL_NODE
+      label: 减节点
+      enabled: true
+      sortOrder: 50
+    - code: BACKUP
+      label: 备份
+      enabled: true
+      sortOrder: 60
+    - code: RESTORE
+      label: 恢复
+      enabled: true
+      sortOrder: 70
+    - code: START
+      label: 启动
+      enabled: true
+      sortOrder: 80
+    - code: STOP
+      label: 停止
+      enabled: true
+      sortOrder: 90
+    - code: CERT_RENEW
+      label: 证书推送
+      enabled: true
+      sortOrder: 100
+    - code: DESTROY
+      label: 销毁
+      enabled: true
+      sortOrder: 110
+- id: DICT-CLC_EXEC_PATH
+  name: CLC_EXEC_PATH
+  types:
+  - typeCode: CLC_EXEC_PATH
+    typeName: CLC_EXEC_PATH
+    items:
+    - code: LOCAL
+      label: 本地链路
+      enabled: true
+      sortOrder: 10
+    - code: REMOTE_EXECUTOR
+      label: 远程执行机
+      enabled: true
+      sortOrder: 20
+- id: DICT-CLC_TRIGGER_SOURCE
+  name: CLC_TRIGGER_SOURCE
+  types:
+  - typeCode: CLC_TRIGGER_SOURCE
+    typeName: CLC_TRIGGER_SOURCE
+    items:
+    - code: SCHEDULED
+      label: 定时
+      enabled: true
+      sortOrder: 10
+    - code: MANUAL
+      label: 人工
+      enabled: true
+      sortOrder: 20
+aggregate_associations: []

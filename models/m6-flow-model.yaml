@@ -1,34 +1,570 @@
-# M6 流程模型 - 客户示例域
-# 客户申请审批流：客户经理 -> 部门总经理（两个独立角色，严格串行）
 model_type: FLOW
-version: "1.0"
-domain: "客户管理"
-
+version: '1.0'
+domain: 集群域
 flows:
-  - id: FLOW-CUSTOMER-APPROVAL
-    name: 客户申请审批
-    flowType: APPROVAL
-    description: 客户申请由客户经理审批，通过后由部门总经理审批
-    businessObjectRefs:
-      - AGG-CUSTOMER-001
-    roleRefs:
-      - ROLE-CUSTOMER-MANAGER
-      - ROLE-DEPT-GM
-    trigger:
-      triggerType: BEHAVIOR
-      behaviorRef: Customer_Submit
-    startActivity: start
-    endActivities: [end_ok, end_reject]
-    nodeGraph:
-      nodes:
-        - { id: start, type: start, name: 开始 }
-        - { id: n1, type: approval_task, name: 客户经理审批, role_ref: CUSTOMER_MANAGER, outcomes: [APPROVE, REJECT] }
-        - { id: n2, type: approval_task, name: 部门总经理审批, role_ref: DEPT_GENERAL_MANAGER, outcomes: [APPROVE, REJECT] }
-        - { id: end_ok, type: end, name: 审批通过结束, result: APPROVED }
-        - { id: end_reject, type: end, name: 驳回结束, result: REJECTED }
-      edges:
-        - { source: start, target: n1 }
-        - { source: n1, target: n2, approval_outcome: APPROVE }
-        - { source: n1, target: end_reject, approval_outcome: REJECT }
-        - { source: n2, target: end_ok, approval_outcome: APPROVE }
-        - { source: n2, target: end_reject, approval_outcome: REJECT }
+- id: FLOW-PROC-01
+  name: 集群创建与安装
+  flowType: COLLABORATION
+  description: 从四步向导到一个运行中的集群
+  businessObjectRefs: []
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A13
+  activities:
+  - activityId: A01
+    name: 四步向导：前三步会话态
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 提交：事务内写集群 + 节点 + 台账 + 首快照
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 状态置草稿
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 发起安装：创建 INSTALL 任务
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 执行位置
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 经任务桥接路由执行机
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 本地执行链路
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 交付工具分步执行
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 步骤结果
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 记录失败步骤索引：任务与集群双写（R-09）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 续跑：从失败步骤继续（不重跑已成功）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 登记 kubeconfig 存放标识 + 主控入口（R-13）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A13
+  - activityId: A13
+    name: 状态置运行中：发布安装完成事件
+    activityType: END
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-02
+  name: 节点变更
+  flowType: COLLABORATION
+  description: 安全地增删集群成员
+  businessObjectRefs: []
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A12
+  activities:
+  - activityId: A01
+    name: 变更类型
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 资产占用拦截（R-02）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 阻断：列出占用集群
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 反查登记值写入节点行
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 人工填 IP
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 创建 DEL_NODE 任务
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 创建 ADD_NODE 任务
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 交付工具执行加入
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 交付工具执行移除
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 回填节点名：置已加入
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 节点置已移除（终局）：发布移除事件
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 发布节点变更事件
+    activityType: END
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-03
+  name: 引用变更与参数同步
+  flowType: COLLABORATION
+  description: 引用与参数的受控变更 —— 派生归派生、生效归运维
+  businessObjectRefs: []
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A12
+  activities:
+  - activityId: A01
+    name: 变更来源
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 双写引用（R-01）：派生参数更新 + 打快照
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 参数派生 + 打快照 + 置待同步（R-04）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 存在人工覆写
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 保留覆写值：登记冲突提示（不覆盖）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 参数更新：置待同步
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 待同步视图：呈现 diff
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 运维确认同步（FUNC-15）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-15
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 创建同步任务
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 交付工具执行参数生效
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 清除待同步标记：留痕
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 保持待同步：持续提示
+    activityType: END
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-04
+  name: 降级与显式恢复
+  flowType: COLLABORATION
+  description: 引用受损可见、可归因、只能显式恢复
+  businessObjectRefs: []
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A14
+  activities:
+  - activityId: A01
+    name: 上游事件：资源消失或降级
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 被本集群引用
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 健康置降级 + 归因（R-05）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 忽略
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 多原因叠加：记录最早未恢复原因 + 事件历史
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 运维决策
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 恢复路径
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 校验新引用存在且可用（R-11）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 更新引用（双写）+ 派生参数 + 打快照
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 显式确认
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 清除降级原因：健康转健康并留痕
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 还有其他未恢复原因
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A13
+  - activityId: A13
+    name: 保持降级：逐一处理
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A14
+  - activityId: A14
+    name: 恢复完成
+    activityType: END
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-05
+  name: 集群销毁
+  flowType: COLLABORATION
+  description: 不可逆地把集群退出治理，并启动全平台连锁清理
+  businessObjectRefs: []
+  roleRefs:
+  - CLC-ROLE-01
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A10
+  activities:
+  - activityId: A01
+    name: 审批通过：创建 DESTROY 任务（R-10）
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 交付工具卸载
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: ezctl destroy 清理控制面组件
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 吊销本域申请的基础设施证书
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: O-CRT 吊销
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 吊销成功
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 挂起：后台逐小时重试（残留显式可见）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 级联清理引用台账
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 发布销毁事件（不删他域资源）
+    activityType: TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 状态置已销毁：终态保留行
+    activityType: END
+    roleRef: CLC-ROLE-01
+    behaviorRef: null
+    nextActivities: []
+- id: FLOW-PROC-APP-01
+  name: 集群销毁审批（单级）
+  flowType: COLLABORATION
+  description: ''
+  businessObjectRefs: []
+  roleRefs: []
+  trigger:
+    triggerType: MANUAL
+  preconditions: []
+  postconditions: []
+  startActivity: A01
+  endActivities:
+  - A08
+  activities:
+  - activityId: A01
+    name: 提交销毁申请 FUNC-05
+    activityType: START
+    roleRef: null
+    behaviorRef: FUNC-05
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 下游引用存在性
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 前置阻断：列出引用方
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A04
+  - activityId: A04
+    name: 影响面强制展示：引用方 + 节点 + 证书清单
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A05
+  - activityId: A05
+    name: 待审批
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 平台运维管理员审批
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 进入 PROC-05 销毁链
+    activityType: TASK
+    roleRef: null
+    behaviorRef: null
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 审批关闭：状态不变，意见留痕
+    activityType: END
+    roleRef: null
+    behaviorRef: null
+    nextActivities: []
