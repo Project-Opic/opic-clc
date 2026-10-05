@@ -50,6 +50,13 @@ services:
       WORKFLOW_ADDRESS: ${WORKFLOW_ADDRESS:-temporal:7233}
       WORKFLOW_NAMESPACE: ${WORKFLOW_NAMESPACE:-opic}
       WORKFLOW_TASK_QUEUE: ${WORKFLOW_TASK_QUEUE:-}
+      # ── 交付执行内核（v1.1 真实交付链：后端容器即执行机，交付工具由宿主目录挂载）──
+      DELIVERY_TOOL_BIN: ${DELIVERY_TOOL_BIN:-/opt/opic/delivery/bin/delivery-tool}
+      DELIVERY_TOOL_DIR: ${DELIVERY_TOOL_DIR:-/opt/opic/delivery}
+      DELIVERY_KUBECONFIG_ENV: ${DELIVERY_KUBECONFIG_ENV:-KUBECONFIG}
+      DELIVERY_KUBECONFIG_PATH_PATTERN: ${DELIVERY_KUBECONFIG_PATH_PATTERN:-kube/{cluster}.conf}
+      IGNITION_BASE_URL: ${IGNITION_BASE_URL:-}
+      IGNITION_TOKEN: ${IGNITION_TOKEN:-}
       # ── 用户工作台 SSO（OPIC-SSO-01：Casdoor）──
       USER_AUTH_MODE: ${USER_AUTH_MODE:-local}
       USER_AUTH_AUTO_PROVISION: ${USER_AUTH_AUTO_PROVISION:-false}
@@ -79,6 +86,8 @@ services:
       # 自建 CA 公钥(step1 gen-certs.sh 签发 *.opic-ai.ccoe.tech,公钥可入库);
       # 容器内 OIDC 发现/换码经宿主网关 Traefik TLS 时须信任此 CA
       - ./configs/ca.crt:/etc/ssl/certs/opic-ca.crt:ro
+      # 交付工具与执行面凭据由宿主挂载(后端容器即执行机);可执行文件路径见 DELIVERY_TOOL_BIN
+      - ${DELIVERY_HOST_DIR:-/opt/opic/delivery}:${DELIVERY_TOOL_DIR:-/opt/opic/delivery}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9680/health/live >/dev/null 2>&1 || exit 1"]
       interval: 10s
