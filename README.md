@@ -129,6 +129,8 @@ CENTER_CODE=clc DB_SCHEMA=clc go run ./cmd/smoke
 | `WORKFLOW_DRIVER/ADDRESS/NAMESPACE/TASK_QUEUE` | 工作流 | local / clc |
 | `REDIS_ENABLED/REDIS_HOST/REDIS_PORT/REDIS_PASSWORD` | Redis（登出吊销黑名单） | disabled |
 | `METRICS_ENABLED` / `JWT_SECRET` / `AUTH_MODE` | 可观测 / 会话密钥 / 认证模式 | true / 见生产 .env / local |
+| `DELIVERY_TOOL_BIN` / `DELIVERY_TOOL_DIR` / `DELIVERY_KUBECONFIG_ENV` / `DELIVERY_KUBECONFIG_PATH_PATTERN` | 本地交付链路：交付工具可执行文件、工作目录与执行面凭据注入方式（未配置 ⇒ `LOCAL` 不可登记，REF-16） | config.yml |
+| `IGNITION_BASE_URL` / `IGNITION_TOKEN` | 远程交付链路：点火中心交付门面地址与服务令牌（对端 `delivery.facade_token`；未配置 ⇒ `REMOTE_EXECUTOR` 不可登记，INV-46） | 空 |
 
 平台表保留口径：`sys_*`、`flow_*`、`audit_logs`、`sys_notice`、`temporalflow_*`、`ai_*`（000001~000003）；
 底座客户申请示例表（customer_application）与页面已移除。

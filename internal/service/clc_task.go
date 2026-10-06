@@ -58,6 +58,9 @@ func createTaskTx(db *gorm.DB, clusterNo, kind, execPath string, user UserInfo) 
 	if err := checkTaskKind(kind); err != nil {
 		return nil, err
 	}
+	if err := checkExecPathRegistered(execPath); err != nil {
+		return nil, err
+	}
 	no, err := genBizNo(db, NoPrefixTask, "clc_task", "task_no")
 	if err != nil {
 		return nil, err
@@ -210,7 +213,7 @@ func runClusterAction(clusterID int64, kind string, d map[string]any, user UserI
 	clusterNo := Str(c["cluster_no"])
 	execPath := Str(d["execution_path"])
 	if execPath == "" {
-		execPath = ExecPathLocal
+		execPath = execPathOf(c) // Q-71:未显式选链路时按集群登记事实推导(绑定执行机 ⇒ 远程)
 	}
 	// PENDING 节点不得作为交付目标(INV-15):动作声明节点时校验
 	if nodeNo := Str(d["node_no"]); nodeNo != "" {

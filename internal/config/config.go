@@ -100,10 +100,10 @@ var Config struct {
 		KubeconfigPathPattern string   `yaml:"kubeconfig_path_pattern"` // 凭据文件路径模板,{cluster} 占位
 		ExtraEnv              []string `yaml:"extra_env"`               // 附加环境变量(KEY=VALUE)
 		IgnitionBaseURL       string   `yaml:"ignition_base_url"`       // 点火中心地址(远程链路;空 ⇒ 远程不可用)
-		IgnitionToken         string   `yaml:"ignition_token"`          // 点火中心服务令牌
-		IgnitionSubmitPath    string   `yaml:"ignition_submit_path"`    // 提交端点(默认 /api/delivery/submit)
-		IgnitionReceiptPath   string   `yaml:"ignition_receipt_path"`   // 回执端点模板,{ref} 占位(默认 /api/delivery/receipt/{ref})
-		IgnitionCancelPath    string   `yaml:"ignition_cancel_path"`    // 撤销端点模板,{ref} 占位(默认 /api/delivery/cancel/{ref})
+		IgnitionToken         string   `yaml:"ignition_token"`          // 交付门面服务令牌(对端 delivery.facade_token)
+		IgnitionSubmitPath    string   `yaml:"ignition_submit_path"`    // 受理端点(默认 /api/v1/ign/delivery/submit)
+		IgnitionReceiptPath   string   `yaml:"ignition_receipt_path"`   // 回执端点模板,{ref} 占位(默认 /api/v1/ign/delivery/receipt/{ref})
+		IgnitionCancelPath    string   `yaml:"ignition_cancel_path"`    // 撤销端点模板,{ref} 占位(默认 /api/v1/ign/delivery/cancel/{ref})
 		IgnitionPollSeconds   int      `yaml:"ignition_poll_seconds"`   // 回执轮询周期(秒,默认 5)
 	} `yaml:"delivery"`
 	Frontend struct {

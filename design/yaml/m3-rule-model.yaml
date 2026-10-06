@@ -108,7 +108,7 @@ rules:
   reusedBy: []
   version: '1.1'
 - id: REF-16
-  name: 执行适配器形态（LOCAL / REMOTE_EXECUTOR）由部署配置显式声明且运行期不得互转；集群的执行位置一旦登记即只读（INV-32 的配置侧同源）
+  name: 执行适配器形态（LOCAL / REMOTE_EXECUTOR）由部署配置显式声明且运行期不得互转；集群的执行位置一旦登记即只读（INV-32 的配置侧同源）；登记前该链路须在本部署实际可用（远程须已配置 O-IGN 地址、本地须已配置交付工具路径，否则任务创建即拒绝且不留排队行）；请求未显式选链路时执行位置由集群登记事实（executorRef 非空即远程）推导，全生命周期动作一律据此经 O-IGN 交付门面单步下发（Q-71）
   ruleType: FORMAT
   description: ClusterTask.executionPath
   expression: ClusterTask.executionPath

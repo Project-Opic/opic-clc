@@ -135,7 +135,7 @@ func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, 
 	ip := strings.TrimSpace(Str(d["ip_address"]))
 	execPath := Str(d["execution_path"])
 	if execPath == "" {
-		execPath = ExecPathLocal
+		execPath = execPathOf(c) // Q-71:加节点同样按集群登记事实推导链路
 	}
 	var created map[string]any
 	var taskNo string
@@ -195,7 +195,7 @@ func RemoveNode(id int64, d map[string]any, user UserInfo) (map[string]any, erro
 	ip := Str(n["ip_address"])
 	execPath := Str(d["execution_path"])
 	if execPath == "" {
-		execPath = ExecPathLocal
+		execPath = execPathByClusterNo(clusterNo) // Q-71:减节点同样按集群登记事实推导链路
 	}
 	var taskNo string
 	err = tx(func(db *gorm.DB) error {

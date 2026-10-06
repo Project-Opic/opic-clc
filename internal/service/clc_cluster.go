@@ -466,6 +466,25 @@ func destroyInFlight(clusterNo string) (string, bool) {
 	return Str(row["task_no"]), true
 }
 
+// execPathOf 系统创建任务(审批回调,无人在场选链路)的执行位置 = 集群登记事实:绑定了点火中心
+// 执行机 ⇒ 远程链路(用户裁定 Q-71:全生命周期动作一律经交付门面单步下发,销毁也不例外);
+// 未绑定 ⇒ 本地链路(创建向导「不使用执行机」的同源登记,不是失联兜底)。
+func execPathOf(cluster map[string]any) string {
+	if strings.TrimSpace(Str(cluster["executor_ref"])) != "" {
+		return ExecPathRemoteExecutor
+	}
+	return ExecPathLocal
+}
+
+// execPathByClusterNo 只有集群编号时的同源推导(节点动作:从节点行取所属集群)。
+func execPathByClusterNo(clusterNo string) string {
+	row, err := qOne(`SELECT executor_ref FROM clc_cluster WHERE cluster_no=? AND flag=1`, clusterNo)
+	if err != nil || row == nil {
+		return ExecPathLocal
+	}
+	return execPathOf(row)
+}
+
 // SyncClusterDestroyFromFlow 审批结果 → 销毁链(FLOW-PROC-APP-01 A07 → PROC-05)。
 // 通过:INV-33 审批通过结论为前置 ⇒ 创建 DESTROY 任务(QUEUED)+ 集群置 DESTROYING;
 // R-07 销毁编排由交付内核承载(卸载成功后进 destroySuccessLanding:级联清理 → DESTROYED);
@@ -487,7 +506,7 @@ func SyncClusterDestroyFromFlow(db *gorm.DB, businessKey string, flowStatus stri
 			return err
 		}
 		user := UserInfo{ID: 0, Username: "system"}
-		if _, err := createTaskTx(db, businessKey, TaskKindDestroy, ExecPathLocal, user); err != nil {
+		if _, err := createTaskTx(db, businessKey, TaskKindDestroy, execPathOf(c), user); err != nil {
 			return err
 		}
 		if Str(c["status"]) != ClusterStatusDestroying {

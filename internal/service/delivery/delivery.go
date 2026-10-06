@@ -27,12 +27,17 @@ const (
 	LevelError = "ERROR"
 )
 
-// StepRef 单步执行请求:命令面以已校验的参数数组直传( INV-47,不经 shell)。
+// StepRef 单步执行请求。
+//
+// 本地链路:Args = 已校验的命令数组(INV-47,不经 shell 直调)。
+// 远程链路:Args 一律不填 —— 命令面归点火中心私有(其 R-13),本域只登记标识:
+// StepCode(安装族 01~07;其余族与任务类别同名,REF-13 既有契约)+ Nodes(节点增删类地址清单)。
 type StepRef struct {
 	TaskNo    string
 	ClusterID string
 	StepIndex int
 	StepCode  string
+	Nodes     []string
 	Args      []string
 }
 

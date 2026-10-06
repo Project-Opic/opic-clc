@@ -217,6 +217,27 @@ func (rt *deliveryRuntime) adapterFor(execPath string) delivery.Adapter {
 	return rt.local
 }
 
+// checkExecPathRegistered REF-16 的配置侧同源:登记执行位置前先确认该链路在本部署确实可用 ——
+// 远程要求点火中心地址已配置、本地要求交付工具路径已配置,否则提交即刻拒绝。
+// 放行的话任务会先排队、执行时才发现链路不存在(失联 + 集群降级),而登记值必须是可达的真实位置(INV-32/INV-46)。
+func checkExecPathRegistered(execPath string) error {
+	cfg := config.Config.Delivery
+	switch execPath {
+	case ExecPathLocal:
+		if strings.TrimSpace(cfg.ToolBin) == "" {
+			return bizRuleFail("REF-16", "本地链路未配置交付工具路径(部署配置 delivery.tool_bin),不可登记执行位置 LOCAL")
+		}
+		return nil
+	case ExecPathRemoteExecutor:
+		if strings.TrimSpace(cfg.IgnitionBaseURL) == "" {
+			return bizRuleFail("INV-46", "远程链路未配置点火中心地址(部署配置 delivery.ignition_base_url),不可登记执行位置 REMOTE_EXECUTOR(REF-16)")
+		}
+		return nil
+	default:
+		return bizRuleFail("INV-32", "执行位置「%s」不在 CLC_EXEC_PATH 字典取值内(LOCAL / REMOTE_EXECUTOR)", execPath)
+	}
+}
+
 // ---------- 步骤展开与单步推进 ----------
 
 // expandStepsTx 任务创建事务内展开步骤行(INV-45 先展开后执行;R-17 续跑 SKIPPED;
@@ -626,7 +647,10 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 			return
 		}
 
-		ref := delivery.StepRef{TaskNo: taskNo, ClusterID: clusterNo, StepIndex: idx, StepCode: stepCode}
+		// 远程链路只登记标识(来源任务号/步骤序号/集群标识/步骤编码/节点清单),命令面归点火中心私有;
+		// 本地链路才在本域渲染 argv(INV-47)。
+		ref := delivery.StepRef{TaskNo: taskNo, ClusterID: clusterNo, StepIndex: idx,
+			StepCode: stepCode, Nodes: args.NodeIPs}
 		if adapter.Form() == delivery.FormLocal {
 			built, err := delivery.BuildStepArgs(config.Config.Delivery.ToolBin, kind, clusterNo, stepCode, args.NodeIPs)
 			if err != nil {

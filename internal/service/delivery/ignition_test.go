@@ -11,15 +11,20 @@ import (
 	"time"
 )
 
+// fakeIgnition 按点火中心交付门面真实口径替身(O-IGN FUNC-34~36):
+// 路径 /api/v1/ign/delivery/*、成功终态 COMPLETED(IGN_TASK_STATUS 字典码)、
+// 错误走 flat JSON {return_code, error_msg} + 非 200。
 type fakeIgnition struct {
 	mu       sync.Mutex
 	submits  []submitReq
-	receipts []string
+	receipts []string // 已请求的回执路径(含查询串,断言游标推进用)
 	cancels  []string
 	sequence []string // 回执状态轮询脚本
 	next     int
 	failRef  bool
-	status   int
+	logs     []map[string]any // 对端回吐的增量日志行(本域不得消费)
+	errBody  string           // 非空 ⇒ 受理按门面错误体回非 200
+	errCode  int
 }
 
 func (f *fakeIgnition) handler() http.Handler {
@@ -28,6 +33,11 @@ func (f *fakeIgnition) handler() http.Handler {
 		defer f.mu.Unlock()
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/submit"):
+			if f.errBody != "" {
+				w.WriteHeader(f.errCode)
+				_, _ = w.Write([]byte(f.errBody))
+				return
+			}
 			var req submitReq
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			f.submits = append(f.submits, req)
@@ -35,18 +45,29 @@ func (f *fakeIgnition) handler() http.Handler {
 			if !f.failRef {
 				ref = "IGN-TSK-77"
 			}
-			_ = json.NewEncoder(w).Encode(submitResp{RemoteTaskRef: ref, Status: "ACCEPTED"})
+			_ = json.NewEncoder(w).Encode(submitResp{RemoteTaskRef: ref, TaskNo: ref, Status: "RUNNING"})
 		case strings.Contains(r.URL.Path, "/receipt/"):
-			f.receipts = append(f.receipts, r.URL.Path)
+			f.receipts = append(f.receipts, r.URL.Path+"?"+r.URL.RawQuery)
 			st := "RUNNING"
 			if f.next < len(f.sequence) {
 				st = f.sequence[f.next]
 				f.next++
 			}
-			_ = json.NewEncoder(w).Encode(receiptResp{Status: st, Summary: "远端结论"})
+			summary := "远端结论"
+			if st == "LOST" {
+				summary = "" // LOST 不带结论摘要：适配器必须自己给出可诊断口径
+			}
+			body := map[string]any{
+				"status": st, "summary": summary, "exit_code": 0,
+				"next_seq": len(f.logs), "truncated": false,
+			}
+			if len(f.logs) > 0 {
+				body["logs"] = f.logs // 对端照实回吐日志行,本域必须只看结论、不留副本
+			}
+			_ = json.NewEncoder(w).Encode(body)
 		case strings.Contains(r.URL.Path, "/cancel/"):
 			f.cancels = append(f.cancels, r.URL.Path)
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "CANCELLED"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "CANCELLING"})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -61,23 +82,37 @@ func newTestIgnition(t *testing.T, f *fakeIgnition) *Ignition {
 }
 
 func TestIgnitionSubmitAndReceipt(t *testing.T) {
-	f := &fakeIgnition{sequence: []string{"RUNNING", "SUCCEEDED"}}
+	f := &fakeIgnition{
+		sequence: []string{"RUNNING", "COMPLETED"},
+		logs:     []map[string]any{{"seq": 1, "direction": "TOOL", "log_line": "PLAY [etcd] ***"}},
+	}
 	a := newTestIgnition(t, f)
 	cap := &sinkCapture{}
 	out := a.Execute(context.Background(), StepRef{TaskNo: "TSK-20", ClusterID: "CLU-9", StepIndex: 2, StepCode: "02"}, cap.On)
 	if !out.Success || out.Verdict != VerdictRemoteReceipt || out.RemoteRef != "IGN-TSK-77" {
 		t.Fatalf("远程结论不符: %+v", out)
 	}
-	if len(f.submits) != 1 || f.submits[0].ClusterNo != "CLU-9" || f.submits[0].StepCode != "02" {
+	if len(f.submits) != 1 || f.submits[0].ClusterRef != "CLU-9" || f.submits[0].StepCode != "02" {
 		t.Fatalf("提交意图不符(clc 不拥有远端动作白名单语义): %+v", f.submits)
 	}
-	for _, p := range f.submits {
-		if p.TaskNo == "" {
-			t.Fatal("提交必须携带任务号")
-		}
+	// 门面幂等键 = 来源任务标识 + 来源步骤序号(INV-34/INV-35 对端侧)
+	if f.submits[0].SourceTaskNo != "TSK-20" || f.submits[0].SourceStepIndex != 2 {
+		t.Fatalf("提交必须携带来源两列: %+v", f.submits[0])
+	}
+	if f.submits[0].ActionCode != "" {
+		t.Fatal("提交不得携带本域动作码词汇(命令面与动作白名单归点火中心私有)")
 	}
 	if !strings.Contains(cap.Text(), "已受理") {
 		t.Fatal("受理事件应进日志通道")
+	}
+	// REF-12 / 口径 8:远程链路的原始日志只在点火中心侧,本域不留副本(界面给跳转)。
+	if strings.Contains(cap.Text(), "PLAY [etcd]") {
+		t.Fatalf("远端原始日志不得回流进本域日志通道(REF-12 不留副本): %s", cap.Text())
+	}
+	// 游标必须推进:否则对端每轮从第 0 行重吐整页(白占带宽)。
+	if len(f.receipts) < 2 || !strings.Contains(f.receipts[0], "since_seq=0") ||
+		!strings.Contains(f.receipts[1], "since_seq=1") {
+		t.Fatalf("回执游标未推进: %v", f.receipts)
 	}
 }
 
@@ -97,6 +132,37 @@ func TestIgnitionReceiptFailureVerdict(t *testing.T) {
 	out := a.Execute(context.Background(), StepRef{TaskNo: "TSK-22", ClusterID: "CLU-9"}, nil)
 	if out.Success || out.Verdict != VerdictRemoteReceipt || out.RemoteRef == "" {
 		t.Fatalf("远端失败回执: %+v", out)
+	}
+}
+
+// 门面治理拒绝(R-12/R-13)与执行位不可用(R-15)是非 200 + flat JSON:
+// 错误理由必须回到本域结论里,不能吞成"提交失败"空话。
+func TestIgnitionGovernanceRefuseSurfacing(t *testing.T) {
+	f := &fakeIgnition{
+		errBody: `{"return_code":"IGN-GOV-403","error_msg":"执行动作不在白名单内（R-12 治理拒绝）"}`,
+		errCode: http.StatusForbidden,
+	}
+	a := newTestIgnition(t, f)
+	out := a.Execute(context.Background(), StepRef{TaskNo: "TSK-25", ClusterID: "CLU-9", StepIndex: 1, StepCode: "08"}, nil)
+	if out.Success || !strings.Contains(out.Detail, "R-12 治理拒绝") ||
+		!strings.Contains(out.Detail, "403") {
+		t.Fatalf("受理侧拒绝理由须原样回传(可诊断): %+v", out)
+	}
+}
+
+// 引用未命中 ⇒ 登记值与真实位置不符(INV-46),不静默重试。
+func TestIgnitionReceiptUnknownRefIsLost(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/ign/delivery/receipt/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"return_code":"IGN-NF-404","error_msg":"任务不存在"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	a := NewIgnition(IgnitionConfig{BaseURL: srv.URL, PollInterval: 10 * time.Millisecond})
+	out := a.Reconcile(context.Background(), "IGN-GONE", nil)
+	if !out.Lost || !strings.Contains(out.Detail, "INV-46") {
+		t.Fatalf("远端引用未命中应判失联并留 INV-46 口径: %+v", out)
 	}
 }
 
@@ -127,12 +193,12 @@ func TestIgnitionCancelRequestsRemoteRevoke(t *testing.T) {
 func TestIgnitionReconcileReadsExistingRef(t *testing.T) {
 	var submits int
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/delivery/submit", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/ign/delivery/submit", func(w http.ResponseWriter, _ *http.Request) {
 		submits++
-		_, _ = w.Write([]byte(`{"remote_task_ref":"IGN-9","status":"ACCEPTED"}`))
+		_, _ = w.Write([]byte(`{"remote_task_ref":"IGN-9","status":"RUNNING"}`))
 	})
-	mux.HandleFunc("/api/delivery/receipt/IGN-9", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"status":"SUCCEEDED","summary":"远端已执行完毕(重启期间完成)"}`))
+	mux.HandleFunc("/api/v1/ign/delivery/receipt/IGN-9", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"COMPLETED","summary":"远端已执行完毕(重启期间完成)","verdict_source":"EXIT_CODE"}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -146,10 +212,33 @@ func TestIgnitionReconcileReadsExistingRef(t *testing.T) {
 	}
 }
 
+// LOST 是独立终态(点火中心 INV-37),既不记成功也不并入失败。
+func TestIgnitionLostVerdict(t *testing.T) {
+	f := &fakeIgnition{sequence: []string{"LOST"}}
+	a := newTestIgnition(t, f)
+	out := a.Execute(context.Background(), StepRef{TaskNo: "TSK-26", ClusterID: "CLU-9", StepIndex: 1, StepCode: "03"}, nil)
+	if out.Success || out.Cancelled || !out.Lost {
+		t.Fatalf("LOST 应判失联: %+v", out)
+	}
+	if !strings.Contains(out.Detail, "痕迹不可存活") {
+		t.Fatalf("失联结论须给出可诊断口径: %s", out.Detail)
+	}
+}
+
 func TestIgnitionUnconfiguredIsLost(t *testing.T) {
 	a := NewIgnition(IgnitionConfig{})
 	out := a.Execute(context.Background(), StepRef{TaskNo: "TSK-24"}, nil)
 	if !out.Lost {
 		t.Fatalf("未配置点火中心地址的远程链路应判不可执行: %+v", out)
+	}
+}
+
+// 缺省端点路径 = 点火中心交付门面契约路径。
+func TestIgnitionDefaultPaths(t *testing.T) {
+	a := NewIgnition(IgnitionConfig{BaseURL: "http://ign:9709"})
+	if a.cfg.SubmitPath != "/api/v1/ign/delivery/submit" ||
+		a.cfg.ReceiptPath != "/api/v1/ign/delivery/receipt/{ref}" ||
+		a.cfg.CancelPath != "/api/v1/ign/delivery/cancel/{ref}" {
+		t.Fatalf("缺省门面路径不符: %+v", a.cfg)
 	}
 }

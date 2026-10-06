@@ -57,7 +57,7 @@ type fakeRemote struct {
 func newFakeRemote(receipts []string, ref string) *fakeRemote {
 	f := &fakeRemote{receipts: receipts, ref: ref}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/delivery/submit", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/ign/delivery/submit", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.submits++
@@ -66,7 +66,7 @@ func newFakeRemote(receipts []string, ref string) *fakeRemote {
 		f.lastSubm = body
 		_ = json.NewEncoder(w).Encode(map[string]string{"remote_task_ref": f.ref, "status": "ACCEPTED"})
 	})
-	mux.HandleFunc("/api/delivery/receipt/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/ign/delivery/receipt/", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		st := "RUNNING"
@@ -77,7 +77,7 @@ func newFakeRemote(receipts []string, ref string) *fakeRemote {
 		ec := 0
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": st, "summary": "远端结论", "exit_code": ec})
 	})
-	mux.HandleFunc("/api/delivery/cancel/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/ign/delivery/cancel/", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.cancels++
@@ -89,8 +89,13 @@ func newFakeRemote(receipts []string, ref string) *fakeRemote {
 
 func (f *fakeRemote) attach(t *testing.T, rt *deliveryRuntime) {
 	t.Helper()
+	prev := config.Config.Delivery.IgnitionBaseURL
+	config.Config.Delivery.IgnitionBaseURL = f.srv.URL
+	t.Cleanup(func() {
+		config.Config.Delivery.IgnitionBaseURL = prev
+		f.srv.Close()
+	})
 	rt.remote = delivery.NewIgnition(delivery.IgnitionConfig{BaseURL: f.srv.URL, PollInterval: 10 * time.Millisecond})
-	t.Cleanup(f.srv.Close)
 }
 
 func (f *fakeRemote) counts() (submits, cancels int) {
@@ -396,7 +401,7 @@ func TestResumeExpansionSeparatesSkipAndCancel(t *testing.T) {
 
 func TestInstallSuccessChainLocal(t *testing.T) {
 	requireDB(t)
-	fr := newFakeRemote([]string{"SUCCEEDED"}, "IGN-UNUSED")
+	fr := newFakeRemote([]string{"COMPLETED"}, "IGN-UNUSED")
 	rt := useTool(t, `echo "step $3 running"`+"\n"+
 		`echo "PLAY RECAP ****"`+"\n"+
 		`echo "node-1 : ok=4 changed=2 unreachable=0 failed=0 skipped=0"`, time.Minute)
@@ -839,7 +844,7 @@ func TestCancelQueuedTaskBranchAndGuards(t *testing.T) {
 
 func TestRemoteTaskWritesRefAndReceipt(t *testing.T) {
 	requireDB(t)
-	fr := newFakeRemote([]string{"RUNNING", "SUCCEEDED"}, "IGN-RT-77")
+	fr := newFakeRemote([]string{"RUNNING", "COMPLETED"}, "IGN-RT-77")
 	rt := useTool(t, `echo "本地链路不得执行"`, time.Minute)
 	fr.attach(t, rt)
 
@@ -863,13 +868,25 @@ func TestRemoteTaskWritesRefAndReceipt(t *testing.T) {
 	if submits != 1 || cancels != 0 {
 		t.Fatalf("远程链路应恰好提交一次且无撤销: submits=%d cancels=%d", submits, cancels)
 	}
-	// REF-12:提交只带登记标识(集群/步骤/任务),命令面与凭据不出域
+	// REF-12:提交只带登记标识(来源任务号 + 来源步骤序号 + 集群标识 + 步骤编码),命令面与凭据不出域
 	body := fr.submitted()
-	if Str(body["task_no"]) != taskNo || Str(body["cluster_no"]) != clusterNo || Str(body["step_code"]) != TaskKindUpgrade {
+	if Str(body["source_task_no"]) != taskNo || Str(body["cluster_ref"]) != clusterNo {
 		t.Fatalf("提交意图应携带登记标识: %+v", body)
+	}
+	if idx, _ := body["source_step_index"].(float64); int(idx) != 1 {
+		t.Fatalf("提交必须携带来源步骤序号(门面幂等键): %+v", body)
+	}
+	if Str(body["step_code"]) != TaskKindUpgrade {
+		t.Fatalf("非安装族提交携带本域步骤编码(= 任务类别名,由被调用方私有映射解析): %+v", body)
+	}
+	if _, ok := body["action_code"]; ok {
+		t.Fatal("提交不得携带本域动作码词汇(动作白名单语义归点火中心)")
 	}
 	if _, ok := body["args"]; ok {
 		t.Fatal("REF-12/INV-40:提交不得携带命令面参数")
+	}
+	if _, ok := body["working_dir"]; ok {
+		t.Fatal("REF-12:工作目录归被调用方派生,提交不得携带")
 	}
 }
 
@@ -911,7 +928,7 @@ func TestRemoteCancelCallsIgnition(t *testing.T) {
 
 func TestRemoteMissingRefIsFailure(t *testing.T) {
 	requireDB(t)
-	fr := newFakeRemote([]string{"SUCCEEDED"}, "") // 远端受理但未回引用
+	fr := newFakeRemote([]string{"COMPLETED"}, "") // 远端受理但未回引用
 	rt := useTool(t, `echo "本地链路不得执行"`, time.Minute)
 	fr.attach(t, rt)
 
@@ -937,6 +954,111 @@ func TestRemoteMissingRefIsFailure(t *testing.T) {
 	}
 	if submits, _ := fr.counts(); submits != 1 {
 		t.Fatalf("应恰好提交一次: %d", submits)
+	}
+}
+
+// REF-16/INV-46 的配置侧同源:链路在本部署不可用 ⇒ 执行位置不可登记,提交即刻拒绝。
+// 放行的后果是任务排队→执行时失联→集群降级,而登记值必须是可达的真实执行位置(INV-32)。
+func TestExecPathRegistrationRequiresConfiguredLink(t *testing.T) {
+	requireDB(t)
+	prevBin, prevURL := config.Config.Delivery.ToolBin, config.Config.Delivery.IgnitionBaseURL
+	t.Cleanup(func() {
+		config.Config.Delivery.ToolBin, config.Config.Delivery.IgnitionBaseURL = prevBin, prevURL
+	})
+
+	config.Config.Delivery.ToolBin = "/bin/true"
+	config.Config.Delivery.IgnitionBaseURL = ""
+	if err := checkExecPathRegistered(ExecPathLocal); err != nil {
+		t.Fatalf("已配置交付工具时本地链路应可登记: %v", err)
+	}
+	if err := checkExecPathRegistered(ExecPathRemoteExecutor); err == nil ||
+		!strings.Contains(err.Error(), "INV-46") {
+		t.Fatalf("未配置点火中心地址时远程链路不得登记(REF-16/INV-46): %v", err)
+	}
+	config.Config.Delivery.IgnitionBaseURL = "http://ignition:9709"
+	if err := checkExecPathRegistered(ExecPathRemoteExecutor); err != nil {
+		t.Fatalf("已配置点火中心地址时远程链路应可登记: %v", err)
+	}
+	config.Config.Delivery.ToolBin = ""
+	if err := checkExecPathRegistered(ExecPathLocal); err == nil ||
+		!strings.Contains(err.Error(), "REF-16") {
+		t.Fatalf("未配置交付工具路径时本地链路不得登记(REF-16): %v", err)
+	}
+	config.Config.Delivery.ToolBin = "/bin/true"
+	if err := checkExecPathRegistered("EXECUTOR_AGENT"); err == nil {
+		t.Fatal("字典外执行位置取值必须拒绝")
+	}
+
+	// 入口同拦:未配置点火中心却提交远程链路 ⇒ 拒绝且不落任务行(前置阻断,不排队后失联)
+	config.Config.Delivery.IgnitionBaseURL = ""
+	clusterNo := seedCluster(t, ClusterStatusDraft)
+	if _, err := StartInstall(Int(mustClusterRow(t, clusterNo)["id"]),
+		map[string]any{"execution_path": ExecPathRemoteExecutor}, testUser); err == nil {
+		t.Fatal("未配置点火中心的远程链路提交必须拒绝")
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM clc_task WHERE cluster_ref=?`, clusterNo); n != 0 {
+		t.Fatalf("拒绝不得留下任务行,得到 %d", n)
+	}
+}
+
+// Q-71:全生命周期一律经点火中心门面单步下发 —— 审批回调创建的销毁任务(无人在场可选链路)
+// 必须继承集群登记事实:绑定了执行机即远程链路(INV-32 登记值即真实位置)。
+func TestDestroyTaskInheritsClusterRegisteredLink(t *testing.T) {
+	requireDB(t)
+	rt := useTool(t, `echo "本地链路不得执行"`, time.Minute)
+	newFakeRemote([]string{"UNUSED"}, "IGN-NA").attach(t, rt)
+
+	clusterNo := seedCluster(t, ClusterStatusRunning)
+	mustSQL(t, `UPDATE clc_cluster SET executor_ref='IGN-EXE-0001' WHERE cluster_no=? AND flag=1`, clusterNo)
+	if err := tx(func(db *gorm.DB) error { return SyncClusterDestroyFromFlow(db, clusterNo, "APPROVED") }); err != nil {
+		t.Fatalf("审批通过回调创建销毁任务失败: %v", err)
+	}
+	nos := taskNosOf(t, clusterNo)
+	if len(nos) != 1 {
+		t.Fatalf("应创建 1 个销毁任务,得到 %d", len(nos))
+	}
+	if got := Str(mustOne(t, `SELECT execution_path FROM clc_task WHERE task_no=?`, nos[0])["execution_path"]); got != ExecPathRemoteExecutor {
+		t.Fatalf("Q-71:绑定执行机的集群其销毁任务必须登记远程链路,得到 %q", got)
+	}
+
+	// 未绑定执行机 ⇒ 本地链路(创建向导「不使用执行机」的同源登记,不是失联兜底)
+	online := seedCluster(t, ClusterStatusRunning)
+	if err := tx(func(db *gorm.DB) error { return SyncClusterDestroyFromFlow(db, online, "APPROVED") }); err != nil {
+		t.Fatalf("无执行机集群的销毁任务创建失败: %v", err)
+	}
+	got := Str(mustOne(t, `SELECT execution_path FROM clc_task WHERE cluster_ref=?`, online)["execution_path"])
+	if got != ExecPathLocal {
+		t.Fatalf("INV-32:未绑定执行机的集群应登记本地链路,得到 %q", got)
+	}
+}
+
+// Q-71 的默认口径:请求未显式选链路时,执行位置由集群登记事实(点火中心执行机引用)推导 ——
+// 绑定执行机的集群其全生命周期动作一律经交付门面单步下发,七步安装即七次受理。
+func TestMccClusterInstallsEntirelyThroughFacade(t *testing.T) {
+	requireDB(t)
+	comp := make([]string, 10)
+	for i := range comp {
+		comp[i] = "COMPLETED"
+	}
+	rt := useTool(t, `echo "本地链路不得执行"`, time.Minute)
+	fr := newFakeRemote(comp, "IGN-EXE-1")
+	fr.attach(t, rt)
+
+	clusterNo := seedCluster(t, ClusterStatusDraft)
+	mustSQL(t, `UPDATE clc_cluster SET executor_ref='IGN-EXE-0001' WHERE cluster_no=? AND flag=1`, clusterNo)
+	if _, err := StartInstall(Int(mustClusterRow(t, clusterNo)["id"]), map[string]any{}, testUser); err != nil {
+		t.Fatalf("StartInstall 失败: %v", err)
+	}
+	nos := taskNosOf(t, clusterNo)
+	if len(nos) != 1 {
+		t.Fatalf("应创建 1 个安装任务,得到 %d", len(nos))
+	}
+	row := waitTaskStatuses(t, nos[0], TaskStatusSucceeded)
+	if Str(row["execution_path"]) != ExecPathRemoteExecutor {
+		t.Fatalf("Q-71:绑定执行机的集群默认须登记远程链路,得到 %q", Str(row["execution_path"]))
+	}
+	if submits, _ := fr.counts(); submits != 7 {
+		t.Fatalf("INV-45/Q-71:七步安装须经门面受理七次,得到 %d", submits)
 	}
 }
 

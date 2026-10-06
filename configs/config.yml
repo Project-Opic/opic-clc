@@ -89,10 +89,10 @@ delivery:
   kubeconfig_path_pattern: "kube/{cluster}.conf"      # 凭据文件路径模板(相对 tool_dir,{cluster} 占位)
   extra_env: []                                       # 附加环境变量(KEY=VALUE;凭据经此注入,不入库)
   ignition_base_url: ""                               # 点火中心地址(远程链路 REMOTE_EXECUTOR;空 ⇒ 远程判失联)
-  ignition_token: ""                                  # 点火中心服务令牌(env IGNITION_TOKEN)
-  ignition_submit_path: /api/delivery/submit
-  ignition_receipt_path: /api/delivery/receipt/{ref}
-  ignition_cancel_path: /api/delivery/cancel/{ref}
+  ignition_token: ""                                  # 点火中心交付门面服务令牌(env IGNITION_TOKEN,对端 delivery.facade_token)
+  ignition_submit_path: /api/v1/ign/delivery/submit
+  ignition_receipt_path: /api/v1/ign/delivery/receipt/{ref}
+  ignition_cancel_path: /api/v1/ign/delivery/cancel/{ref}
   ignition_poll_seconds: 5
 
 # 前端构建产物目录(空则不托管;开发期前端走 vite proxy;compose 走网关/nginx)
