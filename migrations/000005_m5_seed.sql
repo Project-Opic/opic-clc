@@ -37,11 +37,11 @@ INSERT INTO sys_permission (code, name, target_type, target_ref) SELECT 'PERM-FU
 INSERT INTO sys_permission (code, name, target_type, target_ref) SELECT 'PERM-FUNC-34', '交付步骤查询', 'BEHAVIOR', 'PERM-FUNC-34' WHERE NOT EXISTS (SELECT 1 FROM sys_permission WHERE code='PERM-FUNC-34');
 INSERT INTO sys_permission (code, name, target_type, target_ref) SELECT 'PERM-FUNC-35', '任务日志回放查询', 'BEHAVIOR', 'PERM-FUNC-35' WHERE NOT EXISTS (SELECT 1 FROM sys_permission WHERE code='PERM-FUNC-35');
 
-INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-01', '集群管理员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-01');
-INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-02', '平台运维管理员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-02');
-INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-03', '集群审计员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-03');
-INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-04', '集群只读用户' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-04');
-INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-05', '下游能力中心' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-05');
+INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-01', '集群管理员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-01' OR name='集群管理员');
+INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-02', '平台运维管理员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-02' OR name='平台运维管理员');
+INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-03', '集群审计员' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-03' OR name='集群审计员');
+INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-04', '集群只读用户' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-04' OR name='集群只读用户');
+INSERT INTO sys_role (code, name) SELECT 'CLC-ROLE-05', '下游能力中心' WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code='CLC-ROLE-05' OR name='下游能力中心');
 
 INSERT INTO sys_role_permission (role_id, permission_id) SELECT r.id, p.id FROM sys_role r, sys_permission p WHERE r.code='CLC-ROLE-01' AND p.code='PERM-FUNC-01' AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp WHERE rp.role_id=r.id AND rp.permission_id=p.id);
 INSERT INTO sys_role_permission (role_id, permission_id) SELECT r.id, p.id FROM sys_role r, sys_permission p WHERE r.code='CLC-ROLE-01' AND p.code='PERM-FUNC-02' AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp WHERE rp.role_id=r.id AND rp.permission_id=p.id);
