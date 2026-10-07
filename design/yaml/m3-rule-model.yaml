@@ -1,5 +1,5 @@
 model_type: RULE
-version: '1.1'
+version: '1.1.1'
 domain: 集群域
 rules:
 - id: REF-01
@@ -108,7 +108,7 @@ rules:
   reusedBy: []
   version: '1.1'
 - id: REF-16
-  name: 执行适配器形态（LOCAL / REMOTE_EXECUTOR）由部署配置显式声明且运行期不得互转；集群的执行位置一旦登记即只读（INV-32 的配置侧同源）；登记前该链路须在本部署实际可用（远程须已配置 O-IGN 地址、本地须已配置交付工具路径，否则任务创建即拒绝且不留排队行）；请求未显式选链路时执行位置由集群登记事实（executorRef 非空即远程）推导，全生命周期动作一律据此经 O-IGN 交付门面单步下发（Q-71）
+  name: 执行适配器形态（LOCAL / REMOTE_EXECUTOR）由部署配置显式声明且运行期不得互转；集群的执行位置一旦登记即只读（INV-32 的配置侧同源）；登记前该链路须在本部署实际可用（远程须已配置 O-IGN 地址、本地须已配置交付工具路径，否则任务创建即拒绝且不留排队行）；请求未显式选链路时执行位置由集群登记事实（executorRef 非空即远程）推导，全生命周期动作一律据此经 O-IGN 交付门面单步下发（O-IGN 侧 Q-71）
   ruleType: FORMAT
   description: ClusterTask.executionPath
   expression: ClusterTask.executionPath
@@ -208,7 +208,7 @@ rules:
 - id: INV-14
   name: ADDED 状态必须已有 K8s 节点名（加入成功的登记落点；仅提交时强制校验）
   ruleType: INVARIANT
-  description: 集群节点：ADDED 状态必须已有 K8s 节点名（加入成功的登记落点；仅提交时强制校验）
+  description: 集群节点：ADDED 状态必须已有 K8s 节点名（加入成功的登记落点；仅提交时强制校验）。节点名未回填时的派生口径唯一：集群编号小写 + 地址短横（如 clu-20261006-0001-192-168-3-21）；安装族下发对端的节点名与成功落点回填台账必须走同一条口径 —— 否则界面名单与集群里的节点名两样（R-19 同源）
   expression: ''
   reusedBy: []
   version: '1.0'
@@ -576,3 +576,10 @@ rules:
   expression: 执行并发与互斥：全局执行槽位（REF-14）占满 ⇒ 任务排队 QUEUED；同一集群至多一个运行中交付任务（INV-48）；槽位释放按排队次序推进
   reusedBy: []
   version: '1.1'
+- id: R-19
+  name: 远程交付受理的登记事实携带
+  ruleType: CROSS_OBJECT
+  description: 远程交付受理的登记事实携带：REMOTE 链路每一步受理只携带登记标识与本域事实（来源任务 + 来源步骤序号 + 集群标识 + 步骤编码 + 节点清单 + 交付版本引用）。节点清单按任务类别三档取用 —— 安装族（INSTALL/RETRY_INSTALL）带全量在册拓扑（PENDING+ADDED 的地址 + 角色原文 + 节点名，节点名未回填按 INV-14 派生后下发，与成功落点同源）；节点增删类（ADD_NODE/DEL_NODE）只带地址；其余类别不带清单。交付版本引用仅安装族下发（UPGRADE 的目标版本不经该字段代答）。永不下发动作码 / 参数数组 / 工作目录 / 参数模板（INV-47 的远程侧同源，命令面归对端私有）
+  expression: 远程交付受理的登记事实携带：REMOTE 链路每一步受理只携带登记标识与本域事实（来源任务 + 来源步骤序号 + 集群标识 + 步骤编码 + 节点清单 + 交付版本引用）。节点清单按任务类别三档取用 —— 安装族（INSTALL/RETRY_INSTALL）带全量在册拓扑（PENDING+ADDED 的地址 + 角色原文 + 节点名，节点名未回填按 INV-14 派生后下发，与成功落点同源）；节点增删类（ADD_NODE/DEL_NODE）只带地址；其余类别不带清单。交付版本引用仅安装族下发（UPGRADE 的目标版本不经该字段代答）。永不下发动作码 / 参数数组 / 工作目录 / 参数模板（INV-47 的远程侧同源，命令面归对端私有）
+  reusedBy: []
+  version: '1.1.1'

@@ -467,7 +467,7 @@ func destroyInFlight(clusterNo string) (string, bool) {
 }
 
 // execPathOf 系统创建任务(审批回调,无人在场选链路)的执行位置 = 集群登记事实:绑定了点火中心
-// 执行机 ⇒ 远程链路(用户裁定 Q-71:全生命周期动作一律经交付门面单步下发,销毁也不例外);
+// 执行机 ⇒ 远程链路(O-IGN 侧用户裁定 Q-71:全生命周期动作一律经交付门面单步下发,销毁也不例外);
 // 未绑定 ⇒ 本地链路(创建向导「不使用执行机」的同源登记,不是失联兜底)。
 func execPathOf(cluster map[string]any) string {
 	if strings.TrimSpace(Str(cluster["executor_ref"])) != "" {

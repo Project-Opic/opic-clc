@@ -1,5 +1,5 @@
 model_type: FLOW
-version: '1.1'
+version: '1.1.1'
 domain: 集群域
 flows:
 - id: FLOW-PROC-01
@@ -585,7 +585,7 @@ flows:
     nextActivities:
     - A13
   - activityId: A10
-    name: 经点火中心提交并登记远端任务引用
+    name: 经点火中心提交并登记远端任务引用（受理体只携登记标识与本域事实：节点清单 / 交付版本引用按 R-19 取用，永不携命令面）
     activityType: BEHAVIOR_CALL
     behaviorRef: B-AUTO-10
     ruleRef: INV-46

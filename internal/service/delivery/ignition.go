@@ -13,8 +13,8 @@ import (
 
 // 点火中心交付门面契约(O-IGN FUNC-34~36,需求文档 3.2.1 / 8.3):
 // 词汇由被调用方定义 —— 回执状态取 IGN_TASK_STATUS 字典码(成功 = COMPLETED),
-// 请求体只携带登记标识(来源任务号 / 来源步骤序号 / 集群标识 / 步骤编码 / 节点地址清单),
-// 不含命令、参数数组与工作目录(命令面映射归点火中心私有,其 R-13)。
+// 请求体只携带登记标识与本域事实(来源任务号 / 来源步骤序号 / 集群标识 / 步骤编码 /
+// 节点清单 / 交付版本引用),不含命令、参数数组与工作目录(命令面映射归点火中心私有,其 R-13)。
 const (
 	defaultSubmitPath  = "/api/v1/ign/delivery/submit"
 	defaultReceiptPath = "/api/v1/ign/delivery/receipt/{ref}"
@@ -68,17 +68,21 @@ func NewIgnition(cfg IgnitionConfig) *Ignition {
 // Form 适配器形态(REF-16)。
 func (a *Ignition) Form() string { return FormRemote }
 
-// submitReq 受理请求(INV-34 跨域只存标识)。
+// submitReq 受理请求(INV-34 跨域只存标识 / R-19 登记事实携带:字段就是本域能送出去的边界形态)。
 //
 // action_code 留空:点火中心按「步骤编码命中 01~07 ⇒ 安装族单步 / 命中本域任务类别名 ⇒
 // 私有映射取单步动作码」解析(其 R-13),本域不下发命令面词汇;两者都空才是治理拒绝。
+//
+// nodes 是结构化清单(O-IGN 侧 Q-72):安装族带在册节点全量(地址 + 角色 + 节点名),对端据此派生
+// 集群交付配置(inventory);节点增删类只带本次目标地址(角色留空 = 对端的"只给地址 ⇒ 工作节点")。
 type submitReq struct {
-	SourceTaskNo    string   `json:"source_task_no"`
-	SourceStepIndex int      `json:"source_step_index"`
-	ClusterRef      string   `json:"cluster_ref"`
-	ActionCode      string   `json:"action_code,omitempty"`
-	StepCode        string   `json:"step_code,omitempty"`
-	Nodes           []string `json:"nodes,omitempty"`
+	SourceTaskNo    string     `json:"source_task_no"`
+	SourceStepIndex int        `json:"source_step_index"`
+	ClusterRef      string     `json:"cluster_ref"`
+	ActionCode      string     `json:"action_code,omitempty"`
+	StepCode        string     `json:"step_code,omitempty"`
+	VersionRef      string     `json:"version_ref,omitempty"`
+	Nodes           []NodeSpec `json:"nodes,omitempty"`
 }
 
 type submitResp struct {
@@ -173,7 +177,7 @@ func (a *Ignition) Execute(ctx context.Context, ref StepRef, sink LineSink) Outc
 	var sub submitResp
 	if err := a.do(ctx, http.MethodPost, a.cfg.SubmitPath, "", submitReq{
 		SourceTaskNo: ref.TaskNo, SourceStepIndex: ref.StepIndex, ClusterRef: ref.ClusterID,
-		StepCode: ref.StepCode, Nodes: ref.Nodes,
+		StepCode: ref.StepCode, VersionRef: ref.VersionRef, Nodes: ref.Nodes,
 	}, &sub); err != nil {
 		return Outcome{Detail: "提交远端执行失败: " + err.Error()}
 	}
@@ -254,7 +258,7 @@ func (a *Ignition) poll(ctx context.Context, remoteRef string, sink LineSink) Ou
 					Detail: nonEmpty(rc.Summary, "远端结论:完成"), ExitCode: derefInt(rc.ExitCode)}
 			case remoteFailed:
 				return Outcome{RemoteRef: remoteRef,
-					Detail: nonEmpty(rc.Summary, nonEmpty(rc.FailReason, "远端回执结论:失败")),
+					Detail:   nonEmpty(rc.Summary, nonEmpty(rc.FailReason, "远端回执结论:失败")),
 					ExitCode: derefInt(rc.ExitCode)}
 			case remoteCancelled:
 				return Outcome{Cancelled: true, RemoteRef: remoteRef,

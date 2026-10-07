@@ -135,7 +135,7 @@ func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, 
 	ip := strings.TrimSpace(Str(d["ip_address"]))
 	execPath := Str(d["execution_path"])
 	if execPath == "" {
-		execPath = execPathOf(c) // Q-71:加节点同样按集群登记事实推导链路
+		execPath = execPathOf(c) // O-IGN 侧 Q-71:加节点同样按集群登记事实推导链路
 	}
 	var created map[string]any
 	var taskNo string
@@ -195,7 +195,7 @@ func RemoveNode(id int64, d map[string]any, user UserInfo) (map[string]any, erro
 	ip := Str(n["ip_address"])
 	execPath := Str(d["execution_path"])
 	if execPath == "" {
-		execPath = execPathByClusterNo(clusterNo) // Q-71:减节点同样按集群登记事实推导链路
+		execPath = execPathByClusterNo(clusterNo) // O-IGN 侧 Q-71:减节点同样按集群登记事实推导链路
 	}
 	var taskNo string
 	err = tx(func(db *gorm.DB) error {
@@ -238,6 +238,13 @@ func addNodeSuccessLanding(db *gorm.DB, task, _ map[string]any, args DeliveryArg
 		fmt.Sprintf("节点加入完成:%d 个待加入节点已回填 K8s 节点名(INV-14)", done), user)
 }
 
+// deriveK8sNodeName INV-14 的节点名派生口径(集群号小写 + 地址短横):
+// 安装族下发清单与成功落点回填必须同一条口径,否则台账与集群里的节点名两样。
+func deriveK8sNodeName(clusterNo, ip string) string {
+	return strings.ToLower(strings.TrimSpace(clusterNo)) + "-" +
+		strings.ReplaceAll(strings.TrimSpace(ip), ".", "-")
+}
+
 // markNodesAddedTx 待加入节点置 ADDED 并回填 K8s 节点名(INV-14)。
 // ADD_NODE 成功落点与安装类成功落点共用:ips 为空则取该集群全部 PENDING(向导登记的节点)。
 func markNodesAddedTx(db *gorm.DB, clusterNo string, ips []string, nameOverride string, user UserInfo) (int, error) {
@@ -248,7 +255,7 @@ func markNodesAddedTx(db *gorm.DB, clusterNo string, ips []string, nameOverride 
 	for _, ip := range ips {
 		name := trimEmpty(nameOverride)
 		if name == "" {
-			name = strings.ToLower(clusterNo) + "-" + strings.ReplaceAll(strings.TrimSpace(ip), ".", "-")
+			name = deriveK8sNodeName(clusterNo, ip)
 		}
 		res, err := store.Exec(db, `
 			UPDATE clc_cluster_node SET node_status=?, k8s_nodename=?, node_health=?,

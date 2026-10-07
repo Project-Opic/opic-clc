@@ -52,6 +52,7 @@ type fakeRemote struct {
 	ref      string
 	srv      *httptest.Server
 	lastSubm map[string]any
+	allSubm  []map[string]any
 }
 
 func newFakeRemote(receipts []string, ref string) *fakeRemote {
@@ -64,6 +65,7 @@ func newFakeRemote(receipts []string, ref string) *fakeRemote {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.lastSubm = body
+		f.allSubm = append(f.allSubm, body)
 		_ = json.NewEncoder(w).Encode(map[string]string{"remote_task_ref": f.ref, "status": "ACCEPTED"})
 	})
 	mux.HandleFunc("/api/v1/ign/delivery/receipt/", func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +110,15 @@ func (f *fakeRemote) submitted() map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastSubm
+}
+
+// submittedAll 按受理次序返回全部请求体(七步安装即七次受理,逐步断言下发口径)。
+func (f *fakeRemote) submittedAll() []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]map[string]any, len(f.allSubm))
+	copy(out, f.allSubm)
+	return out
 }
 
 var testUser = UserInfo{ID: 1, Username: "tester"}
@@ -1001,7 +1012,7 @@ func TestExecPathRegistrationRequiresConfiguredLink(t *testing.T) {
 	}
 }
 
-// Q-71:全生命周期一律经点火中心门面单步下发 —— 审批回调创建的销毁任务(无人在场可选链路)
+// O-IGN 侧 Q-71:全生命周期一律经点火中心门面单步下发 —— 审批回调创建的销毁任务(无人在场可选链路)
 // 必须继承集群登记事实:绑定了执行机即远程链路(INV-32 登记值即真实位置)。
 func TestDestroyTaskInheritsClusterRegisteredLink(t *testing.T) {
 	requireDB(t)
@@ -1018,7 +1029,7 @@ func TestDestroyTaskInheritsClusterRegisteredLink(t *testing.T) {
 		t.Fatalf("应创建 1 个销毁任务,得到 %d", len(nos))
 	}
 	if got := Str(mustOne(t, `SELECT execution_path FROM clc_task WHERE task_no=?`, nos[0])["execution_path"]); got != ExecPathRemoteExecutor {
-		t.Fatalf("Q-71:绑定执行机的集群其销毁任务必须登记远程链路,得到 %q", got)
+		t.Fatalf("O-IGN 侧 Q-71:绑定执行机的集群其销毁任务必须登记远程链路,得到 %q", got)
 	}
 
 	// 未绑定执行机 ⇒ 本地链路(创建向导「不使用执行机」的同源登记,不是失联兜底)
@@ -1032,7 +1043,7 @@ func TestDestroyTaskInheritsClusterRegisteredLink(t *testing.T) {
 	}
 }
 
-// Q-71 的默认口径:请求未显式选链路时,执行位置由集群登记事实(点火中心执行机引用)推导 ——
+// O-IGN 侧 Q-71 的默认口径:请求未显式选链路时,执行位置由集群登记事实(点火中心执行机引用)推导 ——
 // 绑定执行机的集群其全生命周期动作一律经交付门面单步下发,七步安装即七次受理。
 func TestMccClusterInstallsEntirelyThroughFacade(t *testing.T) {
 	requireDB(t)
@@ -1055,10 +1066,98 @@ func TestMccClusterInstallsEntirelyThroughFacade(t *testing.T) {
 	}
 	row := waitTaskStatuses(t, nos[0], TaskStatusSucceeded)
 	if Str(row["execution_path"]) != ExecPathRemoteExecutor {
-		t.Fatalf("Q-71:绑定执行机的集群默认须登记远程链路,得到 %q", Str(row["execution_path"]))
+		t.Fatalf("O-IGN 侧 Q-71:绑定执行机的集群默认须登记远程链路,得到 %q", Str(row["execution_path"]))
 	}
 	if submits, _ := fr.counts(); submits != 7 {
-		t.Fatalf("INV-45/Q-71:七步安装须经门面受理七次,得到 %d", submits)
+		t.Fatalf("INV-45/O-IGN 侧 Q-71:七步安装须经门面受理七次,得到 %d", submits)
+	}
+}
+
+// TestRemoteInstallSendsLedgerTopology P2 打通口径:安装族每一步都随请求体下发台账在册节点的
+// 结构化清单(地址 + 角色 + K8s 节点名)与集群登记的交付版本引用(O-IGN 侧裁定 Q-72:清单进请求体、
+// 两侧各校验一次;拓扑权威在本域台账,被调用方据此派生集群交付配置)。
+func TestRemoteInstallSendsLedgerTopology(t *testing.T) {
+	requireDB(t)
+	comp := make([]string, 10)
+	for i := range comp {
+		comp[i] = "COMPLETED"
+	}
+	rt := useTool(t, `echo "本地链路不得执行"`, time.Minute)
+	fr := newFakeRemote(comp, "IGN-EXE-INV")
+	fr.attach(t, rt)
+
+	created, err := CreateCluster(map[string]any{
+		"name":               fmt.Sprintf("清单下发验收-%d", nextSeq()),
+		"cluster_dns_domain": "inv.test",
+		"version_ref":        "VDV-INV-0001",
+		"executor_ref":       "IGN-EXE-0001",
+		"nodes": []any{
+			map[string]any{"ip_address": "10.30.0.11", "node_role": "MASTER"},
+			map[string]any{"ip_address": "10.30.0.12", "node_role": "MASTER"},
+			map[string]any{"ip_address": "10.30.0.13", "node_role": "MASTER"},
+			map[string]any{"ip_address": "10.30.0.14", "node_role": "WORKER"},
+		},
+	}, testUser)
+	if err != nil {
+		t.Fatalf("CreateCluster(四步向导)失败: %v", err)
+	}
+	clusterNo := Str(created["cluster_no"])
+	if _, err := StartInstall(Int(created["id"]), map[string]any{}, testUser); err != nil {
+		t.Fatalf("StartInstall 失败: %v", err)
+	}
+	waitTaskStatuses(t, taskNosOf(t, clusterNo)[0], TaskStatusSucceeded)
+
+	subs := fr.submittedAll()
+	if len(subs) != 7 {
+		t.Fatalf("七步应七次受理: %d", len(subs))
+	}
+	wantIPs := []string{"10.30.0.11", "10.30.0.12", "10.30.0.13", "10.30.0.14"}
+	wantRoles := []string{"MASTER", "MASTER", "MASTER", "WORKER"}
+	for i, body := range subs {
+		if Str(body["step_code"]) != fmt.Sprintf("%02d", i+1) {
+			t.Fatalf("第 %d 步步骤编码口径不符: %+v", i+1, body)
+		}
+		if Str(body["cluster_ref"]) != clusterNo {
+			t.Fatalf("集群标识须为台账编号: %+v", body)
+		}
+		if Str(body["version_ref"]) != "VDV-INV-0001" {
+			t.Fatalf("交付版本引用须随安装族下发(未登记即由对端治理拒绝): %+v", body)
+		}
+		items, _ := body["nodes"].([]any)
+		if len(items) != len(wantIPs) {
+			t.Fatalf("第 %d 步清单应为台账在册 4 台,得到 %+v", i+1, items)
+		}
+		for j, it := range items {
+			spec, _ := it.(map[string]any)
+			if Str(spec["addr"]) != wantIPs[j] || Str(spec["role"]) != wantRoles[j] {
+				t.Fatalf("第 %d 步清单条目 %d 的拓扑事实不符: %+v", i+1, j, spec)
+			}
+			// 节点名未回填也要按 INV-14 口径下发:对端把它写进交付配置,真实节点名才与台账同源
+			want := strings.ToLower(clusterNo) + "-" + strings.ReplaceAll(wantIPs[j], ".", "-")
+			if Str(spec["nodename"]) != want {
+				t.Fatalf("第 %d 步条目 %d 节点名须按 INV-14 派生口径下发,期望 %q 得到 %+v", i+1, j, want, spec)
+			}
+		}
+		if _, ok := body["action_code"]; ok {
+			t.Fatal("安装族不得下发本域动作码(命令面归被调用方)")
+		}
+	}
+}
+
+// TestStepNodeSpecsCaliber 请求体字段口径的其余两支(R-19 / O-IGN 侧裁定 Q-72):
+// 节点增删只带本次目标地址(角色留空 = 对端的"加一个工作节点"语义),其余族不带清单。
+func TestStepNodeSpecsCaliber(t *testing.T) {
+	specs := stepNodeSpecs(TaskKindAddNode, "CLU-T00001", DeliveryArgs{NodeIPs: []string{"10.31.0.7", "10.31.0.8"}})
+	if len(specs) != 2 || specs[0].Addr != "10.31.0.7" || specs[0].Role != "" || specs[0].Nodename != "" {
+		t.Fatalf("节点增删须只带地址条目: %+v", specs)
+	}
+	if got := stepNodeSpecs(TaskKindDelNode, "CLU-T00001", DeliveryArgs{NodeIPs: []string{"10.31.0.7"}}); len(got) != 1 {
+		t.Fatalf("摘除同样按地址条目下发: %+v", got)
+	}
+	for _, kind := range []string{TaskKindUpgrade, TaskKindDestroy, TaskKindBackup, TaskKindStart} {
+		if got := stepNodeSpecs(kind, "CLU-T00001", DeliveryArgs{NodeIPs: []string{"10.31.0.7"}}); got != nil {
+			t.Fatalf("%s 不得携带节点清单(对端口径:非节点增删类动作带清单即请求形态拒绝): %+v", kind, got)
+		}
 	}
 }
 

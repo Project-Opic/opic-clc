@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,6 +187,66 @@ func TestIgnitionCancelRequestsRemoteRevoke(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.cancels) == 0 {
 		t.Fatal("远程链路取消必须撤销远端任务(FUNC-33)")
+	}
+}
+
+// 请求体的节点清单是结构化条目(O-IGN 侧 Q-72:清单进请求体,拓扑事实由本域给出):
+// 安装族带角色与节点名,只给地址时不得出现空的角色/节点名键(对端按"只给地址 ⇒ 工作节点"处理)。
+func TestIgnitionSubmitBodyShape(t *testing.T) {
+	var raw string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/ign/delivery/submit", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		raw = string(b)
+		_, _ = w.Write([]byte(`{"remote_task_ref":"IGN-27","status":"ACCEPTED"}`))
+	})
+	mux.HandleFunc("/api/v1/ign/delivery/receipt/", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"COMPLETED","summary":"完成"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	a := NewIgnition(IgnitionConfig{BaseURL: srv.URL, PollInterval: 10 * time.Millisecond})
+	out := a.Execute(context.Background(), StepRef{
+		TaskNo: "TSK-27", ClusterID: "CLU-9", StepIndex: 1, StepCode: "01",
+		VersionRef: "VDV-20261006-0001",
+		Nodes: []NodeSpec{
+			{Addr: "10.9.0.11", Role: "MASTER", Nodename: "clu-9-10-9-0-11"},
+			{Addr: "10.9.0.12"},
+		},
+	}, nil)
+	if !out.Success {
+		t.Fatalf("单步应成功: %+v", out)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatal(err)
+	}
+	text := func(v any) string { s, _ := v.(string); return s }
+	if text(body["version_ref"]) != "VDV-20261006-0001" {
+		t.Fatalf("交付版本引用须随请求体下发: %s", raw)
+	}
+	items, _ := body["nodes"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("节点清单应逐项下发: %s", raw)
+	}
+	first, _ := items[0].(map[string]any)
+	if text(first["addr"]) != "10.9.0.11" || text(first["role"]) != "MASTER" ||
+		text(first["nodename"]) != "clu-9-10-9-0-11" {
+		t.Fatalf("拓扑条目须含地址/角色/节点名(角色词汇由被调用方归一): %v", first)
+	}
+	second, _ := items[1].(map[string]any)
+	if _, ok := second["role"]; ok {
+		t.Fatalf("只给地址不得带空角色键: %s", raw)
+	}
+	if _, ok := second["nodename"]; ok {
+		t.Fatalf("只给地址不得带空节点名键: %s", raw)
+	}
+	// 命令面与凭据不出域:清单之外不得混入 argv / 工作目录 / 私钥
+	if _, ok := body["args"]; ok {
+		t.Fatal("远程链路不得携带命令面参数(INV-47 只属本地链路)")
+	}
+	if _, ok := body["working_dir"]; ok {
+		t.Fatal("工作目录归被调用方派生,提交不得携带")
 	}
 }
 

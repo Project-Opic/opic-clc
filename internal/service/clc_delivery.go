@@ -508,6 +508,58 @@ func deriveNodeIPs(kind, clusterNo string) []string {
 	return ips
 }
 
+// isInstallFamily 安装族任务类别(展开 01~07 步骤、由被调用方按步骤编码落安装动作)。
+func isInstallFamily(kind string) bool {
+	return kind == TaskKindInstall || kind == TaskKindRetryInstall
+}
+
+// stepNodeSpecs 交付门面请求体的节点清单(R-19 三档取用 / O-IGN 侧裁定 Q-72:清单进请求体,两侧各校验一次)。
+//
+// 安装族 ⇒ 台账在册节点全量(地址 + 角色 + K8s 节点名):被调用方据此派生集群交付配置,
+// 拓扑权威始终在本域台账(每步重取,事实变了就跟着改);
+// 节点增删 ⇒ 只带本次目标地址(角色留空,由命令面按"加一个工作节点/摘一个在册节点"处理);
+// 其余族 ⇒ 不带清单(对端口径:非节点增删类动作携带清单即请求形态拒绝)。
+func stepNodeSpecs(kind, clusterNo string, args DeliveryArgs) []delivery.NodeSpec {
+	switch kind {
+	case TaskKindInstall, TaskKindRetryInstall:
+		return deriveInstallNodes(clusterNo)
+	case TaskKindAddNode, TaskKindDelNode:
+		var out []delivery.NodeSpec
+		for _, ip := range args.NodeIPs {
+			out = append(out, delivery.NodeSpec{Addr: ip})
+		}
+		return out
+	}
+	return nil
+}
+
+// deriveInstallNodes 安装族的在册节点拓扑:PENDING(向导已登记、安装未落点)+ ADDED(续跑时已在册)。
+// REMOVING/REMOVED 不参与新装 —— 那是摘除链的中间/终局态。
+//
+// 节点名未回填时按 INV-14 口径派生下发:被调用方把该名字写进交付配置,真实集群里的节点名
+// 才与成功落点回填的台账值一致(否则界面名单与 kubectl 看到的两样)。
+func deriveInstallNodes(clusterNo string) []delivery.NodeSpec {
+	rows, err := qList(`SELECT ip_address, node_role, k8s_nodename FROM clc_cluster_node
+		WHERE cluster_ref=? AND flag=1 AND node_status IN (?, ?) ORDER BY id`,
+		clusterNo, NodeStatusPending, NodeStatusAdded)
+	if err != nil {
+		return nil
+	}
+	var out []delivery.NodeSpec
+	for _, r := range rows {
+		ip := strings.TrimSpace(Str(r["ip_address"]))
+		if ip == "" {
+			continue
+		}
+		name := trimEmpty(Str(r["k8s_nodename"]))
+		if name == "" {
+			name = deriveK8sNodeName(clusterNo, ip)
+		}
+		out = append(out, delivery.NodeSpec{Addr: ip, Role: Str(r["node_role"]), Nodename: name})
+	}
+	return out
+}
+
 // tryStart 取得全局槽位(REF-14)+ 同集群互斥(INV-48)后启动 QUEUED 任务。
 func (rt *deliveryRuntime) tryStart(taskNo string) bool {
 	task, err := qOne(`SELECT * FROM clc_task WHERE task_no=? AND flag=1`, taskNo)
@@ -561,6 +613,14 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 	}()
 	user := UserInfo{ID: Int(task["created_by"]), Username: Str(task["submitted_by"])}
 	args := rt.resolveArgs(task)
+	// 交付版本引用按 R-19 仅安装族下发:取集群登记的版本引用(FUNC-01 四步向导;可空 ⇒ 对端沿用发行包自身版本)。
+	// UPGRADE 的目标版本不经该列下发:改写集群交付配置里的版本面归点火中心的交付配置对齐职责,本域不代答。
+	clusterVersion := ""
+	if isInstallFamily(kind) {
+		if row, err := qOne(`SELECT version_ref FROM clc_cluster WHERE cluster_no=? AND flag=1`, clusterNo); err == nil && row != nil {
+			clusterVersion = trimEmpty(Str(row["version_ref"]))
+		}
+	}
 
 	// QUEUED → RUNNING(带守卫:已被取消/终态即中止,INV-29 终局不被覆盖)
 	var running map[string]any
@@ -647,10 +707,10 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 			return
 		}
 
-		// 远程链路只登记标识(来源任务号/步骤序号/集群标识/步骤编码/节点清单),命令面归点火中心私有;
-		// 本地链路才在本域渲染 argv(INV-47)。
+		// 远程链路只登记标识(R-19:来源任务号/步骤序号/集群标识/步骤编码/节点清单/版本引用),
+		// 命令面归点火中心私有;本地链路才在本域渲染 argv(INV-47)。
 		ref := delivery.StepRef{TaskNo: taskNo, ClusterID: clusterNo, StepIndex: idx,
-			StepCode: stepCode, Nodes: args.NodeIPs}
+			StepCode: stepCode, Nodes: stepNodeSpecs(kind, clusterNo, args), VersionRef: clusterVersion}
 		if adapter.Form() == delivery.FormLocal {
 			built, err := delivery.BuildStepArgs(config.Config.Delivery.ToolBin, kind, clusterNo, stepCode, args.NodeIPs)
 			if err != nil {

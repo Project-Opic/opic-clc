@@ -1,5 +1,5 @@
 model_type: BEHAVIOR
-version: '1.1'
+version: '1.1.1'
 domain: 集群域
 behaviors:
 - id: FUNC-01
@@ -63,7 +63,7 @@ behaviors:
   - field: ClusterTask.taskStatus
     setValue: "QUEUED（无槽位时排队，REF-14 / R-18）"
   - field: ClusterTask.executionPath
-    setValue: "登记值即真实执行位置（INV-32 / REF-16）；未显式选择时由集群 executorRef 推导（非空 = REMOTE_EXECUTOR，Q-71）"
+    setValue: "登记值即真实执行位置（INV-32 / REF-16）；未显式选择时由集群 executorRef 推导（非空 = REMOTE_EXECUTOR，O-IGN 侧 Q-71）"
   - field: Cluster.status
     setValue: "INSTALLING"
   - "同事务完成步骤展开：按 CLC_INSTALL_STEP 生成 01~07 七条步骤行（INV-45 / R-17）"
@@ -674,7 +674,7 @@ behaviors:
   - field: ClusterTask.taskStatus
     setValue: "QUEUED"
   - field: ClusterTask.executionPath
-    setValue: "继承集群登记事实：executorRef 非空 = REMOTE_EXECUTOR，否则 LOCAL（无人在场选链路，Q-71 / REF-16）"
+    setValue: "继承集群登记事实：executorRef 非空 = REMOTE_EXECUTOR，否则 LOCAL（无人在场选链路，O-IGN 侧 Q-71 / REF-16）"
   - field: Cluster.status
     setValue: "DESTROYING"
   - "销毁链由 R-07 承载：交付工具卸载 → 吊销本域证书（失败挂起重试）→ 级联清理引用台账 → 发布销毁事件 → DESTROYED"
@@ -929,7 +929,7 @@ behaviors:
   - "任务进入 RUNNING 且步骤行已展开（INV-45）"
   - "取得全局执行槽位（REF-14）；无槽位则任务保持 QUEUED 等待（R-18）"
   postconditions:
-  - "按当前序号取步骤 → 以参数数组直调交付工具命令面（不经 shell）→ 采集结论与日志游标 → 单步推进（INV-39）"
+  - "按当前序号取步骤 → 单步推进（INV-39）：LOCAL 链路以参数数组直调交付工具命令面（不经 shell）；REMOTE 链路按 R-19 组装登记事实经 O-IGN 门面受理，本域不持有命令面"
   - "步骤进入终态写判定依据（退出码 / 执行回显结论 / 远端回执）与结束时间（INV-38）"
   - "失败步骤按 R-14 回写任务与集群；超时按失败结论落步骤行（REF-15）"
   appliedRules:
@@ -946,6 +946,7 @@ behaviors:
   - REF-16
   - R-14
   - R-18
+  - R-19
   requiredPermissions: []
   syncTriggers: []
 - id: B-AUTO-11
