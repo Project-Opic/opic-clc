@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/config"
+	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/ontology"
 	"gitcode.com/opic-ontology/opic-techbase/internal/service/delivery"
 )
 
@@ -1463,6 +1464,73 @@ func TestPermissionSeedForDeliveryBehaviors(t *testing.T) {
 				WHERE r.code=? AND p.code=?`, role, pc)
 			if (n > 0) != expect {
 				t.Fatalf("m5 绑定不符:%s %s 期望绑定=%v,实际 %d 行", role, pc, expect, n)
+			}
+		}
+	}
+}
+
+// G3b 权限/角色/绑定必须由 m5 模型展开入库：m5 增了权限码种子必须跟着增（不许硬编码码数），
+// 且 EnsureSeed 可重复执行、与 goose 000006 种子迁移共存不撞 sys_role/sys_permission 的 UNIQUE。
+func TestSeedPermissionsDerivedFromM5Model(t *testing.T) {
+	requireDB(t)
+	reg := ontology.Load()
+	if err := EnsureSeed(); err != nil {
+		t.Fatalf("种子入库失败: %v", err)
+	}
+	if err := EnsureSeed(); err != nil {
+		t.Fatalf("种子二次执行不幂等: %v", err)
+	}
+	if n, want := countRows(t, `SELECT COUNT(*) FROM sys_permission`), int64(len(reg.Permissions)); n != want {
+		t.Fatalf("权限行数应等于 m5 permissions 全集: model=%d db=%d", want, n)
+	}
+	for code, p := range reg.Permissions {
+		ref := Str(p["targetRef"])
+		row := mustOne(t, `SELECT name, target_type, target_ref, data_scope FROM sys_permission WHERE code=?`, code)
+		if row == nil {
+			t.Fatalf("G3b:%s 未入库(m5 permissions)", code)
+		}
+		if Str(row["target_type"]) != Str(p["targetType"]) || Str(row["target_ref"]) != ref ||
+			Str(row["data_scope"]) != Str(p["dataScope"]) {
+			t.Fatalf("G3b:%s 口径不符: model(%s,%s,%s) db=%+v", code,
+				Str(p["targetType"]), ref, Str(p["dataScope"]), row)
+		}
+		b := reg.Behaviors[ref]
+		if b == nil {
+			t.Fatalf("G3b:%s 指向的 m2 行为 %s 不存在", code, ref)
+		}
+		if Str(row["name"]) != Str(b["name"]) {
+			t.Fatalf("G3b:%s 权限名应取 m2 行为名 %q,实际 %q", code, Str(b["name"]), Str(row["name"]))
+		}
+	}
+	if n, want := countRows(t, `SELECT COUNT(*) FROM sys_role`), int64(len(reg.Roles)+1); n != want {
+		t.Fatalf("角色行数应等于 m5 roles + admin 超管位: want=%d db=%d", want, n)
+	}
+	actual := map[string]map[string]bool{}
+	for _, r := range mustList(t, `
+		SELECT ro.code AS role_code, p.code AS perm_code FROM sys_role_permission rp
+		JOIN sys_role ro ON ro.id=rp.role_id JOIN sys_permission p ON p.id=rp.permission_id`) {
+		rc := Str(r["role_code"])
+		if actual[rc] == nil {
+			actual[rc] = map[string]bool{}
+		}
+		actual[rc][Str(r["perm_code"])] = true
+	}
+	for roleID, role := range reg.Roles {
+		want := map[string]bool{}
+		if list, ok := role["permissions"].([]any); ok {
+			for _, v := range list {
+				want[Str(v)] = true
+			}
+		}
+		got := actual[roleID]
+		for pc := range want {
+			if !got[pc] {
+				t.Fatalf("G3b:%s 缺绑定 %s(m5 roles[].permissions)", roleID, pc)
+			}
+		}
+		for pc := range got {
+			if !want[pc] {
+				t.Fatalf("G3b:%s 多绑 %s(模型里没有此权限码)", roleID, pc)
 			}
 		}
 	}

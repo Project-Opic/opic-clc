@@ -1,5 +1,5 @@
 model_type: BEHAVIOR
-version: '1.1.1'
+version: '1.2'
 domain: 集群域
 behaviors:
 - id: FUNC-01
@@ -19,9 +19,12 @@ behaviors:
   - INV-07
   - INV-08
   - INV-09
+  - INV-49
   - R-05
   - R-08
   - R-13
+  - R-20
+  - REF-04
   requiredPermissions:
   - PERM-FUNC-01
   syncTriggers: []
@@ -67,6 +70,8 @@ behaviors:
   - field: Cluster.status
     setValue: "INSTALLING"
   - "同事务完成步骤展开：按 CLC_INSTALL_STEP 生成 01~07 七条步骤行（INV-45 / R-17）"
+  - field: ClusterTask.stepMode
+    setValue: "创建瞬间落定的只读值：向导入口缺省 STEP、其余入口缺省 AUTO（= v1.1 既有连跑，一字不改），页内切换只是创建前的显式覆盖（REF-17 / INV-50）"
   appliedRules:
   - INV-28
   - INV-29
@@ -77,11 +82,14 @@ behaviors:
   - INV-46
   - INV-47
   - INV-48
+  - INV-50
   - REF-16
+  - REF-17
   - R-09
   - R-14
   - R-17
   - R-18
+  - R-20
   requiredPermissions:
   - PERM-FUNC-03
   syncTriggers: []
@@ -98,7 +106,9 @@ behaviors:
     setValue: "RETRY_INSTALL（续跑是新任务，INV-31）"
   - field: ClusterTask.taskStatus
     setValue: "QUEUED"
-  - "步骤展开：失败索引之前按序生成 SKIPPED 行并填跳过原因，索引起按序待执行（R-17 / INV-37）"
+  - "步骤展开：失败索引之前按序生成 SKIPPED 行并填跳过原因（R-17 / INV-37 / INV-38），索引起按序待执行"
+  - field: ClusterTask.stepMode
+    setValue: "按本任务自身创建入口取缺省（向导「重试本步」⇒ STEP，编排屏发起 ⇒ AUTO），不在旧任务行上开改写口子（REF-17 / INV-31）"
   appliedRules:
   - INV-03
   - INV-28
@@ -107,10 +117,13 @@ behaviors:
   - INV-31
   - INV-32
   - INV-37
+  - INV-38
   - INV-45
   - INV-46
   - INV-47
   - INV-48
+  - INV-50
+  - REF-17
   - R-09
   - R-14
   - R-17
@@ -775,6 +788,320 @@ behaviors:
   - PERM-FUNC-35
   syncTriggers: []
   queryReportRef: REP-13
+- id: FUNC-36
+  name: 集群模板列表查询
+  ownerEntity: AGG-CLC-08
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "过滤：状态 / 是否默认 / 关键字（模板名称）"
+  - "只出配方头（名称、交付版本引用、状态、默认位、节点组角色分布摘要）；参数行不进列表页 —— 默认值可能含敏感项，列表不展开"
+  postconditions: []
+  appliedRules:
+  - INV-51
+  - R-21
+  requiredPermissions:
+  - PERM-FUNC-36
+  syncTriggers: []
+  queryReportRef: REP-14
+- id: FUNC-37
+  name: 集群模板详情查询
+  ownerEntity: AGG-CLC-08
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "按模板编号读取：节点组 + 参数行全量 + sourceClusterRef 来源"
+  - "「被哪些集群用过」按需反查（与 R-22 删除保护同一条查询），不作常显字段"
+  postconditions: []
+  appliedRules:
+  - INV-51
+  - INV-52
+  - R-22
+  requiredPermissions:
+  - PERM-FUNC-37
+  syncTriggers: []
+  queryReportRef: REP-15
+- id: FUNC-38
+  name: 集群模板登记
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "模板名称未删除范围内唯一（字段级唯一约束，与 INV-01 同口径）"
+  - "填交付版本引用与 O-IGN 参数面标识；不解析、不复制、不校验对端字段行内容（R-21）"
+  - "节点组与参数行按 INV-52 的行约束保存即校验"
+  postconditions:
+  - field: ClusterTemplate.templateStatus
+    setValue: "DRAFT（保存即草稿，不自动启用）"
+  - "同事务写入两组子实体（模板节点组 / 模板参数行）"
+  appliedRules:
+  - INV-51
+  - INV-52
+  - R-21
+  requiredPermissions:
+  - PERM-FUNC-38
+  syncTriggers: []
+- id: FUNC-39
+  name: 模板整组编辑（节点组 + 参数行）
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "DRAFT / ENABLED / DISABLED 三态均可编辑；停用态编辑后仍是停用态，不自动回 DRAFT"
+  - "提交的是「一整组新行」，不做行级增量改写（INV-52 整组替换）"
+  postconditions:
+  - "节点组与参数行整组替换（INV-52）；模板头字段就地更新"
+  - "不触碰任何已建成集群、节点与参数（R-20 建成后不回写、不跟随）"
+  appliedRules:
+  - INV-51
+  - INV-52
+  - R-20
+  - R-21
+  requiredPermissions:
+  - PERM-FUNC-39
+  syncTriggers: []
+- id: FUNC-40
+  name: 模板启用 / 停用
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "DRAFT → ENABLED 需节点组非空且至少一个 MASTER（配方至少要能描述「谁是主控」）"
+  - "ENABLED → DISABLED 时若该项为默认项，须先撤销默认（INV-51）"
+  postconditions:
+  - field: ClusterTemplate.templateStatus
+    setValue: "ENABLED / DISABLED（迁移固定 DRAFT→ENABLED⇄DISABLED，INV-51）"
+  - "停用不回收、不改动任何集群引用（R-22）；DISABLED 项不可被向导实例化"
+  appliedRules:
+  - INV-49
+  - INV-51
+  - R-22
+  requiredPermissions:
+  - PERM-FUNC-40
+  syncTriggers: []
+- id: FUNC-41
+  name: 模板设为默认（取消原默认）
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "目标模板须处于 ENABLED（INV-51）"
+  - "平台级决定而非集群级动作，故档位与运行参数维护（FUNC-30）相同，只给平台运维管理员"
+  postconditions:
+  - "原子地「撤销原默认 + 置新默认」：isDefault 为真者全局至多一行（INV-51）"
+  - "生效面仅为创建向导第二步的预选（REF-04 既有口径的模板化延伸）：不改动任何既有集群、不改变实例化结果本身"
+  appliedRules:
+  - INV-51
+  - REF-04
+  requiredPermissions:
+  - PERM-FUNC-41
+  syncTriggers: []
+- id: FUNC-42
+  name: 模板软删除
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "反查未销毁集群的 templateRef：命中即拒绝并列出引用它的集群清单（R-22）"
+  - "默认项须先撤销默认位（INV-51）"
+  postconditions:
+  - "写删除标记、行保留（软删除为终态，无物理删除，INV-51）"
+  - "不改动任何集群的 templateRef —— 既有引用不失效（INV-49 只读语义）"
+  appliedRules:
+  - INV-49
+  - INV-51
+  - R-22
+  requiredPermissions:
+  - PERM-FUNC-42
+  syncTriggers: []
+- id: FUNC-43
+  name: 模板克隆（含从既有集群克隆为模板）
+  ownerEntity: AGG-CLC-08
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "两个来源：① 既有模板（改名 + 复制两组子实体）；② 既有集群（读版本引用 + 节点角色分布聚合 + 参数当前值生成一份新配方）"
+  - "不接收外部文本上传（ksk8s 式导入模板文件）—— 上传文本绕过全部行校验、把配方变成不透明大字段"
+  postconditions:
+  - field: ClusterTemplate.templateStatus
+    setValue: "DRAFT（克隆产物一律新登记一份，不复用来源状态）"
+  - "集群来源时写 sourceClusterRef 留痕；反向可读只有「集群 → 模板」一个方向，模板不回调集群（R-20）"
+  - "两组子实体按 INV-52 的行约束整组写入"
+  appliedRules:
+  - INV-49
+  - INV-52
+  - R-20
+  - R-21
+  requiredPermissions:
+  - PERM-FUNC-43
+  syncTriggers: []
+- id: FUNC-44
+  name: 向导步进执行与单步重试
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "任务以 stepMode = STEP 创建（向导入口缺省，REF-17；页内显式切连跑则落 AUTO）"
+  - "STEP 模式下只有队列中首个 PENDING 步骤可被派发；已 SUCCEEDED / SKIPPED 的步骤不得再次派发（INV-50）"
+  - "同集群存在运行中步骤 ⇒ 其余按钮置灰不可点，不给「排队中」误导态（R-23）；全局槽位占满仍按 REF-14 置 QUEUED"
+  - "步骤名与序次全部读交付步骤查询（FUNC-34）的数据行权威视图，界面不内置步骤清单"
+  postconditions:
+  - "对首个 PENDING 步骤按 B-AUTO-10 的单步下发循环派发后停下等人工；对 O-IGN 仍是一步一受理，R-19 的请求体口径一字不改"
+  - "单步重试 = 新建 RETRY_INSTALL 续跑任务（INV-31 任务行不可改写），已成功序号按 R-17 置 SKIPPED"
+  - "续跑任务的 stepMode 按其自身创建入口取缺省（向导上的「重试本步」⇒ STEP；编排屏发起的续跑仍为 v1.1 连跑，REF-17）"
+  appliedRules:
+  - INV-31
+  - INV-37
+  - INV-48
+  - INV-50
+  - REF-14
+  - REF-17
+  - R-14
+  - R-17
+  - R-18
+  - R-19
+  - R-23
+  requiredPermissions:
+  - PERM-FUNC-44
+  syncTriggers: []
+- id: FUNC-45
+  name: 向导跳步（跳过未执行步骤）
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "只作用于尚未执行（PENDING）的步骤；事由必填并写任务头 operationReason（R-24）"
+  - "界面须明示后果（列明跳过该步意味着哪一项配置未做、运行后可能缺件）"
+  postconditions:
+  - "被跳步骤置 SKIPPED 并填跳过原因、写结束时间与判定依据（INV-38；置为终态后不可回退，INV-41）"
+  - "后续失败归因不得写成「执行失败于该步」，须如实体现跳过事实（R-24）"
+  - "集群健康仍由 R-08 双源写入，不得为界面好看预先置健康（跳步可能使集群「运行但缺件」）"
+  appliedRules:
+  - INV-37
+  - INV-38
+  - INV-41
+  - INV-50
+  - R-08
+  - R-24
+  requiredPermissions:
+  - PERM-FUNC-45
+  syncTriggers: []
+- id: FUNC-46
+  name: 集群交付动作派发（生命周期台；当前唯一项 = 控制面证书续期）
+  ownerEntity: AGG-CLC-06
+  behaviorType: COMMAND
+  triggerType: USER_ACTION
+  preconditions:
+  - "动作集全部取 CLC_TASK_KIND 既有着陆（START / STOP / UPGRADE / BACKUP / RESTORE / CERT_RENEW），本条不新增类别值 —— 是既有派发口的显式登记"
+  - "生命周期状态合法性（INV-02）、同集群在途互斥（INV-48 / R-18）、执行链路在本部署实际可用（REF-16）"
+  - "高危动作（停止 / 恢复 / 销毁）二次确认 + 事由必填；销毁仍走唯一审批流 PROC-APP-01，其余高危动作不进流程引擎（走「确认 + 事由 + 留痕」）"
+  - "不新增跨中心同步探测：交付前置完备性判定由 FUNC-50 承载"
+  postconditions:
+  - field: ClusterTask.taskStatus
+    setValue: "QUEUED（单步动作 ⇒ 步骤展开为一行，R-17 / INV-45）"
+  - "stepMode 按创建入口取缺省（REF-17）；单步任务 STEP / AUTO 无差异"
+  - field: ClusterTask.operationReason
+    setValue: "高危动作必填的事由留痕（R-24）"
+  appliedRules:
+  - INV-02
+  - INV-28
+  - INV-29
+  - INV-30
+  - INV-31
+  - INV-32
+  - INV-45
+  - INV-46
+  - INV-47
+  - INV-48
+  - REF-05
+  - REF-16
+  - REF-17
+  - R-09
+  - R-14
+  - R-17
+  - R-18
+  - R-24
+  requiredPermissions:
+  - PERM-FUNC-46
+  syncTriggers: []
+- id: FUNC-47
+  name: 节点 SSH 登录标识复制
+  ownerEntity: AGG-CLC-02
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "展示口径固定为「登录用户@节点地址」拼接串（REF-18）；登录用户取平台配置的 SSH 全局变量口径，与 FUNC-01 第二步裸机模式同源"
+  - "零凭据出口：私钥 / 口令 / 口令指纹 / sshpass 式参数一律不在接口、界面、日志、报表与导出中出现（INV-08 的输出面延伸）"
+  - "对全部只读角色开放（含 CLC-ROLE-04）—— 与「kubeconfig 只出存放标识与获取方式」同档"
+  postconditions:
+  - "复制动作 = 纯前端剪贴板写入：不产生业务写入、不产生事件、复制行为不留痕（区别于 FUNC-49 原文视图的逐次留痕）"
+  appliedRules:
+  - INV-08
+  - REF-18
+  requiredPermissions:
+  - PERM-FUNC-47
+  syncTriggers: []
+  queryReportRef: REP-16
+- id: FUNC-48
+  name: 集群交付配置代理查看（字段级视图）
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "本域后端经既有交付门面代理读 O-IGN：同一令牌、不前端直连、不留副本、不落对象（R-25）"
+  - "只给读：覆写与校验的写口在 O-IGN 侧（其 FUNC-47 覆写保存 / FUNC-48 dry-run 校验），本域只给入口；本条所读的对端行为是其 FUNC-50 跨中心交付配置只读通道"
+  postconditions:
+  - "返回字段键 + 生效值 + 取值来源档（默认 / 模板 / 覆写 / 派生）：展示对端结论，本域不重算、不合并四层"
+  - "对端不可达 ⇒ 显式呈现「对端不可达」并保留跳转入口，不缓存旧内容冒充现状（REF-12 同源）"
+  appliedRules:
+  - INV-08
+  - REF-12
+  - R-25
+  requiredPermissions:
+  - PERM-FUNC-48
+  syncTriggers: []
+  queryReportRef: REP-17
+- id: FUNC-49
+  name: 交付配置原文代理只读视图
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "独立权限码：不随 FUNC-48 的结构化字段视图发牌附带，集群管理员需另行授权（R-25 的读侧结论）"
+  - "hosts / config.yaml 原文只读、不提供编辑态；要改字段走 O-IGN 的字段级覆写"
+  postconditions:
+  - "逐次留痕（谁在何时查看了哪个集群的哪一面原文）；不留副本、不写本域对象、不产生事件"
+  - "原文中的凭据类字段由对端在流出前完成掩码，本域不二次解析（INV-08）"
+  - "对端不可达口径同 FUNC-48：显式呈现、不缓存冒充"
+  appliedRules:
+  - INV-08
+  - REF-12
+  - R-25
+  requiredPermissions:
+  - PERM-FUNC-49
+  syncTriggers: []
+  queryReportRef: REP-18
+- id: FUNC-50
+  name: 交付前置完备性预检
+  ownerEntity: AGG-CLC-01
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "只读本域事实与既有降级结论，不新增跨中心同步探活（「引用是否还在」已由 FUNC-27 / B-AUTO-02 承载）"
+  postconditions:
+  - "即时判定项：节点清单非空且含 MASTER（与 FUNC-40 的启用校验同一配方判据）、引用齐备或显式 legacy、执行链路已登记且可用（REF-16）、stepMode 已定（INV-50 / REF-17）、无与派生冲突的覆写（R-04）"
+  - "结论是即时提示、不拦截提交（拦截仍由各 INV / R 在写入瞬间执行）；不写本域对象、不产生事件"
+  appliedRules:
+  - INV-48
+  - INV-50
+  - REF-16
+  - REF-17
+  - R-04
+  requiredPermissions:
+  - PERM-FUNC-50
+  syncTriggers: []
+  queryReportRef: null
+  reportException: "第五部分 5.16 登记的唯一显式例外：交付前置预检是「一次判定 + 一份即时提示」，无留存价值也无列表形态，故不建报表 —— 是 19 个查询功能点 ↔ 18 张报表之间唯一的一处不配对"
 - id: B-AUTO-01
   name: 健康探活调度
   ownerEntity: AGG-CLC-07

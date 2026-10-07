@@ -1,5 +1,5 @@
 model_type: FLOW
-version: '1.1.1'
+version: '1.2'
 domain: 集群域
 flows:
 - id: FLOW-PROC-01
@@ -706,6 +706,274 @@ flows:
   - activityId: A25
     name: 取消终局（取消不是回滚）
     activityType: END
+    nextActivities: []
+- id: FLOW-PROC-07
+  name: 向导式装机与生命周期动作
+  flowType: COLLABORATION
+  description: 发起节奏与入口层 —— 何时发起下一步、跳过谁、派发哪个动作、动手前看到什么（v1.2 新增）。执行内核仍是 PROC-06（步骤 → 任务 → 集群的三段回写，本批一字未改），本流与其同 PROC-01 /
+    PROC-06 的关系：被复用、不重复描述回写。
+  businessObjectRefs:
+  - AGG-CLC-01
+  - AGG-CLC-02
+  - AGG-CLC-06
+  - AGG-CLC-08
+  roleRefs:
+  - CLC-ROLE-01
+  - CLC-ROLE-02
+  - CLC-ROLE-03
+  trigger:
+    triggerType: MANUAL
+  preconditions:
+  - '集群管理员在向导页发起步进 / 跳步 / 单步重试，或在生命周期台派发启停 / 升级 / 备份恢复 / 证书续期'
+  - '模板预选只读：ClusterTemplate 仅作创建的输入配方（R-20），代理读的交付配置不落本域对象（R-25）'
+  postconditions:
+  - '本流止于发起与等待态：STEP 模式的自然终态是「停在某个 PENDING 上」，任务终态仍由 INV-29 判定，不存在半途无人认领的僵尸任务（占位由 R-18、失联由 B-AUTO-11 落 STALLED）'
+  startActivity: A01
+  endActivities:
+  - A26
+  activities:
+  - activityId: A01
+    name: 进入向导 / 生命周期台
+    activityType: START
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    nextActivities:
+    - A02
+  - activityId: A02
+    name: 交付前置完备性预检（即时提示不拦截）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-50
+    ruleRef: INV-50
+    nextActivities:
+    - A03
+  - activityId: A03
+    name: 前置是否齐备（拦截仍由各 INV / R 在写入瞬间执行）
+    activityType: GATEWAY
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: REF-16
+    branches:
+    - branchName: 存在缺项
+      conditionExpression: 节点 / MASTER / 引用 / 链路 / 步进 / 覆写冲突任一项不满足
+      targetActivity: A04
+    - branchName: 齐备
+      isDefault: true
+      targetActivity: A05
+  - activityId: A04
+    name: 如实列出缺项并回到入口（不拦截、不改数据）
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    nextActivities:
+    - A01
+  - activityId: A05
+    name: 代理读交付配置字段视图（同一令牌、不前端直连、不留副本、不重算来源）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-48
+    ruleRef: R-25
+    nextActivities:
+    - A06
+  - activityId: A06
+    name: 交付配置原文只读视图（独立发牌 + 逐次留痕，审计员在本域第一次拥有由他发起的连线）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-03
+    behaviorRef: FUNC-49
+    ruleRef: R-25
+    nextActivities:
+    - A07
+  - activityId: A07
+    name: 创建前的会话态选择：步进 or 连跑（向导入口缺省 STEP，页内切换只覆盖本入口缺省）
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: REF-17
+    nextActivities:
+    - A08
+  - activityId: A08
+    name: 创建任务：stepMode 落定并只读（向导发起 = FUNC-03；生命周期台派发 = FUNC-46 的既有派发口）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-03
+    ruleRef: INV-50
+    nextActivities:
+    - A09
+  - activityId: A09
+    name: 同事务步骤展开（无步骤行的任务不得执行）
+    activityType: SYSTEM_TASK
+    roleRef:
+    behaviorRef: B-AUTO-10
+    ruleRef: INV-45
+    nextActivities:
+    - A10
+  - activityId: A10
+    name: 取队列中首个 PENDING 步骤派发（其余派发即拒绝）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-44
+    ruleRef: INV-50
+    nextActivities:
+    - A11
+  - activityId: A11
+    name: 交 PROC-06 执行内核（对 O-IGN 仍是一步一受理，R-19 请求体口径一字不改）
+    activityType: SUB_FLOW_CALL
+    roleRef:
+    behaviorRef: B-AUTO-10
+    subFlowRef: FLOW-PROC-06
+    ruleRef: R-23
+    nextActivities:
+    - A12
+  - activityId: A12
+    name: 本步结论（序号 / 状态 / 判定依据全部读数据行，界面不内置步骤清单）
+    activityType: GATEWAY
+    roleRef:
+    behaviorRef:
+    ruleRef: INV-39
+    branches:
+    - branchName: 本步成功
+      conditionExpression: step.status == 'SUCCEEDED'
+      targetActivity: A13
+    - branchName: 本步失败
+      conditionExpression: step.status == 'FAILED'
+      targetActivity: A16
+    - branchName: 执行失联
+      isDefault: true
+      targetActivity: A24
+  - activityId: A13
+    name: 停在人工确认点（STEP 的自然等待态；同集群有运行中步骤时其余按钮置灰不谎报）
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: R-23
+    nextActivities:
+    - A14
+  - activityId: A14
+    name: 成功后的走向
+    activityType: GATEWAY
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: INV-50
+    branches:
+    - branchName: 执行下一步
+      isDefault: true
+      targetActivity: A10
+    - branchName: 跳过未执行步骤
+      conditionExpression: 管理员显式跳步并填写事由
+      targetActivity: A15
+    - branchName: 结束本次步进
+      conditionExpression: 任务停在当前进度（STEP 模式自然终态）
+      targetActivity: A20
+  - activityId: A15
+    name: 跳步：事由必填 + 被跳步骤 SKIPPED + 后果明示
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-45
+    ruleRef: R-24
+    nextActivities:
+    - A10
+  - activityId: A16
+    name: 步骤 FAILED + 集群置「安装失败」+ 失败索引双写
+    activityType: BEHAVIOR_CALL
+    roleRef:
+    behaviorRef: B-AUTO-10
+    ruleRef: R-14
+    nextActivities:
+    - A17
+  - activityId: A17
+    name: 失败后的人工出口
+    activityType: GATEWAY
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: INV-31
+    branches:
+    - branchName: 重试本步
+      isDefault: true
+      targetActivity: A18
+    - branchName: 跳步继续
+      conditionExpression: 管理员选择跳过该步（事由必填）
+      targetActivity: A15
+    - branchName: 取消任务
+      conditionExpression: 仅 QUEUED / RUNNING 可取消；DESTROY 不可取消
+      targetActivity: A19
+  - activityId: A18
+    name: 重试本步 = 新建续跑任务（已成功序号置 SKIPPED，stepMode 按本任务自身创建入口取缺省）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-04
+    ruleRef: REF-17
+    nextActivities:
+    - A10
+  - activityId: A19
+    name: 取消执行中任务（走 PROC-06 的取消出口：取消不是回滚）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-33
+    ruleRef: R-15
+    nextActivities:
+    - A26
+  - activityId: A20
+    name: 任务停在当前进度：集群如实保留状态（不为界面好看预置健康）
+    activityType: TASK
+    roleRef:
+    behaviorRef:
+    ruleRef: R-08
+    nextActivities:
+    - A21
+  - activityId: A21
+    name: 生命周期台派发下一个动作（启停 / 升级 / 备份恢复 / 证书续期，全部取 CLC_TASK_KIND 既有着陆）
+    activityType: BEHAVIOR_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-46
+    ruleRef: INV-02
+    nextActivities:
+    - A22
+  - activityId: A22
+    name: 派发后是否需要二次确认或审批
+    activityType: GATEWAY
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: R-24
+    branches:
+    - branchName: 高危动作（停止 / 恢复）
+      conditionExpression: taskKind in ('STOP','RESTORE')
+      targetActivity: A23
+    - branchName: 销毁（唯一审批流，强制不免审批）
+      conditionExpression: taskKind == 'DESTROY'
+      targetActivity: A25
+    - branchName: 一般动作
+      isDefault: true
+      targetActivity: A08
+  - activityId: A23
+    name: 二次确认 + 事由必填（operationReason 留痕，允许做但代价留在数据上）
+    activityType: USER_TASK
+    roleRef: CLC-ROLE-01
+    behaviorRef:
+    ruleRef: R-24
+    nextActivities:
+    - A08
+  - activityId: A24
+    name: 执行失联挂起 STALLED（恢复路径唯一 = 人工显式重试或换机，绝不静默切换执行位置）
+    activityType: SYSTEM_TASK
+    roleRef:
+    behaviorRef: B-AUTO-11
+    ruleRef: INV-32
+    nextActivities:
+    - A17
+  - activityId: A25
+    name: 必经 PROC-APP-01 集群销毁审批（单级，提交与裁决角色互斥）
+    activityType: SUB_FLOW_CALL
+    roleRef: CLC-ROLE-01
+    behaviorRef: FUNC-05
+    subFlowRef: FLOW-PROC-APP-01
+    ruleRef: R-10
+    nextActivities:
+    - A26
+  - activityId: A26
+    name: 本流止于发起与等待态：三段回写由 PROC-06 承载（R-14 / R-15 / R-16 / R-17 / R-18）
+    activityType: END
+    roleRef:
+    behaviorRef:
     nextActivities: []
 - id: FLOW-PROC-APP-01
   name: 集群销毁审批（单级）

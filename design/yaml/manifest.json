@@ -1,6 +1,6 @@
 {
   "model_type": "MANIFEST",
-  "version": "1.1.1",
+  "version": "1.2",
   "domain": "集群域",
   "project": "opic-clc",
   "source_requirements": "需求规格说明书-OPIC-集群域.md",

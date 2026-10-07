@@ -1,5 +1,5 @@
 model_type: REPORT
-version: '1.1'
+version: '1.2'
 domain: 集群域
 query_reports:
 - id: REP-01
@@ -930,3 +930,421 @@ query_reports:
   reportOptions: null
   version: '1.1'
   caliberNote: 口径注记（v1.1，口径 8 的本域落点）：禁整表拉取 —— 只按游标取增量，接口不提供无游标整表出口；本地链路内容来自本域交付日志表，远程链路本区显示「原始日志在 O-IGN 侧」+ 跳转标识、不留副本不留占位假数据（REF-12）；保留期外显式提示「已按 REF-15 清理」而非空结果（INV-44）；级别为 CLC_LOG_LEVEL 三类
+- id: REP-14
+  name: 集群模板列表
+  alias: rep14
+  objectType: LIST_QUERY
+  description: 模板配方头列表（v1.2 新增，绑定 FUNC-36）。CLC-ROLE-01 / 02 可维护、03 / 04 按权限只读；已软删默认可见可筛（口径 3 家族）。
+  behaviorRef: FUNC-36
+  sourceObjects:
+  - objectRef: AGG-CLC-08
+    alias: cluster_template
+    primary: true
+    sourceNote: 列表；角色分布摘要由模板节点组即时聚合，不落库字段
+  joins: []
+  parameters:
+  - name: p1
+    label: 模板状态
+    dataType: String
+    required: false
+    allowedOperators:
+    - EQ
+    sourceField: templateStatus
+  - name: p2
+    label: 是否默认
+    dataType: Boolean
+    required: false
+    allowedOperators:
+    - EQ
+    sourceField: isDefault
+  - name: p3
+    label: 关键字（名称 / 说明）
+    dataType: String
+    required: false
+    allowedOperators:
+    - LIKE
+    sourceField: name
+  conditions:
+  - conditionId: C01
+    leftExpression: templateStatus
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  - conditionId: C02
+    leftExpression: isDefault
+    operator: EQ
+    parameterRef: p2
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  - conditionId: C03
+    leftExpression: name
+    operator: LIKE
+    parameterRef: p3
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  resultColumns:
+  - name: c1
+    label: 模板编号
+    dataType: String
+    sourceExpression: template_no
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 模板名称
+    dataType: String
+    sourceExpression: name
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 说明
+    dataType: String
+    sourceExpression: description
+    aggregateFunction: NONE
+    sortable: false
+  - name: c4
+    label: 交付版本引用
+    dataType: String
+    sourceExpression: version_ref
+    aggregateFunction: NONE
+    sortable: false
+  - name: c5
+    label: 角色分布摘要（如 MASTER×3 + WORKER×5）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c6
+    label: 状态
+    dataType: String
+    sourceExpression: template_status
+    aggregateFunction: NONE
+    sortable: true
+  - name: c7
+    label: 默认标记
+    dataType: Boolean
+    sourceExpression: is_default
+    aggregateFunction: NONE
+    sortable: true
+  - name: c8
+    label: 创建人
+    dataType: String
+    sourceExpression: created_by
+    aggregateFunction: NONE
+    sortable: false
+  - name: c9
+    label: 登记 / 更新时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  groupBy: []
+  having: []
+  orderBy:
+  - c1
+  pagination:
+    enabled: true
+    defaultPageSize: 20
+    maxPageSize: 100
+  reportOptions: null
+  version: '1.2'
+  caliberNote: 口径注记（v1.2，口径 1 的编目侧落点）：参数默认值不进列表页（默认值可能含敏感项，列表不展开，只在 REP-15 详情按权限呈现）；已软删默认可见可筛；默认标记全局唯一、至多一行有值（INV-51）
+- id: REP-15
+  name: 集群模板详情
+  alias: rep15
+  objectType: STATISTICS
+  description: 模板明细（主从）：模板头 ｜ 节点组表 ｜ 参数默认行表 ｜ 来源集群（v1.2 新增，绑定 FUNC-37）。
+  behaviorRef: FUNC-37
+  sourceObjects:
+  - objectRef: AGG-CLC-08
+    alias: cluster_template
+    primary: true
+    sourceNote: 明细（主从）；从表为模板节点组（clc_template_node_group）与模板参数行（clc_template_param）
+  joins: []
+  parameters:
+  - name: p1
+    label: 模板编号
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: templateNo
+  conditions:
+  - conditionId: C01
+    leftExpression: templateNo
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  resultColumns:
+  - name: c1
+    label: 分组名（节点组从表）
+    dataType: String
+    sourceExpression: group_name
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 节点角色
+    dataType: String
+    sourceExpression: node_role
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 期望数量
+    dataType: Integer
+    sourceExpression: expected_count
+    aggregateFunction: NONE
+    sortable: true
+  - name: c4
+    label: 参数键（参数行从表）
+    dataType: String
+    sourceExpression: param_key
+    aggregateFunction: NONE
+    sortable: true
+  - name: c5
+    label: 参数默认值
+    dataType: String
+    sourceExpression: param_value
+    aggregateFunction: NONE
+    sortable: false
+  - name: c6
+    label: 参数说明
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c7
+    label: O-IGN 参数面引用（只出标识与跳转）
+    dataType: String
+    sourceExpression: param_template_ref
+    aggregateFunction: NONE
+    sortable: false
+  - name: c8
+    label: 来源集群引用（sourceClusterRef 跳转）
+    dataType: String
+    sourceExpression: source_cluster_ref
+    aggregateFunction: NONE
+    sortable: false
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: true
+    defaultPageSize: 50
+    maxPageSize: 200
+  reportOptions: null
+  version: '1.2'
+  caliberNote: 口径注记（v1.2）：O-IGN 参数面引用只出标识与跳转、不出字段行（R-21 的报表落点：本域没有那份内容）；「被哪些集群引用」不作常显列，删除保护触发时按需反查并整屏列出（R-22）—— 常显即等于把关系表读成第二处真相；模板内容导出不设二次确认（不含现场事实与凭据，与快照导出不同档，口径 5 家族）
+- id: REP-16
+  name: 节点登录标识
+  alias: rep16
+  objectType: LIST_QUERY
+  description: 节点 SSH 登录标识的精简列表（v1.2 新增，绑定 FUNC-47）；全部角色含 CLC-ROLE-04 可读。
+  behaviorRef: FUNC-47
+  sourceObjects:
+  - objectRef: AGG-CLC-02
+    alias: cluster_node
+    primary: true
+    sourceNote: 精简列表
+  joins: []
+  parameters:
+  - name: p1
+    label: 集群
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: clusterRef
+  conditions:
+  - conditionId: C01
+    leftExpression: clusterRef
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  resultColumns:
+  - name: c1
+    label: 节点编号
+    dataType: String
+    sourceExpression: node_no
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 节点地址
+    dataType: String
+    sourceExpression: ip_address
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 登录标识（用户@地址）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c4
+    label: 复制入口
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: true
+    defaultPageSize: 50
+    maxPageSize: 200
+  reportOptions: null
+  version: '1.2'
+  caliberNote: 口径注记（v1.2）：零凭据出口（REF-18 / 口径 1）—— 私钥、口令、口令指纹、sshpass 式参数一律不出现在接口 / 界面 / 日志 / 报表 / 导出；复制不留痕（与 REP-18 原文视图的逐次留痕刻意不同档，登录标识本就是运维常识，逐次留痕会把审计面淹没有效信息）；地址为人工接管值时同屏显示接管注记（R-03）
+- id: REP-17
+  name: 交付配置代理视图
+  alias: rep17
+  objectType: STATISTICS
+  description: 经本域后端代理读 O-IGN 集群交付配置的结构化字段视图（v1.2 新增，绑定 FUNC-48）；CLC-ROLE-01 / 03。
+  behaviorRef: FUNC-48
+  sourceObjects:
+  - objectRef: EXT-EXTERNAL
+    alias: ign_cluster_config
+    primary: true
+    sourceNote: 明细（跨中心只读）；内容由 O-IGN 承载，本域不落对象、不留副本（R-25）
+  joins: []
+  parameters:
+  - name: p1
+    label: 集群
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: clusterNo
+  conditions:
+  - conditionId: C01
+    leftExpression: clusterNo
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  resultColumns:
+  - name: c1
+    label: 字段键
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 生效值
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c3
+    label: 取值来源档（默认 / 模板 / 覆写 / 派生）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c4
+    label: 是否待同步
+    dataType: Boolean
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c5
+    label: 对端更新时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: true
+    defaultPageSize: 50
+    maxPageSize: 200
+  reportOptions: null
+  version: '1.2'
+  caliberNote: 口径注记（v1.2，第九条报表级口径的落点）：本域不重算来源、不合并四层（权威在 O-IGN，R-25 + 口径 9）；不留副本、不缓存；对端不可达 ⇒ 显式呈现不可达 + 跳转入口，不拿旧值冒充现状；只读，覆写与校验一律跳 O-IGN 侧完成（其 FUNC-44 / 46）
+- id: REP-18
+  name: 交付配置原文只读视图
+  alias: rep18
+  objectType: STATISTICS
+  description: hosts / config.yaml 的原文只读视图（v1.2 新增，绑定 FUNC-49）；CLC-ROLE-03 默认发牌、CLC-ROLE-01 需另行授权，逐次留痕。
+  behaviorRef: FUNC-49
+  sourceObjects:
+  - objectRef: EXT-EXTERNAL
+    alias: ign_config_raw
+    primary: true
+    sourceNote: 明细（原文只读）；原文经本域后端代理取自 O-IGN，不落本域对象（R-25）
+  joins: []
+  parameters:
+  - name: p1
+    label: 集群
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: clusterNo
+  - name: p2
+    label: 文件面（hosts / config.yaml）
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: fileKind
+  conditions:
+  - conditionId: C01
+    leftExpression: clusterNo
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  - conditionId: C02
+    leftExpression: fileKind
+    operator: EQ
+    parameterRef: p2
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  resultColumns:
+  - name: c1
+    label: 文件面（hosts / config.yaml）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 原文（对端流出前已完成掩码）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c3
+    label: 对端版本标识
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c4
+    label: 读取时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: false
+    defaultPageSize: 0
+    maxPageSize: 0
+  reportOptions: null
+  version: '1.2'
+  caliberNote: 口径注记（v1.2）：无编辑态（1.2.2 范围外第 9 条，要改字段走 O-IGN 的字段级覆写）；本域不二次解析掩码串、不据原文做判定（口径 9）；每次读留痕（谁、何时、哪个集群、哪个文件面）—— 与 REP-16 登录标识的「不留痕」刻意分档；不可达时不显示历史原文

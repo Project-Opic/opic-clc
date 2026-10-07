@@ -30,6 +30,7 @@ const (
 	NoPrefixSnapshot = "SNP"
 	NoPrefixTask     = "TSK"
 	NoPrefixProbe    = "PRB"
+	NoPrefixTemplate = "TPL"
 )
 
 // genBizNo 生成「{类型码}-{YYYYMMDD}-{4 位流水}」业务编号(与 INSERT 同事务调用)。

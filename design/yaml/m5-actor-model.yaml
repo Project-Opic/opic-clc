@@ -1,5 +1,5 @@
 model_type: ACTOR
-version: '1.1'
+version: '1.2'
 domain: 集群域
 actors:
 - actorId: ACTOR-CLC-ROLE-01
@@ -62,6 +62,20 @@ roles:
   - PERM-FUNC-33
   - PERM-FUNC-34
   - PERM-FUNC-35
+  - PERM-FUNC-36
+  - PERM-FUNC-37
+  - PERM-FUNC-38
+  - PERM-FUNC-39
+  - PERM-FUNC-40
+  - PERM-FUNC-42
+  - PERM-FUNC-43
+  - PERM-FUNC-44
+  - PERM-FUNC-45
+  - PERM-FUNC-46
+  - PERM-FUNC-47
+  - PERM-FUNC-48
+  - PERM-FUNC-49
+  - PERM-FUNC-50
 - roleId: CLC-ROLE-02
   name: 平台运维管理员
   permissions:
@@ -80,6 +94,10 @@ roles:
   - PERM-FUNC-32
   - PERM-FUNC-34
   - PERM-FUNC-35
+  - PERM-FUNC-36
+  - PERM-FUNC-37
+  - PERM-FUNC-41
+  - PERM-FUNC-47
 - roleId: CLC-ROLE-03
   name: 集群审计员
   permissions:
@@ -95,6 +113,11 @@ roles:
   - PERM-FUNC-29
   - PERM-FUNC-34
   - PERM-FUNC-35
+  - PERM-FUNC-36
+  - PERM-FUNC-37
+  - PERM-FUNC-47
+  - PERM-FUNC-48
+  - PERM-FUNC-49
 - roleId: CLC-ROLE-04
   name: 集群只读用户
   permissions:
@@ -104,6 +127,7 @@ roles:
   - PERM-FUNC-26
   - PERM-FUNC-27
   - PERM-FUNC-29
+  - PERM-FUNC-47
 - roleId: CLC-ROLE-05
   name: 下游能力中心
   permissions:
@@ -248,4 +272,65 @@ permissions:
 - permissionId: PERM-FUNC-35
   targetType: BEHAVIOR
   targetRef: FUNC-35
+  dataScope: ALL
+- permissionId: PERM-FUNC-36
+  targetType: BEHAVIOR
+  targetRef: FUNC-36
+  dataScope: ALL
+- permissionId: PERM-FUNC-37
+  targetType: BEHAVIOR
+  targetRef: FUNC-37
+  dataScope: ALL
+- permissionId: PERM-FUNC-38
+  targetType: BEHAVIOR
+  targetRef: FUNC-38
+  dataScope: ALL
+- permissionId: PERM-FUNC-39
+  targetType: BEHAVIOR
+  targetRef: FUNC-39
+  dataScope: ALL
+- permissionId: PERM-FUNC-40
+  targetType: BEHAVIOR
+  targetRef: FUNC-40
+  dataScope: ALL
+- permissionId: PERM-FUNC-41
+  targetType: BEHAVIOR
+  targetRef: FUNC-41
+  dataScope: ALL
+- permissionId: PERM-FUNC-42
+  targetType: BEHAVIOR
+  targetRef: FUNC-42
+  dataScope: ALL
+- permissionId: PERM-FUNC-43
+  targetType: BEHAVIOR
+  targetRef: FUNC-43
+  dataScope: ALL
+- permissionId: PERM-FUNC-44
+  targetType: BEHAVIOR
+  targetRef: FUNC-44
+  dataScope: ALL
+- permissionId: PERM-FUNC-45
+  targetType: BEHAVIOR
+  targetRef: FUNC-45
+  dataScope: ALL
+- permissionId: PERM-FUNC-46
+  targetType: BEHAVIOR
+  targetRef: FUNC-46
+  dataScope: ALL
+- permissionId: PERM-FUNC-47
+  targetType: BEHAVIOR
+  targetRef: FUNC-47
+  dataScope: ALL
+- permissionId: PERM-FUNC-48
+  targetType: BEHAVIOR
+  targetRef: FUNC-48
+  dataScope: ALL
+- permissionId: PERM-FUNC-49
+  targetType: BEHAVIOR
+  targetRef: FUNC-49
+  dataScope: ALL
+  note: 原文只读视图独立发牌：不随 PERM-FUNC-48（字段级视图）附带，CLC-ROLE-01 需另行授权（R-25 读侧结论 / 8.6 第 20 项）
+- permissionId: PERM-FUNC-50
+  targetType: BEHAVIOR
+  targetRef: FUNC-50
   dataScope: ALL

@@ -1,5 +1,5 @@
 model_type: UI
-version: '1.1'
+version: '1.2'
 domain: 集群域
 application:
   name: OPIC-集群域
@@ -13,9 +13,15 @@ application:
     - menuId: menu-clc-node
       name: 节点管理
       screenRef: frmClcNode
+    - menuId: menu-clc-template
+      name: 集群模板
+      screenRef: frmClcTemplate
     - menuId: menu-clc-orch
       name: 交付编排
       screenRef: frmClcOrch
+    - menuId: menu-clc-wizard
+      name: 装机向导
+      screenRef: frmClcWizard
     - menuId: menu-clc-ref
       name: 引用与参数
       screenRef: frmClcRef
@@ -198,6 +204,22 @@ screens:
     io: I
     required: false
     dataBinding: ''
+  - id: el12
+    type: BUTTON
+    label: 复制登录标识（行内按钮，v1.2）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 只复制「用户 + 地址」两个字段拼接结果，口令/私钥零出口（REF-18 / 9.8.1 第 ⑤ 条）
+  - id: el13
+    type: TEXT
+    label: 登录标识（行内只读，点按复制时才出）
+    io: O
+    required: false
+    dataBinding: ClusterNode
+    role: QUERY
+    dataSource: REP-16
+    sourceNote: 不随清单一并下发，逐次点按取数（9.9 第 ③ 条）
   actions:
   - actionId: act-FUNC-06
     name: 添加节点
@@ -223,6 +245,12 @@ screens:
     behaviorRef: FUNC-21
     permissionRef:
     - PERM-FUNC-21
+  - actionId: act-FUNC-47
+    name: 节点登录标识查看（逐次点按）
+    actionType: QUERY
+    behaviorRef: FUNC-47
+    permissionRef:
+    - PERM-FUNC-47
 - screenId: frmClcOrch
   name: 编排操作台
   screenType: MASTER_DETAIL_FORM
@@ -763,6 +791,350 @@ screens:
     behaviorRef: FUNC-30
     permissionRef:
     - PERM-FUNC-30
+- screenId: frmClcTemplate
+  name: 集群模板台
+  screenType: MASTER_DETAIL_FORM
+  layout: 主从表维护形态：主表 = 模板清单（REP-14），从表 = 节点组页签 + 参数行页签（整组编辑，REP-15）；默认状态筛「草稿 + 已启用」、默认行置顶高亮、未选中主行时从表给「请先选择模板」而非空表（9.8.6）
+  elements:
+  - id: el01
+    type: SELECT
+    label: 模板状态（筛选）
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.templateStatus
+    role: QUERY
+    sourceNote: 字典 CLC_TEMPLATE_STATE；「已软删」需显式勾选才出（口径 3 家族）
+  - id: el02
+    type: SELECT
+    label: 是否默认（筛选）
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.isDefault
+    role: QUERY
+    sourceNote: 至多一行有值（INV-51）
+  - id: el03
+    type: TEXTBOX
+    label: 关键字（筛选）
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.name
+    role: QUERY
+    sourceNote: 只匹配名称 / 说明，不匹配参数值内容（避免把模板当检索库）
+  - id: el04
+    type: GRID
+    label: 模板清单（主表）
+    io: O
+    required: false
+    dataBinding: ClusterTemplate
+    dataSource: REP-14
+    sourceNote: 只出配方头 + 角色分布摘要；参数默认值不进列表页
+  - id: el05
+    type: TEXTBOX
+    label: 模板名称
+    io: I
+    required: true
+    dataBinding: ClusterTemplate.name
+    sourceNote: 未删除范围内唯一（字段级唯一约束，与 INV-01 同口径）
+  - id: el06
+    type: TEXTBOX
+    label: 说明
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.description
+  - id: el07
+    type: SELECT
+    label: 交付版本引用
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.versionRef
+    sourceNote: 只出 O-IGN 侧标识、不校验内容（R-21）；模板内不含命令与配置文本
+  - id: el08
+    type: SELECT
+    label: 参数面模板引用
+    io: I
+    required: false
+    dataBinding: ClusterTemplate.paramTemplateRef
+    sourceNote: 只透传标识，本域不复制字段行（R-21）
+  - id: el09
+    type: GRID
+    label: 节点组（可编辑从表页签）
+    io: I
+    required: true
+    dataBinding: TemplateNodeGroup
+    dataSource: REP-15
+    sourceNote: 同角色至多一行、groupName 组内唯一、数量 ≥1（INV-52）；无地址 / 无凭据列
+  - id: el10
+    type: GRID
+    label: 参数默认行（可编辑从表页签）
+    io: I
+    required: false
+    dataBinding: TemplateParamLine
+    dataSource: REP-15
+    sourceNote: paramKey 模板内唯一；键不建字典（7.3 第 ① 处）；敏感值不整页展开
+  - id: el11
+    type: BUTTON
+    label: 登记模板（工具栏按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el12
+    type: BUTTON
+    label: 整组保存（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 提交「新的一组行」整组替换（INV-52）；保存前弹层给出替换前后行数差异
+  - id: el13
+    type: BUTTON
+    label: 启用 / 停用（行内按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el14
+    type: BUTTON
+    label: 设为默认（行内按钮，仅 CLC-ROLE-02 渲染）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el15
+    type: BUTTON
+    label: 软删除（行内按钮）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 无物理删除入口
+  - id: el16
+    type: GRID
+    label: 命中引用反查弹层（只读列表 + 处置单选）
+    io: O
+    required: false
+    dataBinding: Cluster.templateRef
+    sourceNote: 列出引用集群清单；处置只两选（改为停用 / 取消操作），不提供「解除集群引用」（INV-49 / R-22）
+  - id: el17
+    type: BUTTON
+    label: 从既有集群存为模板（工具栏按钮）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 读集群当前节点组与参数行做初值，不带地址 / 凭据（2.11 ⑤）
+  - id: el18
+    type: TEXT
+    label: 来源集群引用（建成后只读）
+    io: O
+    required: false
+    dataBinding: ClusterTemplate.sourceClusterRef
+  actions:
+  - actionId: act-FUNC-36
+    name: 集群模板列表查询
+    actionType: QUERY
+    behaviorRef: FUNC-36
+    permissionRef:
+    - PERM-FUNC-36
+  - actionId: act-FUNC-37
+    name: 集群模板详情查询
+    actionType: QUERY
+    behaviorRef: FUNC-37
+    permissionRef:
+    - PERM-FUNC-37
+  - actionId: act-FUNC-38
+    name: 集群模板登记
+    actionType: OTHER
+    behaviorRef: FUNC-38
+    permissionRef:
+    - PERM-FUNC-38
+  - actionId: act-FUNC-39
+    name: 模板整组编辑（节点组 + 参数行）
+    actionType: OTHER
+    behaviorRef: FUNC-39
+    permissionRef:
+    - PERM-FUNC-39
+  - actionId: act-FUNC-40
+    name: 模板启用 / 停用
+    actionType: OTHER
+    behaviorRef: FUNC-40
+    permissionRef:
+    - PERM-FUNC-40
+  - actionId: act-FUNC-41
+    name: 模板设为默认
+    actionType: OTHER
+    behaviorRef: FUNC-41
+    permissionRef:
+    - PERM-FUNC-41
+  - actionId: act-FUNC-42
+    name: 模板软删除
+    actionType: DRAFT
+    behaviorRef: FUNC-42
+    permissionRef:
+    - PERM-FUNC-42
+  - actionId: act-FUNC-43
+    name: 模板克隆（含从既有集群克隆为模板）
+    actionType: OTHER
+    behaviorRef: FUNC-43
+    permissionRef:
+    - PERM-FUNC-43
+- screenId: frmClcWizard
+  name: 装机向导与生命周期台
+  screenType: MASTER_DETAIL_FORM
+  layout: 主从表维护形态：顶部集群选择 + 完备性预检条（不拦截），主区七段步进器（行集合完全来自 REP-12 数据行，界面不内置清单）+ 实时日志面板（REP-13 游标流式追加，上滑暂停跟随），右侧页签依次为配置（代理字段视图）/ 生命周期台 / 原文只读（独立权限码）
+  elements:
+  - id: el01
+    type: SELECT
+    label: 集群
+    io: I
+    required: true
+    dataBinding: Cluster
+    role: QUERY
+    sourceNote: 非终态集群；进入即锁链路徽章（执行位置只读，INV-32）
+  - id: el02
+    type: TEXT
+    label: 来源模板（建成后只读）
+    io: O
+    required: false
+    dataBinding: Cluster.templateRef
+    sourceNote: 不给改（INV-49）；空 = 未用模板
+  - id: el03
+    type: SELECT
+    label: 推进模式（任务创建前可选）
+    io: I
+    required: true
+    dataBinding: ClusterTask.stepMode
+    sourceNote: 字典 CLC_STEP_MODE；创建后落 stepMode 只读、运行中不可切回（INV-50 / REF-17）
+  - id: el04
+    type: BUTTON
+    label: 完备性预检（按钮）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el05
+    type: TEXT
+    label: 预检结论条（即时提示、不拦截）
+    io: O
+    required: false
+    dataBinding: ''
+    sourceNote: 只读本域事实与既有降级结论，不做跨中心同步探活
+  - id: el06
+    type: GRID
+    label: 步进器（序号 / 步骤 / 状态 / 判定依据 / 动作）
+    io: O
+    required: false
+    dataBinding: ClusterTask.steps
+    dataSource: REP-12
+    sourceNote: 行集合完全来自数据行（REF-13）；SKIPPED 与 CANCELLED 分列；STALLED 与 FAILED 分列渲染
+  - id: el07
+    type: BUTTON
+    label: 执行本步（行内按钮）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 仅首个 PENDING 可派发（INV-50）；置灰必须给原因、不谎报状态（R-23）
+  - id: el08
+    type: BUTTON
+    label: 重试本步（行内按钮）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 新建续跑任务（INV-31），已成功序号置 SKIPPED（R-17）
+  - id: el09
+    type: BUTTON
+    label: 跳过此步（行内按钮，事由必填）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 仅未执行行可跳 + 后果明示弹层（R-24）
+  - id: el10
+    type: TEXTAREA
+    label: 实时日志面板（游标增量流式追加，只读）
+    io: O
+    required: false
+    dataBinding: ClusterTask.logs
+    dataSource: REP-13
+    sourceNote: 禁整表拉取（口径 8）；远程链路此处显示「原始日志在执行交付域」+ 跳转，不留副本不留占位（REF-12）
+  - id: el11
+    type: TAB
+    label: 页签组（配置 / 生命周期台 / 原文只读）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el12
+    type: GRID
+    label: 配置页签（字段级代理视图，只读）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-17
+    sourceNote: 来源档由对端给出、本域不重算（口径 9）；给「去 O-IGN 改字段」跳转、无编辑态
+  - id: el13
+    type: TEXTAREA
+    label: 原文页签（hosts / config.yaml 只读）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-18
+    sourceNote: 独立权限码 + 逐次留痕；不可达不显示历史原文
+  - id: el14
+    type: BUTTON
+    label: 证书续期（生命周期台派发）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 动作集取 CLC_TASK_KIND 既有着陆，不新增类别值；启停 / 升级 / 备份 / 恢复复用 frmClcOrch 的既有入口（FUNC-09~12）
+  - id: el15
+    type: BUTTON
+    label: 提交销毁申请（生命周期台，仍走审批）
+    io: I
+    required: false
+    dataBinding: ''
+  - id: el16
+    type: TEXTBOX
+    label: 事由（高危动作二次确认弹层）
+    io: I
+    required: true
+    dataBinding: ClusterTask.operationReason
+    sourceNote: 必填、落任务头只读留痕（R-24）；不填不放行
+  - id: el17
+    type: GRID
+    label: 影响面（二次确认弹层，只读列表）
+    io: O
+    required: false
+    dataBinding: ''
+    sourceNote: 即时读本域集群与任务行（重启台数 / 在途任务 / 负载迁移）
+  actions:
+  - actionId: act-FUNC-44
+    name: 向导步进执行与单步重试
+    actionType: OTHER
+    behaviorRef: FUNC-44
+    permissionRef:
+    - PERM-FUNC-44
+  - actionId: act-FUNC-45
+    name: 向导跳步
+    actionType: OTHER
+    behaviorRef: FUNC-45
+    permissionRef:
+    - PERM-FUNC-45
+  - actionId: act-FUNC-46
+    name: 集群交付动作派发（生命周期台）
+    actionType: OTHER
+    behaviorRef: FUNC-46
+    permissionRef:
+    - PERM-FUNC-46
+  - actionId: act-FUNC-48
+    name: 集群交付配置代理查看（字段级）
+    actionType: QUERY
+    behaviorRef: FUNC-48
+    permissionRef:
+    - PERM-FUNC-48
+  - actionId: act-FUNC-49
+    name: 交付配置原文代理只读视图
+    actionType: QUERY
+    behaviorRef: FUNC-49
+    permissionRef:
+    - PERM-FUNC-49
+  - actionId: act-FUNC-50
+    name: 交付前置完备性预检
+    actionType: QUERY
+    behaviorRef: FUNC-50
+    permissionRef:
+    - PERM-FUNC-50
 - screenId: frmPublicEntry01
   name: 跨中心集群视图
   screenType: LIST_MAINTENANCE
