@@ -1,5 +1,5 @@
 model_type: OBJECT
-version: '1.1'
+version: '1.2'
 domain: 集群域
 aggregates:
 - id: AGG-CLC-01
@@ -109,6 +109,12 @@ aggregates:
     type: DateTime
     required: false
     unique: false
+  - name: templateRef
+    label: 来源模板引用
+    type: Ref
+    required: false
+    unique: false
+    description: 引用本域集群模板（AGG-CLC-08）；只在创建向导实例化的瞬间写入一次，此后只读、不因模板变更回写（INV-49 / R-20）；空 = 未走模板
   entities: []
 - id: AGG-CLC-02
   name: 集群节点
@@ -429,6 +435,16 @@ aggregates:
     type: DateTime
     required: true
     unique: false
+  - name: stepMode
+    label: 步进模式
+    type: Dict
+    required: true
+    description: CLC_STEP_MODE：STEP（向导逐步派发）/ AUTO（步骤展开后连跑）；缺省按创建入口而定（REF-17：向导入口 STEP，编排屏 / 审批回调 / 定时看护等既有入口 AUTO），任务创建瞬间落定且运行中不可互转（INV-50）
+  - name: operationReason
+    label: 操作事由
+    type: String
+    required: false
+    description: 人工派发事由；向导跳步与高危生命周期动作派发时必填，随任务行与操作记录留痕（R-24）
   entities:
   - name: 交付步骤
     alias: ClusterTaskStep
@@ -606,6 +622,137 @@ aggregates:
     required: false
     unique: false
   entities: []
+- id: AGG-CLC-08
+  name: 集群模板
+  alias: ClusterTemplate
+  tableName: clc_cluster_template
+  aggregateType: AGGREGATE_ROOT
+  description: 一套建群配方的登记（表 clc_cluster_template）：在哪个交付版本上、按什么角色拓扑、带哪组参数默认值，可反复实例化出集群。主数据、本域权威源；业务编号 TPL 前缀 + 4 位流水。不是集群的副本、也不是交付配置的第二套真相；与集群之间无级联（销毁集群不动模板、删除模板不动集群）。
+  lifecycle:
+  - 草稿
+  - 已启用
+  - 已停用
+  tags:
+  - 主数据
+  attributes:
+  - name: templateNo
+    label: 模板编号
+    type: String
+    required: true
+    unique: true
+    description: 业务编号 TPL + 4 位流水，登记时生成、只读
+  - name: name
+    label: 模板名称
+    type: String
+    required: true
+    unique: true
+    description: 未删除范围内唯一（已软删不阻塞复用，与 INV-01 同口径）
+  - name: description
+    label: 说明
+    type: String
+    required: false
+    unique: false
+    description: 配方用途与适用场景（列表页直接可见）
+  - name: versionRef
+    label: 交付版本引用
+    type: Ref
+    required: false
+    unique: false
+    description: 跨域引用 O-IGN 交付版本，只存标识；空 = 实例化时由向导选定（R-20）
+  - name: paramTemplateRef
+    label: 参数面模板引用
+    type: Ref
+    required: false
+    unique: false
+    description: 跨域引用 O-IGN 参数面模板（对端 AGG-IGN-07），只存标识；只透传标识、不校验内容、不复制字段行（R-21）
+  - name: templateStatus
+    label: 模板状态
+    type: Dict
+    required: true
+    unique: false
+    description: CLC_TEMPLATE_STATE：DRAFT / ENABLED / DISABLED；仅 ENABLED 可被向导实例化
+  - name: isDefault
+    label: 是否默认
+    type: Boolean
+    required: true
+    unique: false
+    description: 全局至多一行为真且该行须为 ENABLED（INV-51）；设为默认是平台运维管理员动作（FUNC-41）
+  - name: sourceClusterRef
+    label: 来源集群引用
+    type: Ref
+    required: false
+    unique: false
+    description: 「从既有集群克隆为模板」的留痕（FUNC-43）；空 = 人工登记；建成后只读
+  - name: createdBy
+    label: 创建人
+    type: String
+    required: true
+    unique: false
+    description: 登记 / 更新时间由平台默认字段承载，不作业务属性列出（模板无业务时点不变量）
+  entities:
+  - name: 模板节点组
+    alias: TemplateNodeGroup
+    tableName: clc_template_node_group
+    description: 角色拓扑配方，不承载 IP / 主机名 / 凭据（那是实例事实）；随模板整组读写、不独立编号。
+    localId: sortNo
+    cardinality: ONE_OR_MORE
+    cascadeDelete: true
+    attributes:
+    - name: templateRef
+      label: 所属模板
+      type: Ref
+      required: true
+    - name: groupName
+      label: 分组名称
+      type: String
+      required: true
+      description: 组内唯一（INV-52）
+    - name: nodeRole
+      label: 节点角色
+      type: Dict
+      required: true
+      description: CLC_NODE_ROLE：MASTER / WORKER / INFRA；同角色至多一行（INV-52，配方不是清单）
+    - name: expectedCount
+      label: 期望数量
+      type: Integer
+      required: true
+      description: ≥1；实例化时按该数量生成待登记节点位，真实地址由向导后续填入
+    - name: sortNo
+      label: 排序号
+      type: Integer
+      required: true
+      description: 组内展示次序；子实体一律整组替换（INV-52）
+  - name: 模板参数行
+    alias: TemplateParamLine
+    tableName: clc_template_param
+    description: 建群时的参数默认值配方，与集群参数（AGG-CLC-04）是「配方 ⇄ 实例」关系、不是同一张表；随模板整组读写、不独立编号。
+    localId: sortNo
+    cardinality: ZERO_OR_MORE
+    cascadeDelete: true
+    attributes:
+    - name: templateRef
+      label: 所属模板
+      type: Ref
+      required: true
+    - name: paramKey
+      label: 参数键
+      type: String
+      required: true
+      description: 模板内唯一（INV-52）；键域沿用集群参数口径，不建字典
+    - name: paramValue
+      label: 参数默认值
+      type: String
+      required: true
+      description: 可为空串（表示该项必须现场填）；不得含凭据类值（INV-08 同纪律，凭据零持久化）
+    - name: description
+      label: 说明
+      type: String
+      required: false
+    - name: sortNo
+      label: 排序号
+      type: Integer
+      required: true
+      description: 展示次序；整组替换语义
 data_dictionaries:
 - id: DICT-CLC_CLUSTER_STATUS
   name: CLC_CLUSTER_STATUS
@@ -1159,6 +1306,38 @@ data_dictionaries:
       label: 错误
       enabled: true
       sortOrder: 30
+- id: DICT-CLC_TEMPLATE_STATE
+  name: CLC_TEMPLATE_STATE
+  types:
+  - typeCode: CLC_TEMPLATE_STATE
+    typeName: 集群模板状态
+    items:
+    - code: DRAFT
+      label: 草稿
+      enabled: true
+      sortOrder: 10
+    - code: ENABLED
+      label: 已启用
+      enabled: true
+      sortOrder: 20
+    - code: DISABLED
+      label: 已停用
+      enabled: true
+      sortOrder: 30
+- id: DICT-CLC_STEP_MODE
+  name: CLC_STEP_MODE
+  types:
+  - typeCode: CLC_STEP_MODE
+    typeName: 任务步进模式
+    items:
+    - code: STEP
+      label: 向导单步
+      enabled: true
+      sortOrder: 10
+    - code: AUTO
+      label: 自动连跑
+      enabled: true
+      sortOrder: 20
 aggregate_associations:
 - id: ASSOC-CLC-CLUSTER-NODE
   sourceAggregate: AGG-CLC-01
@@ -1208,3 +1387,11 @@ aggregate_associations:
   targetRole: 所属集群
   cardinality: ONE_TO_MANY
   referenceField: clusterRef
+- id: ASSOC-CLC-CLUSTER-TEMPLATE
+  sourceAggregate: AGG-CLC-01
+  targetAggregate: AGG-CLC-08
+  associationType: DEPENDENCY
+  sourceRole: 来源模板
+  targetRole: 被实例化的配方
+  cardinality: MANY_TO_ONE
+  referenceField: templateRef
