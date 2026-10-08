@@ -235,7 +235,10 @@ screens:
     dataBinding: ClusterNode
     role: QUERY
     dataSource: REP-03
-    sourceNote: 分组轴取 CLC_NODE_ROLE 词条序，组头两数（台数 / 异常数）由已加载行算得；组内行序不随健康事件重排（9.2.6 ③），异常行置顶只在加载时做一次
+    sourceNote: 分组轴取 CLC_NODE_ROLE 词条序，组头台数与各档数由已加载行算得——异常数只算 UNREACHABLE，
+      UNKNOWN(未探测) 不并档、单独成数（否则刚登记的整组节点会读成全组异常）；三档名一律取
+      CLC_NODE_HEALTH 词条，界面不留第二份标签表（DEF-09 同一口径）；组内行序不随健康事件重排（9.2.6 ③），
+      异常行置顶只在加载时做一次
   actions:
   - actionId: act-FUNC-06
     name: 添加节点

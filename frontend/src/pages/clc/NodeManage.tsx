@@ -74,11 +74,12 @@ export default function NodeManage() {
     [clusters],
   )
 
-  // MU el15 分组呈现:异常(观测值非 HEALTHY,即不可达 / 未知)行置顶只在加载时做一次,
-  // 组内行序不随健康事件重排(9.2.6 ③)——数据行刷新才会重排,推送刷新不动序。
-  const isAbnormal = (n: ClcNode) => n.node_health !== 'HEALTHY'
+  // MU el15 分组呈现:三档各归各档——异常=UNREACHABLE(探测过且不可达),UNKNOWN(未知)是没探测过,
+  // 既不算健康也不算异常;否则刚登记的整组节点会读成「全组异常」,把管理员引去查并不存在的事件。
+  // 异常行置顶只在加载时做一次,组内行序不随健康事件重排(9.2.6 ③)——数据行刷新才会重排,推送刷新不动序。
+  const healthRank = (h: string) => (h === 'UNREACHABLE' ? 0 : h === 'HEALTHY' ? 1 : 2)
   const orderedRows = useMemo(
-    () => [...data].sort((a, b) => Number(isAbnormal(b)) - Number(isAbnormal(a))),
+    () => [...data].sort((a, b) => healthRank(a.node_health || 'UNKNOWN') - healthRank(b.node_health || 'UNKNOWN')),
     [data],
   )
   const roleGroups = useMemo(() => {
@@ -96,8 +97,9 @@ export default function NodeManage() {
         role,
         label: dict.labelOf('CLC_NODE_ROLE', role),
         count: rows.length,
-        healthy: rows.filter((r) => !isAbnormal(r)).length,
-        abnormal: rows.filter(isAbnormal).length,
+        healthy: rows.filter((r) => r.node_health === 'HEALTHY').length,
+        abnormal: rows.filter((r) => r.node_health === 'UNREACHABLE').length,
+        unknown: rows.filter((r) => !['HEALTHY', 'UNREACHABLE'].includes(r.node_health)).length,
         rows,
       }
     })
@@ -293,13 +295,15 @@ export default function NodeManage() {
         />
       ) : (
         <>
-          {/* MU el15 分组标题:组序 = CLC_NODE_ROLE 词条序,两数 = 台数 / 异常数(观测值非 HEALTHY) */}
+          {/* MU el15 分组标题:组序 = CLC_NODE_ROLE 词条序,台数/各档数由已加载行算得;
+              三档名一律取 CLC_NODE_HEALTH 词条(界面不留第二份标签表,DEF-09 同一口径) */}
           {roleGroups.map((g) => (
             <div key={g.role} style={{ marginBottom: 14 }}>
               <Space size={8} style={{ marginBottom: 6 }}>
                 <Typography.Text strong>分组：{g.label}</Typography.Text>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  ｜ {g.count} 台（健康 {g.healthy} · 异常 {g.abnormal}）
+                  ｜ {g.count} 台（{dict.labelOf('CLC_NODE_HEALTH', 'HEALTHY')} {g.healthy} · {dict.labelOf('CLC_NODE_HEALTH', 'UNREACHABLE')} {g.abnormal}
+                  {g.unknown > 0 && ` · ${dict.labelOf('CLC_NODE_HEALTH', 'UNKNOWN')} ${g.unknown}`}）
                 </Typography.Text>
               </Space>
               <Table rowKey="id" size="small" columns={columns} dataSource={g.rows} loading={loading} pagination={false} scroll={{ x: 1450 }} />
