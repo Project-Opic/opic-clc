@@ -255,7 +255,23 @@ var seedResources = []struct {
 	{"", "集群管理", "menu-l1-01", "", "DIRECTORY", "", "Cluster", 10},
 	{"menu-l1-01", "集群台账", "clc-cluster", "PERM-FUNC-19", "MENU", "/clc/cluster", "Database", 11},
 	{"menu-l1-01", "节点管理", "clc-node", "PERM-FUNC-21", "MENU", "/clc/node", "Hdd", 12},
+	// MU menu-clc-template「集群模板」→ screenRef frmClcTemplate(AGG-CLC-08, FUNC-36~43)。
+	// code 沿用本仓 clc-* 菜单约定(与 clc-cluster/clc-node 同族,不带 menu- 前缀);
+	// PermCode 取本屏主数据接口 PERM-FUNC-36(模板清单查询)——与姊妹仓「菜单挂主列表行为码」同口径,
+	// m5 里 CLC-ROLE-01/02/03 均有 36,故三岗位都见入口、只读岗位进去只能看不能改(按钮由 38~43 各自发牌控制)。
+	// Sort 与 MU 前驱(节点管理)同为 12:GetMenus 按 (sort_order, id) 升序,本行 id 必大于节点管理,
+	// 于是新屏正好落在 MU 声明的「节点管理与交付编排之间」——既有 11~16 的取值一律不重排
+	// (存量库只补插不迁移,重排会打乱运维自定义),与姊妹仓 v1.3 菜单同法(同 sort 靠 id 定序)。
+	{"menu-l1-01", "集群模板", "clc-template", "PERM-FUNC-36", "MENU", "/clc/template", "ListChecks", 12},
 	{"menu-l1-01", "交付编排", "clc-orch", "PERM-FUNC-25", "MENU", "/clc/orch", "DeploymentUnit", 13},
+	// MU menu-clc-wizard「装机向导」→ screenRef frmClcWizard(AGG-CLC-06, FUNC-44/45/46 + 只读代理 47~50)。
+	// PermCode 取本屏主数据接口 PERM-FUNC-34(步进器 REP-12 = GET /clc/task/:no/steps)——与 clc-template
+	// 「菜单挂主列表行为码」同口径:菜单只管入口可见,屏内动作各按自己的牌收口
+	// (步进 44 / 跳步 45 / 生命周期派发 46 且其内再按 task_kind 复查行为档,原文页签 49 独立于字段视图 48)。
+	// 发牌面:m5 里 CLC-ROLE-01/02/03 均有 34、CLC-ROLE-04 只读岗位没有 ⇒ 不见本入口(与它同样看不见交付编排一致)。
+	// Sort 与前驱「交付编排」同为 13:GetMenus 按 (sort_order, id) 升序,本行 id 必大于 clc-orch,
+	// 于是正好落在 MU 声明的「交付编排与引用与参数之间」,既有 14~16 不重排(同 clc-template 手法)。
+	{"menu-l1-01", "装机向导", "clc-wizard", "PERM-FUNC-34", "MENU", "/clc/wizard", "Compass", 13},
 	{"menu-l1-01", "引用与参数", "clc-ref", "PERM-FUNC-22", "MENU", "/clc/ref", "Api", 14},
 	{"menu-l1-01", "快照与回滚", "clc-snap", "PERM-FUNC-24", "MENU", "/clc/snap", "History", 15},
 	{"menu-l1-01", "健康探活", "clc-health", "PERM-FUNC-26", "MENU", "/clc/health", "Heartbeat", 16},
@@ -291,6 +307,13 @@ func EnsureSeed() error {
 		return err
 	}
 	if count > 0 {
+		// 存量库只走上面这条发牌分支，seedResources 的新行不会自己长出来(资源插入只在
+		// sys_user 为空的首建路径上)——v1.2 两张新屏「集群模板」「装机向导」的挂口按幂等 backfill 补插。
+		for _, code := range []string{"clc-template", "clc-wizard"} {
+			if err := backfillClcMenu(code); err != nil {
+				return err
+			}
+		}
 		return ensureFlowDefinitions()
 	}
 	// 资源
@@ -332,6 +355,31 @@ func EnsureSeed() error {
 		return err
 	}
 	return ensureFlowDefinitions()
+}
+
+// backfillClcMenu 按 seedResources 的登记口径补插一条缺失菜单(存量库幂等回填)。
+// 只在 code 不存在时插入;已存在(含运维改过名称/权限/次序)一律不动。
+// 父目录不在(被删或改名)时不强造菜单树，直接返回 nil —— 与本仓种子纪律一致，
+// 树形结构归资源管理屏管，种子不越权补父节点。
+func backfillClcMenu(code string) error {
+	exists, err := qOne(`SELECT id FROM sys_resource WHERE code = ?`, code)
+	if err != nil || exists != nil {
+		return err
+	}
+	for _, r := range seedResources {
+		if r.Code != code {
+			continue
+		}
+		parent, err := qOne(`SELECT id FROM sys_resource WHERE code = ?`, r.Parent)
+		if err != nil || parent == nil {
+			return err
+		}
+		_, err = qExec(`INSERT INTO sys_resource (parent_id, name, code, permission_code, type, path, component, icon, sort_order, status)
+			VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 1)`,
+			toInt(parent["id"]), r.Name, r.Code, r.PermCode, r.Type, r.Path, r.Icon, r.Sort)
+		return err
+	}
+	return nil
 }
 
 // ensureAdminRole 幂等确保 admin 超管角色存在且绑定到 admin 账号。

@@ -9,10 +9,11 @@ import { clusterApi, taskApi, type ClcTask } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
 import TaskDetailDrawer, { type TaskDetailDrawerProps } from './TaskDetail'
-import { EXEC_PATH, TASK_FAIL_REASON, TASK_KIND, TASK_STATUS, pill } from './common'
+import { EXEC_PATH, ORCH_DISPATCH_KINDS, TASK_FAIL_REASON, TASK_KIND, TASK_KIND_PERMS, TASK_STATUS, pill } from './common'
 
 const KIND_OPTIONS = Object.keys(TASK_KIND).map((k) => ({ value: k, label: TASK_KIND[k] }))
-const DELIVERABLE_KINDS = ['INSTALL', 'RETRY_INSTALL', 'UPGRADE', 'BACKUP', 'RESTORE', 'START', 'STOP'].map((k) => ({ value: k, label: TASK_KIND[k] }))
+// DEF-06 行为级分档：kind→权限码常量已提到 ./common.tsx 与装机向导生命周期台共用（不出第二份）；
+// 本口受理集取 ORCH_DISPATCH_KINDS（CERT_RENEW 属生命周期台 FUNC-46 派发口，不在编排口渲染）。
 
 /** act-FUNC-33 前置(m2):仅 QUEUED/RUNNING 可取消、DESTROY 拒绝、终态不渲染入口 */
 function cancellable(t: ClcTask): boolean {
@@ -21,6 +22,12 @@ function cancellable(t: ClcTask): boolean {
 
 export default function OrchManage() {
   const hasPerm = usePermission()
+  // DEF-06：交付动作选择器按档收口 —— 当前用户没有该动作的牌时，选项「不渲染」（不是 disabled 置灰）。
+  // 后端同一 handler 在 any 副作用之前按 task_kind 复查这一档（business/clc.go ClcTaskAction +
+  // service.CheckTaskKindPermission），界面只是把必然 403 的动作提前藏掉，不改请求体也不改响应形状。
+  const deliverableKinds = ORCH_DISPATCH_KINDS
+    .filter((k) => hasPerm(TASK_KIND_PERMS[k]))
+    .map((k) => ({ value: k, label: TASK_KIND[k] }))
   const [form] = Form.useForm()
   const [destroyForm] = Form.useForm()
   const [cancelForm] = Form.useForm<{ reason: string }>()
@@ -70,7 +77,8 @@ export default function OrchManage() {
     if (!cluster) return
     setActionTarget(cluster)
     form.resetFields()
-    form.setFieldsValue({ task_kind: 'INSTALL', execution_path: 'LOCAL' })
+    // 缺省值取当前可见的第一档（全档用户仍是 INSTALL，行为不变）：避免表单落在一个没渲染的选项上。
+    form.setFieldsValue({ task_kind: deliverableKinds[0]?.value, execution_path: 'LOCAL' })
   }
 
   const handleAction = async () => {
@@ -229,7 +237,7 @@ export default function OrchManage() {
       >
         <Form form={form} layout="vertical">
           <Form.Item name="task_kind" label="任务类别(INSTALL 前置 DRAFT/INSTALL_FAILED;其余前置 RUNNING)" rules={[{ required: true }]}>
-            <Select options={DELIVERABLE_KINDS} />
+            <Select options={deliverableKinds} />
           </Form.Item>
           <Form.Item name="execution_path" label="执行位置(INV-32:登记值与真实执行位置一致,绝不静默切换)" rules={[{ required: true }]}>
             <Select options={[{ value: 'LOCAL', label: '本地链路' }, { value: 'REMOTE_EXECUTOR', label: '远程执行机' }]} />

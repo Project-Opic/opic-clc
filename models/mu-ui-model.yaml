@@ -220,6 +220,22 @@ screens:
     role: QUERY
     dataSource: REP-16
     sourceNote: 不随清单一并下发，逐次点按取数（9.9 第 ③ 条）
+  - id: el14
+    type: SELECT
+    label: 呈现档（按角色分组 ｜ 平铺，v1.2）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 只换呈现形态、不改筛选语义与报表计数（5.16 口径 ⑰）；缺省「按角色分组」（9.2.6）
+  - id: el15
+    type: TEXT
+    label: 分组标题（组头台数与异常数，v1.2）
+    io: O
+    required: false
+    dataBinding: ClusterNode
+    role: QUERY
+    dataSource: REP-03
+    sourceNote: 分组轴取 CLC_NODE_ROLE 词条序，组头两数（台数 / 异常数）由已加载行算得；组内行序不随健康事件重排（9.2.6 ③），异常行置顶只在加载时做一次
   actions:
   - actionId: act-FUNC-06
     name: 添加节点

@@ -76,6 +76,30 @@ export const TASK_KIND: Record<string, string> = {
   DESTROY: '销毁',
 }
 
+// DEF-06 行为级分档(唯一一份 kind→权限码表,frmClcOrch 发起弹窗与 frmClcWizard 生命周期台共用,
+// 不出第二份):与后端 internal/service/clc_task.go 从本体注册表两级派生的 kind→权限码同一口径,
+// 不新造权限码。START/STOP 同属 FUNC-12「集群启停」一档;CERT_RENEW 只经生命周期台(FUNC-46)派发,
+// 编排口(POST /cluster/:id/task)不受理它。
+export const TASK_KIND_PERMS: Record<string, string> = {
+  INSTALL: 'PERM-FUNC-03',
+  RETRY_INSTALL: 'PERM-FUNC-04',
+  UPGRADE: 'PERM-FUNC-09',
+  BACKUP: 'PERM-FUNC-10',
+  RESTORE: 'PERM-FUNC-11',
+  START: 'PERM-FUNC-12',
+  STOP: 'PERM-FUNC-12',
+  CERT_RENEW: 'PERM-FUNC-46',
+}
+
+/** 编排口(/clc/cluster/:id/task)受理集;DESTROY 只经审批流(FUNC-05),任何派发口都不直派 */
+export const ORCH_DISPATCH_KINDS = ['INSTALL', 'RETRY_INSTALL', 'UPGRADE', 'BACKUP', 'RESTORE', 'START', 'STOP']
+
+/** FUNC-46 生命周期台派发集(internal/service/clc_wizard.go lifecycleActionKinds 同档;不新增类别值) */
+export const LIFECYCLE_DISPATCH_KINDS = ['START', 'STOP', 'UPGRADE', 'BACKUP', 'RESTORE', 'CERT_RENEW']
+
+/** 生命周期台高危动作(R-24 二次确认 + 事由必填;后端 highRiskActionKinds 同档;销毁另走审批不入此列) */
+export const HIGH_RISK_LIFECYCLE_KINDS = ['STOP', 'RESTORE']
+
 /** 任务状态(字典 CLC_TASK_STATUS) */
 export const TASK_STATUS: Record<string, { tone: StatusTone; label: string }> = {
   QUEUED: { tone: 'muted', label: '排队中' },
@@ -101,28 +125,30 @@ export const EXEC_PATH: Record<string, string> = {
   REMOTE_EXECUTOR: '远程执行机',
 }
 
-/** 交付步骤状态(字典 CLC_STEP_STATUS;CANCELLED=未执行即取消 与 SKIPPED=本次跳过(上次已成功) 语义分列) */
-export const STEP_STATUS: Record<string, { tone: StatusTone; label: string }> = {
-  PENDING: { tone: 'muted', label: '待执行' },
-  RUNNING: { tone: 'info', label: '执行中' },
-  SUCCEEDED: { tone: 'success', label: '已成功' },
-  FAILED: { tone: 'danger', label: '已失败' },
-  CANCELLED: { tone: 'muted', label: '未执行即取消' },
-  SKIPPED: { tone: 'warning', label: '本次跳过(上次已成功)' },
+/** 交付步骤状态(字典 CLC_STEP_STATUS;CANCELLED=未执行即取消 与 SKIPPED=本次跳过(上次已成功) 语义分列)。
+ *  中文名取自 /api/meta/dictionaries,本地只留 tone(字典没有配色维度)。 */
+export const STEP_STATUS_TONE: Record<string, StatusTone> = {
+  PENDING: 'muted',
+  RUNNING: 'info',
+  SUCCEEDED: 'success',
+  FAILED: 'danger',
+  CANCELLED: 'muted',
+  SKIPPED: 'warning',
 }
 
-/** 步骤判定依据(字典 CLC_STEP_VERDICT;REP-12 c4) */
-export const STEP_VERDICT: Record<string, string> = {
-  EXIT_CODE: '退出码',
-  PLAY_RECAP: '剧本汇总判定',
-  REMOTE_RECEIPT: '远端回执',
+/** 交付日志级别(字典 CLC_LOG_LEVEL;REP-13 面板着色)——只留 tone,级别名取自接口。
+ *  同档还有 CLC_STEP_VERDICT(判定依据):它只有中文名一个维度,故本地不再建表,直接按码值取词条。 */
+export const LOG_LEVEL_TONE: Record<string, 'info' | 'warn' | 'error'> = {
+  INFO: 'info',
+  WARN: 'warn',
+  ERROR: 'error',
 }
 
-/** 交付日志级别(字典 CLC_LOG_LEVEL;REP-13 面板着色) */
-export const LOG_LEVEL: Record<string, { tone: 'info' | 'warn' | 'error'; label: string }> = {
-  INFO: { tone: 'info', label: '信息' },
-  WARN: { tone: 'warn', label: '告警' },
-  ERROR: { tone: 'error', label: '错误' },
+/** 用本地 tone 档 + 接口下发的词条拼出胶囊映射(DEF-09:界面不留字典副本)。 */
+export function withDictLabels(map: Record<string, StatusTone>, items: { code: string; label: string }[]) {
+  const out: Record<string, { tone: StatusTone; label: string }> = {}
+  for (const i of items) out[i.code] = { tone: map[i.code] || 'muted', label: i.label }
+  return out
 }
 
 /** 快照类型(AGG-CLC-05;字典 CLC_SNAPSHOT_TYPE) */

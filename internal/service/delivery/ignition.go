@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -19,7 +21,14 @@ const (
 	defaultSubmitPath  = "/api/v1/ign/delivery/submit"
 	defaultReceiptPath = "/api/v1/ign/delivery/receipt/{ref}"
 	defaultCancelPath  = "/api/v1/ign/delivery/cancel/{ref}"
+	// defaultConfigPath O-IGN FUNC-50 跨中心交付配置只读通道(字段级视图;CLC FUNC-48 的对端)。
+	defaultConfigPath = "/api/v1/ign/delivery/config/{ref}"
+	// configRawSuffix 同一组内的原文只读通道(必带 file_face、一次一面;CLC FUNC-49 的对端)。
+	configRawSuffix = "/raw"
 )
+
+// ErrPeerNotConfigured 未配置对端地址(与「对端不可达」分列:一个是本部署没接线,一个是接了线连不上)。
+var ErrPeerNotConfigured = errors.New("远程链路未配置点火中心地址(部署配置 delivery.ignition_base_url 缺失)")
 
 // 远端终态(IGN_TASK_STATUS;LOST 为第四终态,与 FAILED/CANCELLED 分列)。
 const (
@@ -290,6 +299,68 @@ func (a *Ignition) revoke(remoteRef string, emit func(level, text string)) {
 		return
 	}
 	emit(LevelInfo, "[取消] 已请求远端撤销(INV-46 引用 "+remoteRef+")")
+}
+
+// ConfigQuery 字段级视图的取数上下文(O-IGN FUNC-50 只读通道的三个可选入参)。
+// 留空即由对端按自己的口径回落:面标识不传 ⇒ 对端回已定义面的取值结论;
+// 参数模板标识不传 ⇒ 对端回落到接管快照里记录的那张模板(不是默认模板,其 R-20)。
+type ConfigQuery struct {
+	FileFace         string
+	ParamTemplateRef string
+	VersionRef       string
+}
+
+// ReadConfig 代理读对端交付配置的字段级视图(CLC FUNC-48 的对端通道)。
+// 返回值原样透传对端 flat JSON:本域不重算四层取值、不合并、不落副本(R-25 / REF-12 同源)。
+func (a *Ignition) ReadConfig(ctx context.Context, clusterRef string, q ConfigQuery) (map[string]any, error) {
+	if a.cfg.BaseURL == "" {
+		return nil, ErrPeerNotConfigured
+	}
+	query := url.Values{}
+	if v := strings.TrimSpace(q.FileFace); v != "" {
+		query.Set("file_face", v)
+	}
+	if v := strings.TrimSpace(q.ParamTemplateRef); v != "" {
+		query.Set("param_template_ref", v)
+	}
+	if v := strings.TrimSpace(q.VersionRef); v != "" {
+		query.Set("version_ref", v)
+	}
+	var out map[string]any
+	if err := a.do(ctx, http.MethodGet, pathWithRef(defaultConfigPath, clusterRef), query.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReadConfigRaw 代理读对端交付配置原文(CLC FUNC-49 的对端通道;file_face 必带且一次一面)。
+// lines[].text 已由对端在流出前完成掩码,content_sha256 是掩码前原文摘要 ——
+// 本域既不二次解析也不落库该摘要(INV-08:再掩码一次即等于承认本域持有原文)。
+func (a *Ignition) ReadConfigRaw(ctx context.Context, clusterRef, fileFace string) (map[string]any, error) {
+	if a.cfg.BaseURL == "" {
+		return nil, ErrPeerNotConfigured
+	}
+	face := strings.ToUpper(strings.TrimSpace(fileFace))
+	if face == "" {
+		return nil, fmt.Errorf("原文通道必须携带 file_face 且一次只出一面(HOSTS / CONFIG)")
+	}
+	var out map[string]any
+	q := url.Values{"file_face": []string{face}}
+	if err := a.do(ctx, http.MethodGet, pathWithRef(defaultConfigPath, clusterRef)+configRawSuffix,
+		q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PeerStatus 取对端返回的 HTTP 状态码与错误说明(401/403/404/409 的中文口径由调用方分派;
+// ok=false 表示不是对端状态错误 —— 传输层失败或未配置地址,即「对端不可达」)。
+func PeerStatus(err error) (code int, msg string, ok bool) {
+	var se *httpStatusError
+	if asStatus(err, &se) {
+		return se.Code, se.Msg, true
+	}
+	return 0, "", false
 }
 
 func asStatus(err error, out **httpStatusError) bool {

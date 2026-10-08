@@ -54,6 +54,7 @@ type DeliveryArgs struct {
 	VersionRef      string   // UPGRADE 目标版本引用
 	NodeName        string   // ADD_NODE 成功落点的 K8s 节点名覆盖值(缺省按集群号 + 地址派生,INV-14)
 	FailStep        int      // 故障注入步骤序号(仅验证用:该步不落交付工具,直接走失败回写链 R-09/INV-30)
+	Step            bool     // 步进派发意图(FUNC-44 的一次性人工授权;消费即清除,不留存)
 }
 
 // stepPlanItem 展开计划的一行(纯数据,便于脱离 DB 单测)。
@@ -485,6 +486,70 @@ func (rt *deliveryRuntime) resolveArgs(task map[string]any) DeliveryArgs {
 	return DeliveryArgs{NodeIPs: deriveNodeIPs(Str(task["task_kind"]), Str(task["cluster_ref"]))}
 }
 
+// ---------- 步进模式(INV-50 / REF-17 / R-23):一次派发 = 一次性人工授权 ----------
+
+// taskStepMode 取任务头只读列(INV-50:创建瞬间落定,运行期不回改;列缺失/空值按 AUTO,
+// 与 000007 迁移的库侧缺省一致 ⇒ v1.1 连跑入口逐字不变)。
+func taskStepMode(task map[string]any) string {
+	if strings.EqualFold(trimEmpty(Str(task["step_mode"])), StepModeStep) {
+		return StepModeStep
+	}
+	return StepModeAuto
+}
+
+// setStepIntent 登记「执行本步」的一次性授权(FUNC-44 后置):
+// 只有带授权的 STEP 任务才允许从 QUEUED 开跑,授权在结论落定后立即失效。
+// 授权时运行期参数已丢(进程重启)则按登记状态派生兜底,与 resolveArgs 同一口径。
+func (rt *deliveryRuntime) setStepIntent(taskNo, kind, clusterNo string) {
+	rt.mu.Lock()
+	a, ok := rt.args[taskNo]
+	if !ok {
+		a = DeliveryArgs{NodeIPs: deriveNodeIPs(kind, clusterNo)}
+	}
+	a.Step = true
+	rt.args[taskNo] = a
+	rt.mu.Unlock()
+}
+
+// clearStepIntent 授权失效(单步结论落定即清,绝不跨步骤留存)。
+func (rt *deliveryRuntime) clearStepIntent(taskNo string) {
+	rt.mu.Lock()
+	if a, ok := rt.args[taskNo]; ok {
+		a.Step = false
+		rt.args[taskNo] = a
+	}
+	rt.mu.Unlock()
+}
+
+// hasStepIntent 当前是否持有一次性步进授权。
+func (rt *deliveryRuntime) hasStepIntent(taskNo string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.args[taskNo].Step
+}
+
+// dropTaskArgs 丢弃运行期参数(任务终局 / 未开跑即取消:防止排队态任务长期占位)。
+func (rt *deliveryRuntime) dropTaskArgs(taskNo string) {
+	rt.mu.Lock()
+	delete(rt.args, taskNo)
+	rt.mu.Unlock()
+}
+
+// parkStepTask STEP 模式的自然终态不是「一路跑完」而是「停在某个 PENDING 上」(m6 A13):
+// 本步结论落定后把任务放回 QUEUED,等下一次「执行本步」派发。
+// 带 RUNNING 守卫(INV-29:终局不可被覆盖;若已被取消即不归还排队态)。
+func (rt *deliveryRuntime) parkStepTask(taskNo string) bool {
+	n, err := qExec(`UPDATE clc_task SET task_status=?, updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS')
+		WHERE task_no=? AND flag=1 AND task_status=?`, TaskStatusQueued, taskNo, TaskStatusRunning)
+	if err != nil || n == 0 {
+		return false
+	}
+	rt.clearStepIntent(taskNo)
+	writeTaskLog(taskNo, nil, delivery.LevelInfo,
+		"步进模式人工确认点(REF-17/INV-50):本步结论已落定,任务回到排队态等下一次「执行本步」派发;未跑完的步骤不会被自动推进")
+	return true
+}
+
 // deriveNodeIPs 从节点台账派生增删目标 IP(ADD_NODE ⇒ PENDING;DEL_NODE ⇒ REMOVING)。
 func deriveNodeIPs(kind, clusterNo string) []string {
 	status := ""
@@ -574,6 +639,12 @@ func (rt *deliveryRuntime) tryStart(taskNo string) bool {
 func (rt *deliveryRuntime) acquireAndRun(task map[string]any) bool {
 	taskNo := Str(task["task_no"])
 	clusterNo := Str(task["cluster_ref"])
+	// INV-50 / REF-17:STEP 任务的排队态语义是「等人」而不是「等槽位」——
+	// 没有一次性「执行本步」授权就不开跑,否则步进模式与连跑无差别(向导的人工确认点会消失)。
+	// 只约束 QUEUED 自启路径:RUNNING 的远程对账接管(B-AUTO-12)不看授权,人已经在那一步上跑着。
+	if taskStepMode(task) == StepModeStep && Str(task["task_status"]) == TaskStatusQueued && !rt.hasStepIntent(taskNo) {
+		return false
+	}
 	if !rt.slots.TryAcquire() {
 		return false // 槽位占满 ⇒ 排队 QUEUED 而不是失败(R-18)
 	}
@@ -602,17 +673,36 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 	clusterNo := Str(task["cluster_ref"])
 	kind := Str(task["task_kind"])
 	execPath := Str(task["execution_path"])
+	user := UserInfo{ID: Int(task["created_by"]), Username: Str(task["submitted_by"])}
+	args := rt.resolveArgs(task)
+	// 步进模式(REF-17 / INV-50):单步结论落定后停在人工确认点(m6 A13),不连跑剩余步骤。
+	singleStep := taskStepMode(task) == StepModeStep
+	parked := false
+	// waitHuman 本步有结论且仍有未终局步骤 ⇒ 归还排队态并结束本次协程;
+	// 无剩余步骤时返回 false,让主循环走到 B-AUTO-09 成功落点(末步结论才是终局判据)。
+	waitHuman := func() bool {
+		if !singleStep {
+			return false
+		}
+		next, err := nextRunnableStep(taskNo)
+		if err != nil || next == nil {
+			return false
+		}
+		parked = rt.parkStepTask(taskNo)
+		return parked
+	}
 	defer func() {
 		rt.mu.Lock()
 		delete(rt.runners, taskNo)
-		delete(rt.args, taskNo)
+		if !parked {
+			// 步进停靠点保留运行期参数:下一步派发仍要用同一份覆盖值(主控入口 / 凭据标识 / 版本引用)
+			delete(rt.args, taskNo)
+		}
 		delete(rt.loggers, taskNo)
 		rt.mu.Unlock()
 		rt.locks.Unlock(clusterNo, taskNo)
 		rt.slots.Release()
 	}()
-	user := UserInfo{ID: Int(task["created_by"]), Username: Str(task["submitted_by"])}
-	args := rt.resolveArgs(task)
 	// 交付版本引用按 R-19 仅安装族下发:取集群登记的版本引用(FUNC-01 四步向导;可空 ⇒ 对端沿用发行包自身版本)。
 	// UPGRADE 的目标版本不经该列下发:改写集群交付配置里的版本面归点火中心的交付配置对齐职责,本域不代答。
 	clusterVersion := ""
@@ -673,6 +763,9 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 				_ = tx(func(db *gorm.DB) error {
 					return markStepTx(db, taskNo, idx, StepStatusSucceeded, out.Verdict, &ec, "", "", &endLine)
 				})
+				if waitHuman() {
+					return // 对账接管同样停在人工确认点(STEP 模式不因重启而变成连跑)
+				}
 				continue
 			case out.Lost:
 				rt.applyStalledChain(taskNo, out, user)
@@ -736,6 +829,9 @@ func (rt *deliveryRuntime) execute(ctx context.Context, task map[string]any) {
 				return markStepTx(db, taskNo, idx, StepStatusSucceeded, out.Verdict, &ec, "", "", &endLine)
 			}); err != nil {
 				writeTaskLog(taskNo, &stepIdx, delivery.LevelError, "步骤终态落行失败: "+err.Error())
+			}
+			if waitHuman() {
+				return // 步进派发把「何时发起下一步」的决定权交回人工(R-23)
 			}
 			continue
 		case out.Lost:
@@ -868,8 +964,11 @@ func (rt *deliveryRuntime) applyFailChain(taskNo, kind string, idx int, user Use
 			return err
 		}
 		fi := idx
-		summary := delivery.MaskSecret(fmt.Sprintf("第 %d 步失败:%s", idx, detail))
-		return finishTaskTx(db, task, TaskStatusFailed, &fi, summary, user)
+		summary := fmt.Sprintf("第 %d 步失败:%s", idx, detail)
+		if note := skipAttributionTx(db, taskNo); note != "" {
+			summary += note // R-24:归因须如实体现跳过事实,不得让台账读成「失败于被跳过的那一步」
+		}
+		return finishTaskTx(db, task, TaskStatusFailed, &fi, delivery.MaskSecret(clampRunes(summary, 500)), user)
 	})
 	if err != nil {
 		writeTaskLog(taskNo, nil, delivery.LevelError, "失败回写链落库异常: "+err.Error())
@@ -878,6 +977,23 @@ func (rt *deliveryRuntime) applyFailChain(taskNo, kind string, idx int, user Use
 	stepIdx := idx
 	writeTaskLog(taskNo, &stepIdx, delivery.LevelError, fmt.Sprintf("失败回写链完成(R-14):步骤 %02d FAILED,任务 FAILED,失败步骤索引已双写(INV-30)", idx))
 	rt.closeStepWindow(taskNo, idx) // 结论行即本步末行(A08 右界)
+}
+
+// skipAttributionTx R-24 的失败归因侧:人工跳过的步骤没执行、不构成失败原因,
+// 但台账与界面必须看得见「这些步被跳过了」,否则失败摘要会误导成「执行失败于该步」。
+// 续跑展开的 SKIPPED(R-17 固定文本 skipReasonResume)不是人工跳步,不列入本注记。
+func skipAttributionTx(db *gorm.DB, taskNo string) string {
+	rows, err := store.List(db, `SELECT step_index, step_name FROM clc_task_step
+		WHERE task_ref=? AND flag=1 AND step_status=? AND (skip_reason IS NULL OR skip_reason <> ?)
+		ORDER BY step_index ASC`, taskNo, StepStatusSkipped, skipReasonResume)
+	if err != nil || len(rows) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(rows))
+	for _, r := range rows {
+		parts = append(parts, fmt.Sprintf("%02d %s", int(paramInt(r["step_index"])), Str(r["step_name"])))
+	}
+	return fmt.Sprintf(";另有 %d 步为人工跳过(未执行,不构成失败原因,R-24):%s", len(rows), strings.Join(parts, "、"))
 }
 
 // applyCancelChain R-15 取消处置:运行中步骤 FAILED(摘要「人工取消」)→ 未执行步骤 CANCELLED →
@@ -1016,6 +1132,8 @@ func CancelClusterTask(taskNo, reason string, user UserInfo) (map[string]any, er
 	}); err != nil {
 		return nil, err
 	}
+	// 未开跑即取消 ⇒ 运行期参数与步进授权一并失效(停靠中的 STEP 任务取消后不留悬空授权)
+	rt.dropTaskArgs(taskNo)
 	WriteAudit(nil, user.ID, user.Username, "FUNC-33", fmt.Sprintf("取消任务 %s(原因:%s):未开跑即取消", taskNo, reason))
 	writeTaskLog(taskNo, nil, delivery.LevelInfo, "任务取消(FUNC-33,原因:"+reason+"):取消不是回滚")
 	return qOne(`SELECT * FROM clc_task WHERE task_no=? AND flag=1`, taskNo)
@@ -1197,13 +1315,19 @@ func (rt *deliveryRuntime) sweepOrphans() {
 }
 
 // promoteQueued 槽位释放按排队次序推进(R-18:QUEUED 不是失败,是排队)。
+// STEP 任务无派发授权时跳过而不是停下:它的排队态是「等人」,不该占住队首、
+// 更不该挡住同队列里 AUTO 任务的推进(REF-17;有授权者仍按 FIFO 取执行权)。
 func (rt *deliveryRuntime) promoteQueued() {
-	rows, err := qList(`SELECT task_no FROM clc_task WHERE flag=1 AND task_status=? ORDER BY id`, TaskStatusQueued)
+	rows, err := qList(`SELECT * FROM clc_task WHERE flag=1 AND task_status=? ORDER BY id`, TaskStatusQueued)
 	if err != nil {
 		return
 	}
 	for _, r := range rows {
-		if !rt.tryStart(Str(r["task_no"])) {
+		taskNo := Str(r["task_no"])
+		if taskStepMode(r) == StepModeStep && !rt.hasStepIntent(taskNo) {
+			continue
+		}
+		if !rt.tryStart(taskNo) {
 			return // 槽位或互斥未满足:保持排队
 		}
 	}

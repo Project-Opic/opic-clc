@@ -21,6 +21,8 @@ import ServerMonitor from '../admin/pages/ServerMonitor'
 import { isAdminPermissions } from '../admin/access'
 import ClcClusterManage from '../pages/clc/ClusterManage'
 import ClcNodeManage from '../pages/clc/NodeManage'
+import ClcTemplateManage from '../pages/clc/TemplateManage'
+import ClcWizardConsole from '../pages/clc/WizardConsole'
 import ClcOrchManage from '../pages/clc/OrchManage'
 import ClcRefManage from '../pages/clc/RefManage'
 import ClcSnapManage from '../pages/clc/SnapManage'
@@ -130,6 +132,10 @@ export default function AppRoutes() {
       >
         <Route path="clc/cluster" element={<ClcClusterManage />} />
         <Route path="clc/node" element={<ClcNodeManage />} />
+        {/* MU menu-clc-template → frmClcTemplate(AGG-CLC-08, FUNC-36~43)；index 默认跳转仍为 /clc/cluster 不动 */}
+        <Route path="clc/template" element={<ClcTemplateManage />} />
+        {/* MU menu-clc-wizard → frmClcWizard(AGG-CLC-06,FUNC-44/45/46/48/49/50);seed.go 本批无此菜单行,待后端补种(见 #69 回报) */}
+        <Route path="clc/wizard" element={<ClcWizardConsole />} />
         <Route path="clc/orch" element={<ClcOrchManage />} />
         <Route path="clc/ref" element={<ClcRefManage />} />
         <Route path="clc/snap" element={<ClcSnapManage />} />

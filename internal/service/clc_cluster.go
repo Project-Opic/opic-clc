@@ -1,7 +1,7 @@
 // clc_cluster.go —— AGG-CLC-01 集群行为实现(m2 FUNC-01/02/05/16/19/20/28/29)。
 //
-// 事务口径:前置校验 → 规则校验(INV-01~09/R-01/R-05/R-10/R-11/R-13) → 状态变更 →
-// 快照留痕 → syncTriggers 联动(引用双写/参数派生) → 审计 + 事件旁路发布。
+// 事务口径:前置校验 → 规则校验(INV-01~09/R-01/R-05/R-10/R-11/R-13/R-20) → 状态变更 →
+// 快照留痕 → syncTriggers 联动(模板实例化展开 R-20 / 引用双写 R-01 / 参数派生 R-04) → 审计 + 事件旁路发布。
 // 编号 CLU 由 genBizNo 同事务生成;销毁走 FLOW-PROC-APP-01 审批(保存草稿/提交双按钮)。
 package service
 
@@ -134,7 +134,19 @@ func CrossClusterList(page, size int, p map[string]any) (*Page, error) {
 }
 
 // CreateCluster FUNC-01 创建集群(四步向导提交)。
-// 事务内:集群 + 节点 + 引用台账(双写 R-01) + 首快照(M6 FLOW-PROC-01 A02)。
+//
+// 事务内:模板实例化(R-20,可选腿) + 集群 + 节点 + 引用台账(双写 R-01) + 参数派生(R-04)
+// + 首快照(M6 FLOW-PROC-01 A02)。
+//
+// R-20 模板实例化口径(DEF-07):
+//   - d["template_ref"] 为空 ⇒ 既有手填路径,以下所有分支不进入,行为逐字不变(INV-49「空 = 未走模板」);
+//   - 非空 ⇒ 只实例化三个面:① 来源模板引用(template_ref 只在本瞬间写一次,此后只读、无改绑口);
+//     ② 交付版本引用(请求缺项时补位);③ 参数默认值(整组落 clc_param,param_source='TEMPLATE')。
+//   - 拓扑面不在服务端造节点行:clc_cluster_node.ip_address 是 NOT NULL 列,而 spec 2.11 ⑤ 明确
+//     「模板刻意不含地址/主机名/凭据」(携带地址即制造过期真相)。R-20 展开的三个面里,角色拓扑
+//     (group_name / node_role / expected_count)是向导第二步「人工预填节点位」的数据来源,
+//     节点行仍由请求的 nodes 经既有 createNodesTx 落库 —— 服务端凭空 INSERT 占位地址行
+//     等于用假数据替未发生的现场填动作作证。
 func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 	if err := validateClusterInput(d); err != nil {
 		return nil, err
@@ -147,6 +159,24 @@ func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 	if runMode == "" {
 		runMode = RunModeMCC
 	}
+	// ---------- R-20 实例化腿(前置读取:引用展开先于既有校验)----------
+	templateNo := strings.TrimSpace(Str(d["template_ref"]))
+	var reqParams []clcParamLine
+	if templateNo != "" {
+		tpl, err := clcInstantiateTemplateRead(store.DB, templateNo)
+		if err != nil {
+			return nil, err
+		}
+		// 交付版本引用展开:请求已带 ⇒ 以请求为准,不覆盖;请求未带且模板带 ⇒ 取模板的。
+		// 展开必须发生在 checkVersionRef(REF-05)与 checkRefConsistency(INV-04/REF-01)之前,
+		// 让两条既有校验对模板补位后的引用同样生效。
+		if strings.TrimSpace(refs["version_ref"]) == "" {
+			refs["version_ref"] = strings.TrimSpace(Str(tpl["version_ref"]))
+		}
+		if reqParams, err = clcRequestParamLines(d["params"]); err != nil {
+			return nil, err
+		}
+	}
 	// REF-05 交付版本引用口径
 	if err := checkVersionRef(refs["version_ref"]); err != nil {
 		return nil, err
@@ -156,6 +186,7 @@ func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 		return nil, err
 	}
 	var created map[string]any
+	var expandedParams int
 	err := tx(func(db *gorm.DB) error {
 		// INV-01:集群名称在未销毁范围内唯一(不区分大小写,保存即校验)
 		if dup, err := store.One(db, `SELECT id FROM clc_cluster WHERE flag=1 AND LOWER(name)=LOWER(?)`, Str(d["name"])); err != nil {
@@ -163,18 +194,26 @@ func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 		} else if dup != nil {
 			return bizRuleFail("INV-01", "集群名称「%s」已存在(未销毁范围内唯一)", Str(d["name"]))
 		}
+		// 模板行在事务内复查(与集群写入同一事务;并发停用/软删不得漏过 —— 与 FUNC-42「前置校验与
+		// 写入同事务复查」同纪律),失败即整个事务回滚,零写入。
+		if templateNo != "" {
+			if _, err := clcInstantiateTemplateRead(db, templateNo); err != nil {
+				return err
+			}
+		}
 		no, err := genBizNo(db, NoPrefixCluster, tblCluster, "cluster_no")
 		if err != nil {
 			return err
 		}
+		// template_ref 只在这一瞬间写一次(INV-49:建成后只读,UpdateCluster 不再有该列的写口)
 		if _, err := store.Exec(db, `
 			INSERT INTO clc_cluster (cluster_no, name, description, cluster_dns_domain,
 				version_ref, executor_ref, registry_ref, registry_project_ref, run_mode, status, health,
-				created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				template_ref, created_by, updated_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			no, Str(d["name"]), d["description"], Str(d["cluster_dns_domain"]),
 			refs["version_ref"], refs["executor_ref"], refs["registry_ref"], refs["registry_project_ref"],
-			runMode, ClusterStatusDraft, HealthUnknown, user.ID, user.ID); err != nil {
+			runMode, ClusterStatusDraft, HealthUnknown, nullableText(templateNo), user.ID, user.ID); err != nil {
 			return err
 		}
 		// R-01 双写:内联列(已写) + 引用台账
@@ -182,8 +221,18 @@ func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 			return err
 		}
 		// 四步向导:节点登记(可选,nodes:[{ip_address,node_role,asset_ref}])
+		// —— 模板的节点组不在此生成节点行,依据见本函数头部注释(地址是现场事实,不是配方)
 		if err := createNodesTx(db, no, d["nodes"], user); err != nil {
 			return err
+		}
+		// R-20 参数面展开(整组默认值 + 请求同键以请求为准),须在 R-04 派生之前:
+		// 派生侧同键命中已有行时按既有口径就地更新值/注记,不新增行,故不撞 uq_param_cluster_key。
+		if templateNo != "" {
+			n, err := expandTemplateParamsTx(db, no, templateNo, reqParams, user)
+			if err != nil {
+				return err
+			}
+			expandedParams = n
 		}
 		// R-04 联动:引用派生参数(镜像源固定映射)
 		if err := deriveParamsTx(db, no, refs, user); err != nil {
@@ -200,13 +249,139 @@ func CreateCluster(d map[string]any, user UserInfo) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	WriteAudit(nil, user.ID, user.Username, "FUNC-01", fmt.Sprintf("创建集群 %s(%s):运行模式 %s,引用 %s",
-		Str(created["cluster_no"]), Str(d["name"]), runMode, sortedSummary(refs)))
-	publishClcEvent("clc.cluster.created", map[string]any{"cluster_no": Str(created["cluster_no"]), "name": Str(d["name"]), "run_mode": runMode})
+	fromTpl := ""
+	if templateNo != "" {
+		fromTpl = fmt.Sprintf(",来源模板 %s(展开参数默认值 %d 项,INV-49 建成后不回写)", templateNo, expandedParams)
+	}
+	WriteAudit(nil, user.ID, user.Username, "FUNC-01", fmt.Sprintf("创建集群 %s(%s):运行模式 %s,引用 %s%s",
+		Str(created["cluster_no"]), Str(d["name"]), runMode, sortedSummary(refs), fromTpl))
+	event := map[string]any{"cluster_no": Str(created["cluster_no"]), "name": Str(d["name"]), "run_mode": runMode}
+	if templateNo != "" {
+		event["template_ref"] = templateNo // 只出模板编号事实,不含任何参数值/凭据(INV-08)
+	}
+	publishClcEvent("clc.cluster.created", event)
 	return GetCluster(Int(created["id"]))
 }
 
+// ---------- R-20 模板实例化助手 ----------
+
+// clcInstantiateTemplateRead 读取并校验「可被实例化」的模板行(spec 2.10:仅 ENABLED 可被向导实例化)。
+// 不存在 / 已软删由 clcTemplateLiveByNo 给中文拒绝;草稿态与停用态都拒绝并说明当前是什么态
+// (草稿=还没编辑完、停用=曾上架后下架,下一步动作相反,故文案不得混为一谈)。
+// 事务前(取版本引用做展开)与事务内(与写入同事务复查)各调一次,两次同一把尺子。
+func clcInstantiateTemplateRead(db *gorm.DB, templateNo string) (map[string]any, error) {
+	row, err := clcTemplateLiveByNo(db, templateNo)
+	if err != nil {
+		return nil, err
+	}
+	status := Str(row["template_status"])
+	if status != TemplateStatusEnabled {
+		return nil, Fail(errcode.ErrState,
+			"集群模板 %s 当前是「%s」态,不能被向导实例化:仅启用(ENABLED)态是合法的建群配方(草稿需先启用、停用需先重新启用,FUNC-40;INV-51 / spec 2.10)",
+			templateNo, clcTemplateStateLabel(status))
+	}
+	return row, nil
+}
+
+// clcParamLine 实例化时的一行参数(键原样透传、不建字典,口径同模板侧 INV-52)。
+type clcParamLine struct {
+	key   string
+	value string
+}
+
+// clcRequestParamLines 请求侧参数行归一(d["params"]:[{param_key,param_value}])。
+// 键按 LOWER 收口判重与判命中(与 uq_param_cluster_key 的 LOWER(param_key) 同一把尺子),
+// 落库仍用原样键。仅在模板实例化腿调用:无模板的手填路径不在此处落参数
+// (既有口径不变,人工覆写走 FUNC-14 专用口)。
+func clcRequestParamLines(raw any) ([]clcParamLine, error) {
+	items, _ := raw.([]any)
+	seen := map[string]bool{}
+	out := make([]clcParamLine, 0, len(items))
+	for i, it := range items {
+		m, ok := it.(map[string]any)
+		if !ok {
+			return nil, Fail(errcode.ErrParam, "第 %d 行参数必须是对象(param_key + param_value),提交形态非法", i+1)
+		}
+		key := strings.TrimSpace(Str(m["param_key"]))
+		if key == "" {
+			return nil, Fail(errcode.ErrParam, "第 %d 行参数缺少参数键(键沿用集群参数键域口径,不建字典)", i+1)
+		}
+		lk := strings.ToLower(key)
+		if seen[lk] {
+			return nil, bizRuleFail("INV-20", "参数键 %q 在本次提交内重复(集群内参数键唯一)", key)
+		}
+		seen[lk] = true
+		out = append(out, clcParamLine{key: key, value: Str(m["param_value"])})
+	}
+	return out, nil
+}
+
+// expandTemplateParamsTx R-20 参数默认值展开(事务内):
+//  1. 模板 clc_template_param 存活行整组落 clc_param,param_source='TEMPLATE'(字典既有第三值,
+//     模板展开专用),空串值原样保留 —— spec 明确「空串 = 须现场填」是合法配方值,不是缺失;
+//  2. 请求同键以请求为准(模板只补默认值),请求行按人工输入落 param_source='MANUAL_OVERRIDE'
+//     (留痕由本行为的 FUNC-01 审计承担,口径同 INV-21);
+//  3. 值命中凭据形态 ⇒ 整条拒绝(INV-08 零出口兜底:模板登记侧已用同一把尺子拒收,
+//     这里防库外直写/历史脏值顺着实例化传染进集群参数;报错只出键不出值,绝不静默截断或掩码入库)。
+//
+// 返回实际落库行数(模板行 + 请求行),供审计文案与用例断言。
+func expandTemplateParamsTx(db *gorm.DB, clusterNo, templateNo string, reqParams []clcParamLine, user UserInfo) (int, error) {
+	rows, err := store.List(db, `SELECT param_key, param_value FROM clc_template_param
+		WHERE template_ref = ? AND flag = 1 ORDER BY sort_no`, templateNo)
+	if err != nil {
+		return 0, err
+	}
+	taken := map[string]bool{}
+	for _, p := range reqParams {
+		taken[strings.ToLower(p.key)] = true
+	}
+	written := 0
+	for _, r := range rows {
+		key := strings.TrimSpace(Str(r["param_key"]))
+		lk := strings.ToLower(key)
+		if taken[lk] {
+			continue // 请求已带同键 ⇒ 以请求为准,模板默认值不覆盖
+		}
+		taken[lk] = true
+		value := Str(r["param_value"])
+		if clcTemplateHasCredentialShape(value) {
+			return 0, bizRuleFail("INV-08",
+				"模板 %s 的参数 %q 默认值命中凭据形态(口令/令牌/私钥类):凭据值不得进集群参数,实例化整条拒绝。请回模板台(FUNC-39)把该键改成存放位置标识或留空由现场填",
+				templateNo, key)
+		}
+		if err := insertClusterParamTx(db, clusterNo, key, value, ParamSourceTemplate, user); err != nil {
+			return 0, err
+		}
+		written++
+	}
+	for _, p := range reqParams {
+		if err := insertClusterParamTx(db, clusterNo, p.key, p.value, ParamSourceOverride, user); err != nil {
+			return 0, err
+		}
+		written++
+	}
+	return written, nil
+}
+
+// insertClusterParamTx 落一行集群参数(INV-20 集群内键唯一,事务内先查再插;
+// TEMPLATE / MANUAL_OVERRIDE 两项均无派生上游,derived_from 与 derive_note 留空、sync_pending=0)。
+func insertClusterParamTx(db *gorm.DB, clusterNo, key, value, source string, user UserInfo) error {
+	dup, err := store.One(db, `SELECT id FROM clc_param WHERE cluster_ref=? AND flag=1 AND LOWER(param_key)=LOWER(?)`, clusterNo, key)
+	if err != nil {
+		return err
+	}
+	if dup != nil {
+		return bizRuleFail("INV-20", "集群参数键 %q 已存在(集群内键唯一)", key)
+	}
+	_, err = store.Exec(db, `
+		INSERT INTO clc_param (cluster_ref, param_key, param_value, param_source, sync_pending, created_by, updated_by)
+		VALUES (?, ?, ?, ?, 0, ?, ?)`, clusterNo, key, value, source, user.ID, user.ID)
+	return err
+}
+
 // UpdateCluster FUNC-02 集群信息修改(INV-01/04/05/07/09;编号只读)。
+// 来源模板引用不参与本行为的写口:template_ref 只在 FUNC-01 实例化瞬间写一次,此后只读、
+// 无改绑入口(INV-49);下方 UPDATE 语句刻意不含该列。
 func UpdateCluster(id int64, d map[string]any, user UserInfo) (map[string]any, error) {
 	old, err := GetCluster(id)
 	if err != nil {
@@ -506,7 +681,7 @@ func SyncClusterDestroyFromFlow(db *gorm.DB, businessKey string, flowStatus stri
 			return err
 		}
 		user := UserInfo{ID: 0, Username: "system"}
-		if _, err := createTaskTx(db, businessKey, TaskKindDestroy, execPathOf(c), user); err != nil {
+		if _, err := createTaskTx(db, businessKey, TaskKindDestroy, execPathOf(c), StepModeAuto, "", user); err != nil {
 			return err
 		}
 		if Str(c["status"]) != ClusterStatusDestroying {

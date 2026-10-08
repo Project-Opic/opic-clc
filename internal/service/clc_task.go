@@ -8,9 +8,14 @@ package service
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
 
 	"gorm.io/gorm"
 
+	"gitcode.com/opic-ontology/opic-techbase/internal/pkg/ontology"
 	"gitcode.com/opic-ontology/opic-techbase/internal/store"
 	"gitcode.com/opic-ontology/opic-techbase/pkg/errcode"
 )
@@ -54,11 +59,19 @@ func ListClusterTasks(page, size int, p map[string]any) (*Page, error) {
 
 // createTaskTx 任务创建(事务内;落 QUEUED,执行位置登记值 INV-32)。
 // QUEUED ⇒ 执行权由交付内核经槽位/互斥判定后授予(FLOW-PROC-06 A02);RUNNING 与 started_at 由内核写入。
-func createTaskTx(db *gorm.DB, clusterNo, kind, execPath string, user UserInfo) (map[string]any, error) {
+// stepMode 在创建瞬间落定且此后只读(REF-17 / INV-50):缺省由创建入口决定,内核不回改本列;
+// operationReason 只在需要事由的入口落值(高危派发 FUNC-46 建单即带;跳步 FUNC-45 事后累加)。
+func createTaskTx(db *gorm.DB, clusterNo, kind, execPath, stepMode, operationReason string, user UserInfo) (map[string]any, error) {
 	if err := checkTaskKind(kind); err != nil {
 		return nil, err
 	}
 	if err := checkExecPathRegistered(execPath); err != nil {
+		return nil, err
+	}
+	if stepMode == "" {
+		stepMode = StepModeAuto
+	}
+	if err := checkStepMode(stepMode); err != nil {
 		return nil, err
 	}
 	no, err := genBizNo(db, NoPrefixTask, "clc_task", "task_no")
@@ -66,12 +79,31 @@ func createTaskTx(db *gorm.DB, clusterNo, kind, execPath string, user UserInfo) 
 		return nil, err
 	}
 	if _, err := store.Exec(db, `
-		INSERT INTO clc_task (task_no, cluster_ref, task_kind, task_status, execution_path, submitted_by, created_by, updated_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		no, clusterNo, kind, TaskStatusQueued, execPath, user.Username, user.ID, user.ID); err != nil {
+		INSERT INTO clc_task (task_no, cluster_ref, task_kind, task_status, execution_path, step_mode, operation_reason,
+			submitted_by, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		no, clusterNo, kind, TaskStatusQueued, execPath, stepMode, nilIfEmpty(clampRunes(operationReason, maxOperationReason)),
+		user.Username, user.ID, user.ID); err != nil {
 		return nil, err
 	}
 	return store.One(db, `SELECT * FROM clc_task WHERE task_no = ?`, no)
+}
+
+// applyTaskOperationReasonTx 事由累加写任务头(R-24「代价留在数据上」的落点;后写不覆盖先写)。
+// step_mode 列不参与任何 UPDATE(INV-50 只读),本函数只动 operation_reason。
+func applyTaskOperationReasonTx(db *gorm.DB, taskNo, reason string, user UserInfo) error {
+	if strings.TrimSpace(reason) == "" {
+		return nil
+	}
+	cur, err := store.One(db, `SELECT operation_reason FROM clc_task WHERE task_no=? AND flag=1`, taskNo)
+	if err != nil || cur == nil {
+		return err
+	}
+	joined := appendReasonText(Str(cur["operation_reason"]), reason, maxOperationReason)
+	_, err = store.Exec(db, `UPDATE clc_task SET operation_reason=?, updated_by=?,
+		updated_at=to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE task_no=? AND flag=1`,
+		joined, user.ID, taskNo)
+	return err
 }
 
 // finishTaskTx 任务终态回写(事务内;INV-29 终态口径;R-09 INSTALL/RETRY_INSTALL 失败写回集群失败步骤索引)。
@@ -224,13 +256,33 @@ func runClusterAction(clusterID int64, kind string, d map[string]any, user UserI
 		}
 	}
 	var taskNo string
+	// REF-17:步进模式缺省按创建入口取 —— 本骨架是各入口的公共下游,非向导入口(编排屏
+	// business/clc.go ClcTaskAction 的 INSTALL/RETRY_INSTALL/UPGRADE/BACKUP/RESTORE/START/STOP、
+	// 审批回调 SyncClusterDestroyFromFlow、定时看护)都不写 d["step_mode"] ⇒ 缺省 AUTO,
+	// v1.1 连跑行为逐字不变;向导入口(clc_wizard.go 的 WizardStepRetry)在进入本口之前
+	// 已把显式取值(STEP)写回 d["step_mode"],由紧随其后的 resolveStepMode 优先采纳。
+	stepMode, err := resolveStepMode(Str(d["step_mode"]), StepModeAuto)
+	if err != nil {
+		return nil, err
+	}
 	err = tx(func(db *gorm.DB) error {
-		task, err := createTaskTx(db, clusterNo, kind, execPath, user)
+		task, err := createTaskTx(db, clusterNo, kind, execPath, stepMode, Str(d["operation_reason"]), user)
 		if err != nil {
 			return err
 		}
 		taskNo = Str(task["task_no"])
-		return apply(db, c, task)
+		if err := apply(db, c, task); err != nil {
+			return err
+		}
+		// INV-45 先展开后执行 + m2 FUNC-44 前置「步骤名与序次全部读 FUNC-34 数据行」:
+		// 步骤行须在创建事务内即落库,STEP 任务停在排队态(等人派发)时向导步进台才能渲染清单;
+		// 生命周期台单步动作(FUNC-46)同样在此展开一行(R-17)。执行协程内的同名展开
+		// (clc_delivery.go execute 的 INV-45 兜底)对已展开任务幂等返回,不产生第二行集(INV-37)。
+		resumeFrom := 0
+		if kind == TaskKindRetryInstall && c["install_step_index"] != nil {
+			resumeFrom = int(paramInt(c["install_step_index"]))
+		}
+		return expandStepsTx(db, taskNo, kind, clusterNo, resumeFrom, clusterActionArgs(d).NodeIPs, user)
 	})
 	if err != nil {
 		return nil, err
@@ -268,8 +320,179 @@ func behaviorOf(kind string) string {
 		return "FUNC-11"
 	case TaskKindStart, TaskKindStop:
 		return "FUNC-12"
+	case TaskKindCertRenew:
+		// m2 FUNC-46:控制面证书续期是生命周期台的显式登记项(既有 CLC_TASK_KIND 着陆,不新增类别值)
+		return "FUNC-46"
 	}
 	return "FUNC-03"
+}
+
+// ---------- DEF-06:task_kind → 行为级权限分档(从运行时本体注册表派生,不在 Go 里抄码表) ----------
+//
+// 本段运行时不携带任何「kind→权限码」字面量表 —— 解析链两级都读注册表(ontology.Load()):
+//
+//	① kind→所属行为(FUNC-nn):由 m2 行为的 postconditions 派生 —— field == "ClusterTask.taskKind"
+//	   的落点(setValue 中命中 CLC_TASK_KIND 字典码的 token)登记在 taskKindBehaviorIndex;
+//	   模型当前显式着陆 RETRY_INSTALL/UPGRADE/BACKUP/RESTORE/START/STOP(以及被 FUNC-31 着陆的 DESTROY)。
+//	   INSTALL(FUNC-03 本体)与 CERT_RENEW(FUNC-46 本体)在 m2 没有 taskKind 后置条件行 ——
+//	   模型未显式绑定,由 behaviorOf(审计留痕的既有同一映射,即本 handler switch 各分支实际实现的行为)兜底;
+//	② 行为→权限码:注册表 Behaviors[FUNC-nn]["requiredPermissions"](m2 每行为自带,逐条 PERM-FUNC-nn)反查,
+//	   并对 m5 侧校验:该码必须已注册在 Permissions 表且 targetRef 指回该行为 —— 链条任一环断裂 ⇒ 解析不出,
+//	   CheckTaskKindPermission 一律拒绝(fail-closed),不放行。
+//
+// 下表是模型的当前口径(运行时以注册表派生结果为准;TestTaskKindPermCodeDerivedFromOntology 把它钉成断言,
+// models/ 漂移时该用例必须红,而不是靠本注释):
+//
+//	task_kind        m2 行为    权限码           m2 行为名              m5 发牌角色
+//	INSTALL          FUNC-03    PERM-FUNC-03     发起安装                CLC-ROLE-01
+//	RETRY_INSTALL    FUNC-04    PERM-FUNC-04     安装续跑                CLC-ROLE-01
+//	UPGRADE          FUNC-09    PERM-FUNC-09     发起升级                CLC-ROLE-01
+//	BACKUP           FUNC-10    PERM-FUNC-10     发起备份                CLC-ROLE-01
+//	RESTORE          FUNC-11    PERM-FUNC-11     发起恢复                CLC-ROLE-01
+//	START / STOP     FUNC-12    PERM-FUNC-12     集群启停                CLC-ROLE-01
+//	CERT_RENEW       FUNC-46    PERM-FUNC-46     生命周期台动作派发       CLC-ROLE-01
+//	ADD_NODE         FUNC-06    PERM-FUNC-06     添加节点                CLC-ROLE-01(专用口 routes.go:70,不经本门)
+//	DEL_NODE         FUNC-07    PERM-FUNC-07     移除节点                CLC-ROLE-01(专用口 routes.go:71,不经本门)
+//	DESTROY          FUNC-05    PERM-FUNC-05     集群销毁·提交申请       CLC-ROLE-01(唯一经审批流 PROC-APP-01,任何派发口都不直派)
+//
+// m5 发牌集摘要(与上表配套的「谁持有哪一档」):
+//
+//	CLC-ROLE-01 集群管理员:PERM-FUNC-01~27、29、33~40、42~50 —— 独占上表全部交付动作档;
+//	CLC-ROLE-02 平台运维管理员:PERM-FUNC-19~29、30~32、34~37、41、47 —— 不含 03/04/09/10/11/12/46,
+//	  即「平台侧运维」能管引用/参数/模板,但不得对集群发起任何交付动作;
+//	CLC-ROLE-03 集群审计员 / CLC-ROLE-04 集群只读用户:只读档,不含任何交付动作档;
+//	CLC-ROLE-05 下游能力中心:仅 PERM-FUNC-28。
+//
+// ADD_NODE/DEL_NODE/DESTROY 三行刻意不进本门(受理集见 taskActionGatedKind):它们各有专用口
+// (专用口已有路由级门),而 DESTROY 在派发口由既有 INV-33 分支拒绝 —— 本门不得改写它的既有报错口径。
+// 表外 task_kind ⇒ CheckTaskKindPermission 一律拒绝(无默许通道)。
+var taskKindBehaviorRe = regexp.MustCompile(`[A-Z][A-Z0-9_]*`)
+
+var (
+	taskKindBehaviorOnce sync.Once
+	// taskKindBehaviorIdx kind→FUNC-nn:纯 m2 postconditions 派生结果(不含兜底行为)。
+	taskKindBehaviorIdx map[string]string
+)
+
+// taskKindBehaviorIndex 从注册表惰性派生「任务类别→显式着陆该类别的行为」。
+// token 只认 CLC_TASK_KIND 字典码(过滤「INV」「REF」等伴随 token);行为按编号升序遍历,
+// 同一类别被多个行为显式着陆时取首个(当前模型无此类竞争,排序仅为派生结果可复现)。
+func taskKindBehaviorIndex() map[string]string {
+	taskKindBehaviorOnce.Do(func() {
+		reg := ontology.Load()
+		kindSet := map[string]bool{}
+		for _, it := range reg.GetDictionaryItems("DICT-CLC_TASK_KIND", "CLC_TASK_KIND") {
+			kindSet[it["code"]] = true
+		}
+		ids := make([]string, 0, len(reg.Behaviors))
+		for id := range reg.Behaviors {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		idx := map[string]string{}
+		for _, id := range ids {
+			pcs, _ := reg.Behaviors[id]["postconditions"].([]any)
+			for _, pc := range pcs {
+				pm, ok := pc.(map[string]any)
+				if !ok || Str(pm["field"]) != "ClusterTask.taskKind" {
+					continue
+				}
+				for _, tok := range taskKindBehaviorRe.FindAllString(Str(pm["setValue"]), -1) {
+					if !kindSet[tok] {
+						continue
+					}
+					if _, dup := idx[tok]; !dup {
+						idx[tok] = id
+					}
+				}
+			}
+		}
+		taskKindBehaviorIdx = idx
+	})
+	return taskKindBehaviorIdx
+}
+
+// taskActionGatedKind 本门受理集 = /task handler 七个 switch 分支 ∪ 生命周期台直派动作集
+// (clc_wizard.go lifecycleActionKinds)。这是「哪些类别归行为级分档门管」的作用域声明,
+// 不含任何权限语义;权限码一律从注册表反查,不在此处出现。
+func taskActionGatedKind(kind string) bool {
+	switch kind {
+	case TaskKindInstall, TaskKindRetryInstall:
+		return true
+	default:
+		return lifecycleActionKinds[kind]
+	}
+}
+
+// lookupTaskKindPerm 解析 kind 的行为级权限码:kind→行为(postconditions 派生优先,
+// INSTALL/CERT_RENEW 由 behaviorOf 兜底)→注册表 requiredPermissions→m5 注册校验。
+// ok=false = 解析链断裂(行为未注册 / requiredPermissions 缺失或与 m5 不同源),调用方必须拒绝。
+func lookupTaskKindPerm(kind string) (permCode, behaviorID string, ok bool) {
+	behaviorID, derived := taskKindBehaviorIndex()[kind]
+	if !derived {
+		behaviorID = behaviorOf(kind) // 兜底:模型未显式着陆 taskKind 的入口行为本体(FUNC-03 / FUNC-46)
+	}
+	reg := ontology.Load()
+	b := reg.Behaviors[behaviorID]
+	if b == nil {
+		return "", "", false
+	}
+	list, _ := b["requiredPermissions"].([]any)
+	if len(list) != 1 {
+		return "", "", false // m2 口径:交付动作行为逐条一码;多码/缺码说明模型漂移,拒绝而非猜
+	}
+	code := Str(list[0])
+	if p := reg.Permissions[code]; p == nil || Str(p["targetRef"]) != behaviorID {
+		return "", "", false // 与 m5 permissions 注册表对不上(码不存在或 targetRef 不指回该行为)
+	}
+	return code, behaviorID, true
+}
+
+// TaskKindPermCode 查 task_kind 所属的行为级权限码;ok=false 表示该类别不在交付动作派发门内
+// (专用口类别 ADD_NODE/DEL_NODE 与审批流唯一类别 DESTROY,以及一切字典外取值),
+// 或注册表解析链断裂(fail-closed)。
+func TaskKindPermCode(kind string) (string, bool) {
+	k := strings.ToUpper(strings.TrimSpace(kind))
+	if !taskActionGatedKind(k) {
+		return "", false
+	}
+	code, _, ok := lookupTaskKindPerm(k)
+	return code, ok
+}
+
+// CheckTaskKindPermission DEF-06 第二道门:同一 handler 内按 task_kind 复查「这一档动作」自己的权限。
+//
+// 为什么需要第二道:路由级 middleware.perm(...) 是「一道门管一族动作」的粗粒度门
+// (routes.go:84 task-action 挂 PERM-FUNC-03、routes.go:116 lifecycle-action 挂 PERM-FUNC-46),
+// 只保证「调用者能进这个口」,不等于他能发起这一档具体动作 —— 持 PERM-FUNC-46 的人不该
+// 顺手发起 UPGRADE(PERM-FUNC-09),持 PERM-FUNC-03 的人不该顺手 STOP(PERM-FUNC-12)。
+// m2/m5 把每一档动作单独发牌,本函数就是那份发牌集的执行力;调用点必须落在任何副作用之前
+// (不建 clc_task 行、不写审计、不发事件、不碰交付门面)。
+//
+// 报错口径:沿用既有权限门的 errcode(errcode.ErrForbidden)与「无权限…」措辞,不新造码。
+// 授权查询失败(库不可用等)同样拒绝 —— 判定不确定时不放行(fail-closed)。
+func CheckTaskKindPermission(user UserInfo, kind string) error {
+	k := strings.ToUpper(strings.TrimSpace(kind))
+	if !taskActionGatedKind(k) {
+		return Fail(errcode.ErrForbidden,
+			"无权限发起交付动作「%s」:该类别不在 M2 交付动作派发档位表内(表外类别一律拒绝,无默许通道)", kind)
+	}
+	code, behaviorID, ok := lookupTaskKindPerm(k)
+	if !ok {
+		// 映射缺失(注册表里该行为不存在 / requiredPermissions 与 m5 注册不同源)⇒ 拒绝而非放行(fail-closed)。
+		return Fail(errcode.ErrForbidden,
+			"无权限发起交付动作「%s」:本体注册表中无法确认该动作的行为级授权(行为 %s 的发牌口径与 m5 注册表对不上),按拒绝处理", kind, behaviorOf(k))
+	}
+	granted, err := HasPermission(nil, user.ID, code)
+	if err != nil {
+		return Fail(errcode.ErrForbidden, "无权限发起交付动作「%s」:授权校验未完成(%v),按拒绝处理", kind, err)
+	}
+	if !granted {
+		return Fail(errcode.ErrForbidden,
+			"无权限执行该操作:交付动作「%s」是 %s 档(M2 行为级授权),需持有 %s;当前用户未获发该牌(M5 发牌集:交付动作档仅 CLC-ROLE-01 集群管理员持有)",
+			k, behaviorID, code)
+	}
+	return nil
 }
 
 // StartUpgrade FUNC-09 发起升级(前置 RUNNING;版本引用变更与 CHANGE 快照在成功落点 B-AUTO-09 后回写)。

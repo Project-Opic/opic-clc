@@ -36,6 +36,15 @@
 //	            回滚校验、销毁编排、健康双源、失败写回、销毁审批前置、显式恢复、重绑定校验、安装成功落点
 //	R-14~R-19  步骤失败回写链、任务取消处置、远端回执对账、续跑步骤展开、执行并发与互斥、
 //	            远程交付受理的登记事实携带(节点清单三档取用 + 版本引用仅安装族 + 永不携命令面)
+//
+// v1.2 易用性增补新增族(步进 / 跳步 / 只读代理):
+//
+//	REF-17     步进模式缺省按创建入口而定(向导 STEP,其余 AUTO;页内切换是创建前的显式覆盖)
+//	REF-18     节点 SSH 登录标识的展示口径(登录用户@节点地址,只出标识不出凭据值)
+//	INV-50     步进模式创建瞬间落定且只读;STEP 下只有首个 PENDING 可派发
+//	R-23       步进派发不改对外口径(B-AUTO-10 同一个循环;置灰不谎报)
+//	R-24       跳步与高危动作的事由必填 + 归因如实(代价留在数据上)
+//	R-25       交付配置只读代理(同一令牌、独立权限码、不留副本、不写)
 package service
 
 import (
@@ -212,6 +221,27 @@ func checkTaskKind(kind string) error {
 		return bizRuleFail("INV-28", "任务类别「%s」不在 CLC_TASK_KIND 字典内", kind)
 	}
 	return nil
+}
+
+// checkStepMode INV-50 / REF-17:步进模式只取 CLC_STEP_MODE 字典两项(创建瞬间落定,此后只读)。
+func checkStepMode(mode string) error {
+	if !dictCodes("DICT-CLC_STEP_MODE", "CLC_STEP_MODE", StepModeStep, StepModeAuto)[mode] {
+		return bizRuleFail("INV-50", "推进模式只能取 STEP(逐步确认)或 AUTO(连跑),收到「%s」——该取值在任务创建瞬间落定且运行中不可互转", mode)
+	}
+	return nil
+}
+
+// resolveStepMode 创建入口缺省 + 页内显式覆盖(REF-17):
+// 显式提交值优先(会话态切换只覆盖本入口缺省),未提交即取入口缺省;非法取值即拒(提交时强制)。
+func resolveStepMode(raw, entryDefault string) (string, error) {
+	v := strings.ToUpper(strings.TrimSpace(raw))
+	if v == "" {
+		return entryDefault, nil
+	}
+	if err := checkStepMode(v); err != nil {
+		return "", err
+	}
+	return v, nil
 }
 
 // checkTaskFinal INV-29:终态必须有结束时间与结果摘要;FAILED 必填失败原因;

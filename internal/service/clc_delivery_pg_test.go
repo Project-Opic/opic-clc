@@ -105,6 +105,21 @@ func openAndMigrate(dsn string) (func(), error) {
 	}
 	store.DB = db
 	config.Config.Ontology.ModelsDir = filepath.Join("..", "..", "models")
+	// DEF-06 之后,服务层派发口(clc_wizard.go DispatchLifecycleAction → clc_task.go
+	// CheckTaskKindPermission)会真读 sys_user_role/sys_role_permission。既有用例以 testUser
+	// (ID=1)直调派发口并期待放行,故装置在迁移后把 m5 的 CLC-ROLE-01(集群管理员,持有全部交付
+	// 动作档 PERM-FUNC-03/04/09~12/46)绑到该用例用户上。
+	// 只加授权、不改任何断言;迁移 000006 已按 idempotent 方式备好 sys_role/sys_permission/
+	// sys_role_permission,这里只补用户↔角色这一条边(幂等)。
+	// 无牌用例(DEF-06 拒绝路径)不在此授权 —— 由用例自带专用用户 ID 天然不持牌。
+	if _, err := store.Exec(nil, `
+		INSERT INTO sys_user_role (user_id, role_id)
+		SELECT 1, r.id FROM sys_role r
+		WHERE r.code = 'CLC-ROLE-01'
+		  AND NOT EXISTS (SELECT 1 FROM sys_user_role ur WHERE ur.user_id = 1 AND ur.role_id = r.id)`); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("测试装置授权(CLC-ROLE-01→用例用户)失败: %w", err)
+	}
 	return func() { _ = sqlDB.Close() }, nil
 }
 

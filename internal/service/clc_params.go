@@ -51,6 +51,7 @@ func SavePlatformParams(items map[string]string, user UserInfo) ([]map[string]an
 		"clc.wizard_default_executor":          func(string) error { return nil },
 		"clc.wizard_default_version":           func(string) error { return nil },
 		"clc.wizard_default_registry_instance": func(string) error { return nil },
+		"clc.ssh_login_user":                   func(string) error { return nil },
 	}
 	err := tx(func(db *gorm.DB) error {
 		for k, v := range items {

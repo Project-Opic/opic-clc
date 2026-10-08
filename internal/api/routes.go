@@ -81,6 +81,10 @@ func SetupRoutes(r *gin.Engine) {
 		authed.POST("/clc/snapshot/:id/rollback", perm("PERM-FUNC-18", business.ClcSnapshotRollback)...)
 		// 任务(AGG-CLC-06)
 		authed.GET("/clc/task", perm("PERM-FUNC-25", business.ClcTaskList)...)
+		// DEF-06:本行只挂 PERM-FUNC-03 是「入口档」(发起交付动作的总门),不是行为档 ——
+		// ClcTaskAction 按 task_kind 分派 FUNC-03/04/09/10/11/12 七个行为,m2/m5 对每档行为各自发牌,
+		// 一条码挂七个行为=分档丢失;行为档(UPGRADE 需 09、启停需 12 等)在 handler 内、任何副作用
+		// 之前由第二道门按注册表派生的 kind→权限码复查(business/clc.go + service/clc_task.go),两道刻意叠加。
 		authed.POST("/clc/cluster/:id/task", perm("PERM-FUNC-03", business.ClcTaskAction)...)
 		// 交付执行内核(FUNC-33/34/35,v1.1;SSE 与日志回放同源权限)
 		authed.POST("/clc/task/:no/cancel", perm("PERM-FUNC-33", business.ClcTaskCancel)...)
@@ -94,6 +98,34 @@ func SetupRoutes(r *gin.Engine) {
 		// 平台参数(FUNC-30)
 		authed.GET("/clc/params", business.ClcParamsGet)
 		authed.PUT("/clc/params", perm("PERM-FUNC-30", business.ClcParamsSave)...)
+		// 集群模板(AGG-CLC-08,FUNC-36~43;v1.2「集群模板台」frmClcTemplate)
+		// 注:克隆挂在 /clc/template-clone 而非 /clc/template/clone —— gin 同一方法树里
+		// 静态段与 :no 参数段同级会 panic,这是树形路由的硬约束,不是命名偏好。
+		authed.GET("/clc/template", perm("PERM-FUNC-36", business.ClcTemplateList)...)
+		authed.GET("/clc/template/:no", perm("PERM-FUNC-37", business.ClcTemplateGet)...)
+		authed.POST("/clc/template", perm("PERM-FUNC-38", business.ClcTemplateCreate)...)
+		authed.PUT("/clc/template/:no/groups", perm("PERM-FUNC-39", business.ClcTemplateGroupsSave)...)
+		authed.POST("/clc/template/:no/enable", perm("PERM-FUNC-40", business.ClcTemplateEnable)...)
+		authed.POST("/clc/template/:no/disable", perm("PERM-FUNC-40", business.ClcTemplateDisable)...)
+		authed.POST("/clc/template/:no/default", perm("PERM-FUNC-41", business.ClcTemplateSetDefault)...)
+		authed.DELETE("/clc/template/:no", perm("PERM-FUNC-42", business.ClcTemplateDelete)...)
+		authed.POST("/clc/template-clone", perm("PERM-FUNC-43", business.ClcTemplateClone)...)
+
+		// 向导步进 / 跳步 / 生命周期台派发(AGG-CLC-06,FUNC-44/45/46;v1.2「交付向导台 frmClcWizard / 生命周期台」)
+		// 注:步进与跳步挂 /clc/task/:no/...(与 FUNC-33/34/35 同在 :no 子树,静态段末级不冲突);
+		// 重试与生命周期派发挂 /clc/cluster/:id/...(与 :id 下既有静态段同级末级不同,不触发 gin 静态/参数同级 panic)。
+		authed.POST("/clc/task/:no/step-execute", perm("PERM-FUNC-44", business.ClcWizardStepExecute)...)
+		authed.POST("/clc/cluster/:id/wizard-retry", perm("PERM-FUNC-44", business.ClcWizardStepRetry)...)
+		authed.POST("/clc/task/:no/step-skip", perm("PERM-FUNC-45", business.ClcWizardStepSkip)...)
+		authed.POST("/clc/cluster/:id/lifecycle-action", perm("PERM-FUNC-46", business.ClcLifecycleAction)...)
+
+		// 只读代理与前置预检(AGG-CLC-01/02,FUNC-47/48/49/50;v1.2「节点登录标识 / 交付配置字段级视图 / 原文只读视图 / 交付前置预检」)
+		// 注:四条都是 GET,挂在既有 :id 子树末级静态段,与步进 / 生命周期台共用 :id 骨架不冲突
+		// (gin 静态段与 :id 同级 panic 的坑只在同方法树混合时才触发,本批四条均为 GET,新增段名互不相同)。
+		authed.GET("/clc/cluster/:id/node-login-identities", perm("PERM-FUNC-47", business.ClcNodeLoginIdentities)...)
+		authed.GET("/clc/cluster/:id/ign-config", perm("PERM-FUNC-48", business.ClcIgnDeliveryConfig)...)
+		authed.GET("/clc/cluster/:id/ign-config-raw", perm("PERM-FUNC-49", business.ClcIgnDeliveryConfigRaw)...)
+		authed.GET("/clc/cluster/:id/delivery-readiness", perm("PERM-FUNC-50", business.ClcDeliveryReadinessCheck)...)
 
 		// 审批中心(登录即可;归属校验在服务层)
 		authed.GET("/workbench/todo", business.WorkbenchTodo)

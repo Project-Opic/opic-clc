@@ -292,7 +292,28 @@ func ClcTaskList(c *gin.Context) {
 	common.OKJSON(c, p, "")
 }
 
-// ClcTaskAction POST /api/clc/cluster/:id/task (FUNC-03/04/09/10/11/12 交付动作)
+// clcTaskActionKinds 交付动出入口受理的 task_kind 集:与下方 ClcTaskAction 的 switch 分支一一对应
+// (DEF-06 行为级分档门的作用域;新增受理分支必须同步补这一份,否则新类别会绕过第二道门)。
+var clcTaskActionKinds = map[string]bool{
+	service.TaskKindInstall:      true,
+	service.TaskKindRetryInstall: true,
+	service.TaskKindUpgrade:      true,
+	service.TaskKindBackup:       true,
+	service.TaskKindRestore:      true,
+	service.TaskKindStart:        true,
+	service.TaskKindStop:         true,
+}
+
+// ClcTaskAction POST /api/clc/cluster/:id/task (FUNC-03/04/09/10/11/12 交付动作)。
+//
+// DEF-06 两道门:路由级 perm("PERM-FUNC-03")(routes.go:84)是「一道门管一族动作」的粗粒度门(入口档,
+// 发起交付动作的总门),只保证调用者能进这个口;但本 handler 按 task_kind 分派七个不同行为
+// (FUNC-03/04/09/10/11/12),m2/m5 对每一档行为各自发牌 —— 一条码挂七个行为 = 权限分档丢失,
+// 持 03 无 09~12 的账号本不该能发起升级/备份/恢复/启停。所以两道门刻意叠加:入口门在中间件,
+// 行为档在本 handler 调用任何服务层入口(即任何副作用:任务行/审计/事件/交付门面)之前复查。
+// kind→权限码在服务层从运行时本体注册表两级派生(m2 postconditions 显式着陆 × requiredPermissions
+// 反查并对 m5 校验,见 service/clc_task.go lookupTaskKindPerm;解析不出一律拒绝,Go 里无码表副本)。
+// 受理集之外的取值仍先走下方 default 分支的「不支持」参数报错,既有口径逐字不变。
 func ClcTaskAction(c *gin.Context) {
 	body := common.BindJSON(c)
 	clusterID := common.PathID(c, "id")
@@ -301,18 +322,24 @@ func ClcTaskAction(c *gin.Context) {
 		row map[string]any
 		err error
 	)
+	if clcTaskActionKinds[kind] {
+		if err := service.CheckTaskKindPermission(common.UserOf(c), kind); err != nil {
+			common.FailJSON(c, err)
+			return
+		}
+	}
 	switch kind {
-	case "INSTALL":
+	case service.TaskKindInstall:
 		row, err = service.StartInstall(clusterID, body, common.UserOf(c))
-	case "RETRY_INSTALL":
+	case service.TaskKindRetryInstall:
 		row, err = service.RetryInstall(clusterID, body, common.UserOf(c))
-	case "UPGRADE":
+	case service.TaskKindUpgrade:
 		row, err = service.StartUpgrade(clusterID, body, common.UserOf(c))
-	case "BACKUP":
+	case service.TaskKindBackup:
 		row, err = service.StartBackup(clusterID, body, common.UserOf(c))
-	case "RESTORE":
+	case service.TaskKindRestore:
 		row, err = service.StartRestore(clusterID, body, common.UserOf(c))
-	case "START", "STOP":
+	case service.TaskKindStart, service.TaskKindStop:
 		row, err = service.StartStop(clusterID, body, common.UserOf(c))
 	default:
 		common.FailJSON(c, service.Fail(errcode.ErrParam, "任务类别「%s」不支持(可选 INSTALL/RETRY_INSTALL/UPGRADE/BACKUP/RESTORE/START/STOP)", kind))

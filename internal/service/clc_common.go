@@ -168,7 +168,14 @@ const (
 	// CLC_TRIGGER_SOURCE
 	ProbeTriggerScheduled = "SCHEDULED"
 	ProbeTriggerManual    = "MANUAL"
+
+	// CLC_STEP_MODE(INV-50 / REF-17:任务创建瞬间落定,运行中不可互转)
+	StepModeStep = "STEP"
+	StepModeAuto = "AUTO"
 )
+
+// maxOperationReason ClusterTask.operationReason 列宽(m1 属性 VARCHAR(500);事由累加按字符收口)。
+const maxOperationReason = 500
 
 // capabilityKinds INV-17:目标能力 → 合法资源类型映射。
 var capabilityKinds = map[string][]string{
@@ -219,6 +226,33 @@ func paramInt(v any) int64 {
 // nowText 当前时间(TEXT 列口径,与底座 to_char(now(),'YYYY-MM-DD HH24:MI:SS') 一致)。
 func nowText() string {
 	return time.Now().Format("2006-01-02 15:04:05")
+}
+
+// clampRunes 按字符数截断(rune 安全;库侧 VARCHAR(500) 是字节还是字符由列定义决定,
+// 中文事由在服务层就按字符收口,避免落库即报错)。
+func clampRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
+}
+
+// appendReasonText 事由累加(FUNC-45 多次跳步 / FUNC-46 高危事由都写任务头 operationReason,
+// 后一次不覆盖前一次:R-24 要求代价留在数据上,覆盖即丢历史)。
+func appendReasonText(old, add string, max int) string {
+	old = strings.TrimSpace(old)
+	add = strings.TrimSpace(add)
+	switch {
+	case old == "":
+		return clampRunes(add, max)
+	case add == "":
+		return old
+	case strings.Contains(old, add):
+		return old // 同一事由重复登记不累加(重试同一请求不产生第二份)
+	default:
+		return clampRunes(old+"；"+add, max)
+	}
 }
 
 // boolSmallInt bool → smallint(0/1)。

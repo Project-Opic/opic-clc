@@ -12,13 +12,16 @@ import {
   type ClcTaskLogLine,
   type ClcTaskStep,
 } from '../../api/clc'
-import { EXEC_PATH, LOG_LEVEL, STEP_STATUS, STEP_VERDICT, TASK_FAIL_REASON, TASK_KIND, TASK_STATUS, pill } from './common'
+import { EXEC_PATH, LOG_LEVEL_TONE, STEP_STATUS_TONE, TASK_FAIL_REASON, TASK_KIND, TASK_STATUS, pill, withDictLabels } from './common'
+import { useDictionaries } from '../../hooks/useDictionaries'
 
 const LOG_FETCH_LIMIT = 500
 /** 非终局任务状态(与服务端 SSE 终局判定同口径):此二态下仍可能有新行 */
 const LIVE_TASK_STATUSES = ['QUEUED', 'RUNNING']
 
 function StepFlowTable({ taskNo }: { taskNo: string }) {
+  // 步骤状态 / 判定依据的中文名取 /api/meta/dictionaries（M1 只读投影），界面不留副本（DEF-09）。
+  const dict = useDictionaries()
   const [steps, setSteps] = useState<ClcTaskStep[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -38,6 +41,8 @@ function StepFlowTable({ taskNo }: { taskNo: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskNo])
 
+  const stepStatusMap = withDictLabels(STEP_STATUS_TONE, dict.itemsOf('CLC_STEP_STATUS'))
+
   const columns: ColumnsType<ClcTaskStep> = [
     { title: '序号', dataIndex: 'step_index', key: 'step_index', width: 60 },
     {
@@ -46,7 +51,7 @@ function StepFlowTable({ taskNo }: { taskNo: string }) {
       width: 220,
       render: (_, r) => `${r.step_code} ${r.step_name}`.trim(),
     },
-    { title: '状态', dataIndex: 'step_status', key: 'step_status', width: 140, render: (v: string) => pill(STEP_STATUS, v) },
+    { title: '状态', dataIndex: 'step_status', key: 'step_status', width: 140, render: (v: string) => pill(stepStatusMap, v) },
     {
       title: '判定依据',
       dataIndex: 'verdict_source',
@@ -54,7 +59,7 @@ function StepFlowTable({ taskNo }: { taskNo: string }) {
       width: 140,
       render: (v: string | null, r) => {
         if (!v && (r.exit_code === null || r.exit_code === undefined)) return '-'
-        const label = v ? STEP_VERDICT[v] || v : '-'
+        const label = v ? dict.labelOf('CLC_STEP_VERDICT', v) : '-'
         return r.exit_code !== null && r.exit_code !== undefined ? `${label}(${r.exit_code})` : label
       },
     },
@@ -90,7 +95,11 @@ function StepFlowTable({ taskNo }: { taskNo: string }) {
 
 type StreamPhase = 'loading' | 'streaming' | 'paused' | 'finished'
 
-function TaskLogPanel({ task }: { task: ClcTask }) {
+/**
+ * REP-13 日志回放面板：游标增量 + SSE 流式追加（禁整表拉取，口径 8；上滑暂停跟随）。
+ * 装机向导台（frmClcWizard el10）复用同一面板 —— 同一日志通道不在两处各写一遍（#69 落点，#70 同判据）。
+ */
+export function TaskLogPanel({ task }: { task: ClcTask }) {
   const { token } = theme.useToken()
   const [lines, setLines] = useState<ClcTaskLogLine[]>([])
   const [phase, setPhase] = useState<StreamPhase>('loading')
@@ -200,7 +209,7 @@ function TaskLogPanel({ task }: { task: ClcTask }) {
   }, [lines])
 
   const levelColor = (level: string) => {
-    const tone = LOG_LEVEL[level]?.tone
+    const tone = LOG_LEVEL_TONE[level]
     if (tone === 'error') return token.colorError
     if (tone === 'warn') return token.colorWarning
     return token.colorText

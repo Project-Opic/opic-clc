@@ -150,7 +150,7 @@ func AddNode(clusterID int64, d map[string]any, user UserInfo) (map[string]any, 
 		}
 		created = row
 		// FLOW-PROC-02 A07:ADD_NODE 任务落 QUEUED,加入动作由交付内核执行(FLOW-PROC-06)
-		task, err := createTaskTx(db, clusterNo, TaskKindAddNode, execPath, user)
+		task, err := createTaskTx(db, clusterNo, TaskKindAddNode, execPath, StepModeAuto, "", user)
 		if err != nil {
 			return err
 		}
@@ -205,7 +205,7 @@ func RemoveNode(id int64, d map[string]any, user UserInfo) (map[string]any, erro
 			return err
 		}
 		// FLOW-PROC-02 A06/A09:DEL_NODE 任务落 QUEUED,摘除动作由交付内核执行(FLOW-PROC-06)
-		task, err := createTaskTx(db, clusterNo, TaskKindDelNode, execPath, user)
+		task, err := createTaskTx(db, clusterNo, TaskKindDelNode, execPath, StepModeAuto, "", user)
 		if err != nil {
 			return err
 		}

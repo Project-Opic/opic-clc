@@ -36,6 +36,13 @@ func Dictionaries(c *gin.Context) {
 		"CLC_TASK_KIND":          common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TASK_KIND", "CLC_TASK_KIND")),
 		"CLC_EXEC_PATH":          common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_EXEC_PATH", "CLC_EXEC_PATH")),
 		"CLC_TRIGGER_SOURCE":     common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TRIGGER_SOURCE", "CLC_TRIGGER_SOURCE")),
+		// v1.2 易用性增补的五个字典：装机向导台与集群模板台的界面文案唯一事实源在 M1，
+		// 只出目录（码值 + 中文名）、不出任何值与凭据；界面不留副本，字典改动即随接口生效。
+		"CLC_STEP_MODE":      common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_STEP_MODE", "CLC_STEP_MODE")),
+		"CLC_STEP_STATUS":    common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_STEP_STATUS", "CLC_STEP_STATUS")),
+		"CLC_STEP_VERDICT":   common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_STEP_VERDICT", "CLC_STEP_VERDICT")),
+		"CLC_LOG_LEVEL":      common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_LOG_LEVEL", "CLC_LOG_LEVEL")),
+		"CLC_TEMPLATE_STATE": common.OrEmpty(reg.GetDictionaryItems("DICT-CLC_TEMPLATE_STATE", "CLC_TEMPLATE_STATE")),
 	}))
 }
 
