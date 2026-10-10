@@ -1,4 +1,5 @@
 // 集群域(clc)列表页公共助手:状态胶囊映射(风格对齐 admin/components/StatusPill)。
+import type { ClcCluster, ClcTask } from '../../api/clc'
 import StatusPill, { type StatusTone } from '../../admin/components/StatusPill'
 
 export function pill(map: Record<string, { tone: StatusTone; label: string }>, value: string | null | undefined) {
@@ -110,6 +111,9 @@ export const TASK_STATUS: Record<string, { tone: StatusTone; label: string }> = 
   STALLED: { tone: 'warning', label: '失联挂起' },
 }
 
+/** 在途任务状态(QUEUED / RUNNING):台级徽章、步进解禁与轮询启停共用这一份判据,不在屏间各写一遍 */
+export const LIVE_TASK_STATUSES = ['QUEUED', 'RUNNING']
+
 /** 任务失败原因(字典 CLC_TASK_FAIL_REASON) */
 export const TASK_FAIL_REASON: Record<string, string> = {
   STEP_FAILED: '步骤失败',
@@ -205,4 +209,16 @@ export const PARAM_SOURCE: Record<string, { tone: StatusTone; label: string }> =
 export const PROBE_RESULT: Record<string, { tone: StatusTone; label: string }> = {
   HEALTHY: { tone: 'success', label: '通过' },
   FAILED: { tone: 'danger', label: '失败' },
+}
+
+/**
+ * 集群台(frmClcClusterConsole,v1.3 载体置换)注入给页签内既有屏的上下文。
+ * 集群由台级唯一确定 ⇒ 屏内不再渲染集群选择器 / 跨集群筛选;任务行由台级持有一份
+ * (REP-07 的本集群 scope),「安装」「日志」两页签与徽章条共用同一份行,不在页签内各拉一次。
+ * refresh = 9.10.7 ① 的落点:页签内任何状态变更后重取徽章条(REP-02)。
+ */
+export interface ConsoleCtx {
+  cluster: ClcCluster
+  tasks: ClcTask[]
+  refresh: () => void
 }

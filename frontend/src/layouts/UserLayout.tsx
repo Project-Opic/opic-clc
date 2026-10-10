@@ -178,6 +178,8 @@ function WorkbenchShell() {
   const pathLabel = (path: string): string => {
     if (labelMap.has(path)) return labelMap.get(path)!
     if (path.startsWith('/flow/designer/')) return '流程设计'
+    // 集群台宿主屏无菜单叶(由台账行操作「台」进入),菜单树里查不到名字,页签固定叫「集群台」
+    if (path.startsWith('/clc/console/')) return '集群台'
     return path
   }
 
@@ -245,10 +247,12 @@ function WorkbenchShell() {
 
   const menuItems = useMemo(() => buildMenuItems(filterWorkbenchMenus(menus)), [menus])
 
-  // 当前选中菜单(设计器页面高亮流程定义)
+  // 当前选中菜单(设计器页面高亮流程定义;集群台不是菜单叶,高亮留在它的来源「集群」)
   const selectedKey = location.pathname.startsWith('/flow/designer/')
     ? '/flow/definitions'
-    : location.pathname
+    : location.pathname.startsWith('/clc/console/')
+      ? '/clc/cluster'
+      : location.pathname
 
   const toggleChat = () => setChatCollapsed((v) => !v)
 

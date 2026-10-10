@@ -1,7 +1,7 @@
-// clc_readonly.go —— v1.2 只读代理与前置预检的服务入口
-// (m2 FUNC-47 / FUNC-48 / FUNC-49 / FUNC-50;权限 PERM-FUNC-47/48/49/50)。
+// clc_readonly.go —— 只读代理与前置预检的服务入口
+// (m2 FUNC-47 / FUNC-48 / FUNC-49 / FUNC-50 / FUNC-51;权限 PERM-FUNC-47/48/49/50/51)。
 //
-// 四条口径(m2 为准,本文件严格照本宣科):
+// 五条口径(m2 为准,本文件严格照本宣科):
 //
 //	FUNC-47 节点 SSH 登录标识复制 —— 展示口径固定为「登录用户@节点地址」拼接串(REF-18);
 //	        登录用户取平台配置的 SSH 全局变量口径,与 FUNC-01 第二步裸机模式同源(platformParam
@@ -23,6 +23,12 @@
 //	        登记且可用(REF-16),④stepMode 已定(INV-50 / REF-17),⑤无与派生冲突的覆写(R-04)。
 //	        结论是即时提示、不拦截提交(拦截仍由各 INV / R 在写入瞬间执行);不写本域对象、
 //	        不产生事件。queryReportRef: null —— M7 里登记的唯一显式例外,不建报表(无列表形态)。
+//	FUNC-51 交付执行日志代理查看(v1.3 / Q-125)—— 远程腿的 ezctl 逐行原文代理直展(REP-19):
+//	        入参 = 任务头 remoteTaskRef + sinceSeq + limit,复用同一条门面腿与同一令牌(R-25);
+//	        行只活在本次响应体里,一律不落 clc_task_log、不缓存、不产生事件,本域不进 REF-15 清理
+//	        (REF-12 的 v1.3 延伸:本域对这份数据没有留存权);对端已写前掩码,本域不二次脱敏、
+//	        不重排、不重算判定(INV-08 / R-17);每次代理读逐次留痕,与 FUNC-49 同口径;
+//	        无引用或对端不可达 ⇒ 200 + 显式结论 + 跳转兜底,不拿上一轮行冒充现状。
 package service
 
 import (
@@ -221,6 +227,118 @@ func proxyFailureEnvelope(funcID, clusterNo string, err error) map[string]any {
 	}
 	env["func_ref"] = funcID
 	return env
+}
+
+// ---------- FUNC-51 交付执行日志代理查看（远程腿，REP-19） ----------
+
+// 远程日志腿的单轮硬上限两档：
+//
+//	remoteExecLogPageDefault —— 入参缺省（limit 未给或非法）时的本轮行数；
+//	remoteExecLogPageMax     —— 请求方给得再大也按此封顶（「禁无游标整表出口」在本域的落点）。
+//
+// 单页真正的答案权在对端：O-IGN 按自己的 REF-14 平台配置二次封顶并如实回显 limit，本域既不复制
+// 该配置（DEF-08 同族纪律：不建第二份权威表），也不放宽它 —— 这里的两档只是入口护栏。
+const (
+	remoteExecLogPageDefault = 200
+	remoteExecLogPageMax     = 500
+)
+
+// RemoteExecLogView FUNC-51（REP-19；EXT-EXTERNAL / alias ign_exec_log_proxy）：
+// 按远端任务引用代理直展 O-IGN 的 ezctl 逐行运行原文（ansible 输出），供「安装」页签的
+// 远程日志腿（el18）短轮询增量追加。
+//
+// m2 口径在实现里的落点：
+//   - 同一令牌、不新建链路：复用 deliveryRT().remote（与 FUNC-48/49 同一条门面腿，R-25）；
+//   - 响应即弃：行只活在这一次响应体里，一律不写 clc_task_log、不缓存、不产生事件
+//     （REF-12 的 v1.3 延伸 —— 本域对这份数据没有留存权，也就没有清理义务，不进 REF-15）；
+//   - 不重排、不二次加工、不重算成功判定：对端行按 seq 原样回吐，判定权威仍是对端回执与本域
+//     步骤行（R-17 / INV-45）；对端已写前掩码（其 INV-40），本域不二次脱敏（再脱敏一次即等于
+//     承认本域持有原文，INV-08）；
+//   - 逐次留痕：无论成功、被拒还是不可达，每次代理读一条审计（谁 / 何时 / 哪个集群 / 哪个远端
+//     任务 / 取到哪个游标），与 FUNC-49 同口径；审计明细只记游标与行数，不回写日志内容；
+//   - 无 remoteTaskRef（本地腿本就无此腿，或远程任务尚未受理）⇒ 200 + 显式结论 + 跳转兜底，
+//     不升级为业务失败（界面要的是「为什么现在看不到」，不是一个弹窗）。
+func RemoteExecLogView(remoteTaskRef string, sinceSeq int64, limit int, user UserInfo) (map[string]any, error) {
+	ref := strings.TrimSpace(remoteTaskRef)
+	if ref == "" {
+		return map[string]any{
+			"remote_task_ref":  "",
+			"leg_available":    false,
+			"peer_unreachable": false,
+			"notice":           "远程日志暂不可读：该任务没有远端任务引用（本地链路本就无此腿，或远程任务尚未受理）——界面须显式呈现本结论并保留跳转兜底入口，不留空面板、不拿上一轮行冒充现状",
+			"lines":            []map[string]any{},
+			"func_ref":         "FUNC-51",
+		}, nil
+	}
+	if sinceSeq < 0 {
+		sinceSeq = 0
+	}
+	pageLimit := limit
+	if pageLimit <= 0 {
+		pageLimit = remoteExecLogPageDefault
+	}
+	if pageLimit > remoteExecLogPageMax {
+		pageLimit = remoteExecLogPageMax
+	}
+
+	// 留痕要落到「哪个集群」：远端引用反查本域任务头（remoteTaskRef 是任务头既有属性，INV-46
+	// 已要求远程链路必写）。反查不到不拒绝读取 —— 引用真伪由于对端判定，本域只是拿不到集群标签。
+	taskRow, err := qOne(`SELECT task_no, cluster_ref FROM clc_task WHERE remote_task_ref=? AND flag=1
+		ORDER BY id DESC LIMIT 1`, ref)
+	if err != nil {
+		return nil, err
+	}
+	clusterNo, localTaskNo := "", ""
+	if taskRow != nil {
+		clusterNo, localTaskNo = Str(taskRow["cluster_ref"]), Str(taskRow["task_no"])
+	}
+
+	out, readErr := deliveryRT().remote.ReadTaskLog(context.Background(), ref, sinceSeq, pageLimit)
+	detail := fmt.Sprintf("远程执行日志代理读：集群 %s 任务 %s 的远端引用 %s 自游标 %d 起取回 %d 行（下一游标 %d，来源=本域界面(FUNC-51)）",
+		clusterLabel(clusterNo), localTaskNo, ref, sinceSeq, len(rowsOfAny(out["lines"])), Int(out["next_seq"]))
+	if readErr != nil {
+		if code, msg, ok := delivery.PeerStatus(readErr); ok {
+			detail = fmt.Sprintf("远程执行日志代理读：集群 %s 远端引用 %s 自游标 %d 起被对端拒绝（HTTP %d：%s），来源=本域界面(FUNC-51)",
+				clusterLabel(clusterNo), ref, sinceSeq, code, msg)
+		} else {
+			detail = fmt.Sprintf("远程执行日志代理读：集群 %s 远端引用 %s 自游标 %d 起读取失败（对端不可达：%s），来源=本域界面(FUNC-51)",
+				clusterLabel(clusterNo), ref, sinceSeq, readErr.Error())
+		}
+	}
+	WriteAudit(nil, user.ID, user.Username, "FUNC-51", detail)
+	if readErr != nil {
+		env := proxyFailureEnvelope("FUNC-51", clusterNo, readErr)
+		env["remote_task_ref"] = ref
+		env["since_seq"] = sinceSeq
+		env["limit_requested"] = limit
+		env["limit"] = pageLimit
+		return env, nil
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	out["remote_task_ref"] = ref
+	out["cluster_no"] = clusterNo
+	out["local_task_no"] = localTaskNo
+	out["leg_available"] = true
+	out["peer_unreachable"] = false
+	out["limit_requested"] = limit
+	out["local_caliber_note"] = "逐行原文由 O-IGN 承载且已在写入前掩码（其 INV-40），本域不二次脱敏、不重排、不落 clc_task_log（R-25 日志腿 / REF-12 / INV-08）；两腿按执行位置二选一，LOCAL 腿仍由 REP-13 出数（REF-16）"
+	return out, nil
+}
+
+// clusterLabel 留痕文案里的集群标签：反查不到任务头时如实写「未登记」，不编造编号。
+func clusterLabel(clusterNo string) string {
+	if strings.TrimSpace(clusterNo) == "" {
+		return "（本域无该远端引用的任务登记）"
+	}
+	return clusterNo
+}
+
+// rowsOfAny 把对端 JSON 解码出的日志行取成切片视图（本域不解析行内容，只数行数）。
+func rowsOfAny(v any) []any {
+	rows, _ := v.([]any)
+	return rows
 }
 
 // ---------- FUNC-50 交付前置完备性预检 ----------

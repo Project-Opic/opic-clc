@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom'
 import { Spin } from 'antd'
 import { useDispatch, useSelector } from 'react-redux'
 import { authApi } from '../api/auth'
@@ -20,15 +20,11 @@ import ErrCodes from '../admin/pages/ErrCodes'
 import ServerMonitor from '../admin/pages/ServerMonitor'
 import { isAdminPermissions } from '../admin/access'
 import ClcClusterManage from '../pages/clc/ClusterManage'
+import ClcClusterConsole from '../pages/clc/ClusterConsole'
 import ClcNodeManage from '../pages/clc/NodeManage'
 import ClcTemplateManage from '../pages/clc/TemplateManage'
-import ClcWizardConsole from '../pages/clc/WizardConsole'
 import ClcOrchManage from '../pages/clc/OrchManage'
-import ClcRefManage from '../pages/clc/RefManage'
-import ClcSnapManage from '../pages/clc/SnapManage'
-import ClcHealthManage from '../pages/clc/HealthManage'
 import ClcOpsManage from '../pages/clc/OpsManage'
-import ClcParams from '../pages/clc/ParamsManage'
 import Todo from '../pages/workbench/Todo'
 import Done from '../pages/workbench/Done'
 import Requested from '../pages/workbench/Requested'
@@ -99,6 +95,17 @@ function LegacyDesignerRedirect() {
   return <Navigate to={`/admin/flow/designer/${id ?? ''}`} replace />
 }
 
+/** 集群台旧深链重定向（9.10.7 ⑤：兼容一版、下一版移除）
+ *  五叶退出侧栏后，`?cluster=<id>` 形式的旧地址带集群进对应页签；无集群参数（或不是数字 id）落回集群列表，
+ *  由使用者从台账行操作「台」重新进入 —— 不做「猜第一个集群」，那是破坏性动作最容易踩空的地方。 */
+function LegacyConsoleRedirect({ tab }: { tab: string }) {
+  const [sp] = useSearchParams()
+  const cluster = sp.get('cluster') || sp.get('cluster_id') || ''
+  if (!/^\d+$/.test(cluster)) return <Navigate to="/clc/cluster" replace />
+  const suffix = tab ? `?tab=${tab}` : ''
+  return <Navigate to={`/clc/console/${cluster}${suffix}`} replace />
+}
+
 /** 管理控制台守卫:无管理权限 → 玻璃风 403 */
 function AdminGuard({ children }: { children: ReactNode }) {
   const permissions = useSelector((s: RootState) => s.auth.permissions)
@@ -131,17 +138,20 @@ export default function AppRoutes() {
         }
       >
         <Route path="clc/cluster" element={<ClcClusterManage />} />
-        <Route path="clc/node" element={<ClcNodeManage />} />
+        {/* MU frmClcClusterConsole（v1.3 宿主屏，无菜单叶）：由集群台账行操作「台」进入，五页签装配既有屏本体 */}
+        <Route path="clc/console/:id" element={<ClcClusterConsole />} />
+        <Route path="clc/node" element={<LegacyConsoleRedirect tab="node" />} />
         {/* MU menu-clc-template → frmClcTemplate(AGG-CLC-08, FUNC-36~43)；index 默认跳转仍为 /clc/cluster 不动 */}
         <Route path="clc/template" element={<ClcTemplateManage />} />
-        {/* MU menu-clc-wizard → frmClcWizard(AGG-CLC-06,FUNC-44/45/46/48/49/50);seed.go 本批无此菜单行,待后端补种(见 #69 回报) */}
-        <Route path="clc/wizard" element={<ClcWizardConsole />} />
+        {/* MU menu-clc-wizard → frmClcWizard(AGG-CLC-06,FUNC-44/45/46/48/49/50)；v1.3 装机向导退出侧栏，旧深链重定向进「安装」页签 */}
+        <Route path="clc/wizard" element={<LegacyConsoleRedirect tab="install" />} />
         <Route path="clc/orch" element={<ClcOrchManage />} />
-        <Route path="clc/ref" element={<ClcRefManage />} />
-        <Route path="clc/snap" element={<ClcSnapManage />} />
-        <Route path="clc/health" element={<ClcHealthManage />} />
+        <Route path="clc/ref" element={<LegacyConsoleRedirect tab="config" />} />
+        <Route path="clc/snap" element={<LegacyConsoleRedirect tab="lifecycle" />} />
+        <Route path="clc/health" element={<LegacyConsoleRedirect tab="lifecycle" />} />
         <Route path="clc/ops" element={<ClcOpsManage />} />
-        <Route path="clc/params" element={<ClcParams />} />
+        {/* 平台参数不是 MU 登记屏(frmClcOps 元素表 el07~el09 已含运行参数区段)：旧书签地址并进「运行观测」 */}
+        <Route path="clc/params" element={<Navigate to="/clc/ops" replace />} />
         <Route path="workbench/todo" element={<Todo />} />
         <Route path="workbench/done" element={<Done />} />
         <Route path="workbench/requested" element={<Requested />} />

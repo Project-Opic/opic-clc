@@ -126,6 +126,10 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/clc/cluster/:id/ign-config", perm("PERM-FUNC-48", business.ClcIgnDeliveryConfig)...)
 		authed.GET("/clc/cluster/:id/ign-config-raw", perm("PERM-FUNC-49", business.ClcIgnDeliveryConfigRaw)...)
 		authed.GET("/clc/cluster/:id/delivery-readiness", perm("PERM-FUNC-50", business.ClcDeliveryReadinessCheck)...)
+		// 交付执行日志代理查看(FUNC-51 / REP-19,v1.3 Q-125)—— :ref 就是任务头 remoteTaskRef,
+		// 集群标签由服务层反查(留痕要"哪个集群"),故路由不按 :id 编址:按 ref 编址才是本报表的入参口径
+		// (REP-19 p1 必填、无集群参数)。挂在 /clc/ 静态段下,与 :id / :no 子树不同级,不触发 gin 静态-参数同级 panic。
+		authed.GET("/clc/exec-log/:ref", perm("PERM-FUNC-51", business.ClcRemoteExecLog)...)
 
 		// 审批中心(登录即可;归属校验在服务层)
 		authed.GET("/workbench/todo", business.WorkbenchTodo)

@@ -1,42 +1,46 @@
 model_type: UI
-version: '1.2'
+version: '1.3'
 domain: 集群域
 application:
   name: OPIC-集群域
   menus:
-  - menuId: menu-l1-01
-    name: 集群管理
-    children:
-    - menuId: menu-clc-cluster
-      name: 集群台账
-      screenRef: frmClcCluster
-    - menuId: menu-clc-node
-      name: 节点管理
-      screenRef: frmClcNode
-    - menuId: menu-clc-template
-      name: 集群模板
-      screenRef: frmClcTemplate
-    - menuId: menu-clc-orch
-      name: 交付编排
-      screenRef: frmClcOrch
-    - menuId: menu-clc-wizard
-      name: 装机向导
-      screenRef: frmClcWizard
-    - menuId: menu-clc-ref
-      name: 引用与参数
-      screenRef: frmClcRef
-    - menuId: menu-clc-snap
-      name: 快照与回滚
-      screenRef: frmClcSnap
-    - menuId: menu-clc-health
-      name: 健康探活
-      screenRef: frmClcHealth
-  - menuId: menu-l1-02
+  - menuId: menu-clc-cluster
+    name: 集群
+    screenRef: frmClcCluster
+    note: 唯一工作起点（v1.3，Q-115 / Q-116）；行操作「台」进入集群台宿主屏
+  - menuId: menu-clc-template
+    name: 集群模板
+    screenRef: frmClcTemplate
+    note: 跨集群资产，与任何单集群的一生无关，保持一级可见（Q-116）
+  - menuId: menu-clc-orch
+    name: 交付任务
+    screenRef: frmClcOrch
+    note: v1.3 由「交付编排」更名（Q-116）；子域 3 的「横看」= 多集群任务台账
+  - menuId: menu-clc-ops
     name: 运行观测
-    children:
-    - menuId: menu-clc-ops
-      name: 运行观测
-      screenRef: frmClcOps
+    screenRef: frmClcOps
+  retiredMenus:
+  - menuId: menu-clc-node
+    name: 节点管理
+    screenRef: frmClcNode
+    landedTab: 节点
+  - menuId: menu-clc-wizard
+    name: 装机向导
+    screenRef: frmClcWizard
+    landedTab: 安装
+  - menuId: menu-clc-ref
+    name: 引用与参数
+    screenRef: frmClcRef
+    landedTab: 配置
+  - menuId: menu-clc-snap
+    name: 快照与回滚
+    screenRef: frmClcSnap
+    landedTab: 生命周期
+  - menuId: menu-clc-health
+    name: 健康探活
+    screenRef: frmClcHealth
+    landedTab: 生命周期
+  menuNote: v1.3 载体置换（Q-116）—— 二级菜单 9 → 一级 4 叶，另有底座审批中心组（menu-workbench，非本域登记）；五叶退出侧栏但其屏幕与元素表一字不动，登记单位由「菜单」变「集群台页签」；深链兼容一版（旧地址重定向进对应页签），库侧 sys_menu 行置不可见而非物理删除
 screens:
 - screenId: frmClcCluster
   name: 集群列表维护
@@ -134,6 +138,9 @@ screens:
 - screenId: frmClcNode
   name: 节点清单维护
   screenType: LIST_MAINTENANCE
+  hostedIn: frmClcClusterConsole
+  tabName: 节点
+  carrierNote: v1.3 载体置换（Q-116）—— 退出侧栏菜单叶、屏与元素表一字不动，转为集群台「节点」页签主体；嵌入态由宿主屏注入集群上下文，屏顶集群选择器由头部徽章条取代（Q-118）
   layout: ''
   elements:
   - id: el01
@@ -220,6 +227,25 @@ screens:
     role: QUERY
     dataSource: REP-16
     sourceNote: 不随清单一并下发，逐次点按取数（9.9 第 ③ 条）
+  - id: el14
+    type: SELECT
+    label: 呈现档（按角色分组 ｜ 平铺，v1.2）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 只换呈现形态、不改筛选语义与报表计数（5.16 口径 ⑰）；缺省「按角色分组」（9.2.6）
+  - id: el15
+    type: TEXT
+    label: 分组标题（组头台数与异常数，v1.2）
+    io: O
+    required: false
+    dataBinding: ClusterNode
+    role: QUERY
+    dataSource: REP-03
+    sourceNote: 分组轴取 CLC_NODE_ROLE 词条序，组头台数与各档数由已加载行算得——异常数只算 UNREACHABLE，
+      UNKNOWN(未探测) 不并档、单独成数（否则刚登记的整组节点会读成全组异常）；三档名一律取
+      CLC_NODE_HEALTH 词条，界面不留第二份标签表（DEF-09 同一口径）；组内行序不随健康事件重排（9.2.6 ③），
+      异常行置顶只在加载时做一次
   actions:
   - actionId: act-FUNC-06
     name: 添加节点
@@ -254,6 +280,7 @@ screens:
 - screenId: frmClcOrch
   name: 编排操作台
   screenType: MASTER_DETAIL_FORM
+  carrierNote: v1.3 收口（Q-121）—— 「发起交付动作」表单退出本屏（发起安装 / 升级 / 备份三个工具栏按钮从元素表移除，动作入口收口进集群台「安装」「生命周期」页签），本屏收敛为全局任务台账 + 下钻流水线；横看不因收拢而与纵看共用报表（REP-07 / REP-12 各归各屏，8.1.1 判据）。FUNC-03 / 09~12 / 05 的**主登记行仍在本屏名下**（8.4 表后「跨屏复用登记一次、不重复发牌」，v1.3 把该判据的适用面扩至台内页签：页签只渲染、不发第二张牌），故本屏 actions 不减、元素表按 Q-121 收口
   layout: ''
   elements:
   - id: el01
@@ -270,127 +297,110 @@ screens:
     required: false
     dataBinding: ClusterTask
   - id: el03
-    type: BUTTON
-    label: 发起安装（按钮）
-    io: I
-    required: false
-    dataBinding: ''
-  - id: el04
-    type: BUTTON
-    label: 升级
-    io: I
-    required: false
-    dataBinding: ''
-  - id: el05
-    type: BUTTON
-    label: 备份
-    io: I
-    required: false
-    dataBinding: ''
-  - id: el06
     type: TEXT
     label: 任务编号
     io: O
     required: false
     dataBinding: ClusterTask
-  - id: el07
+  - id: el04
     type: TEXT
     label: 类别
     io: O
     required: false
     dataBinding: ClusterTask
-  - id: el08
+  - id: el05
     type: TEXT
     label: 执行位置
     io: O
     required: false
     dataBinding: 同左
-  - id: el09
+  - id: el06
     type: TEXT
     label: 失败步骤
     io: O
     required: false
     dataBinding: 同左
-  - id: el10
+  - id: el07
     type: TEXT
     label: 原因
     io: O
     required: false
     dataBinding: 同左
-  - id: el11
+  - id: el08
     type: BUTTON
     label: 续跑（按钮）
     io: I
     required: false
     dataBinding: ''
-  - id: el12
+  - id: el09
     type: BUTTON
     label: 重试 ｜ 显式换机（按钮）
     io: I
     required: false
     dataBinding: ''
-  - id: el13
+  - id: el10
     type: TEXT
     label: 集群
     io: O
     required: false
     dataBinding: 聚合
-  - id: el14
+  - id: el11
     type: TEXT
     label: 下游引用方
     io: O
     required: false
     dataBinding: 聚合
-  - id: el15
+  - id: el12
     type: TEXT
     label: 节点清单
     io: O
     required: false
     dataBinding: 聚合
-  - id: el16
+  - id: el13
     type: TEXT
     label: 基础设施证书
     io: O
     required: false
     dataBinding: 聚合
-  - id: el17
+  - id: el14
     type: TEXTBOX
     label: 强制原因
     io: I
     required: false
     dataBinding: ''
-  - id: el18
+  - id: el15
     type: BUTTON
     label: 提交申请（按钮）
     io: I
     required: false
     dataBinding: ''
-  - id: el19
+  - id: el16
     type: BUTTON
     label: 取消（行内按钮）
     io: I
     required: false
     dataBinding: ''
-  - id: el20
+  - id: el17
     type: BUTTON
     label: 查看步骤（行内入口）
     io: O
     required: false
     dataBinding: ''
-  - id: el21
+  - id: el18
     type: GRID
     label: 交付步骤流水线（从表，只读）
     io: O
     required: false
     dataBinding: ClusterTask.steps
     dataSource: REP-12
-  - id: el22
+  - id: el19
     type: TEXTAREA
     label: 日志回放面板（游标增量，只读）
     io: O
     required: false
     dataBinding: ClusterTask.logs
     dataSource: REP-13
+    sourceNote: 两腿合一、按任务执行位置二选一（REF-16，与 frmClcWizard 的 el10 / el18 同一条判据）—— LOCAL 腿 = FUNC-35 游标增量回放 clc_task_log；REMOTE_EXECUTOR 腿 = v1.3（Q-125）FUNC-51 代理直展对端 ezctl 逐行原文，主登记位在安装页签（frmClcWizard.el18 / REP-19），本屏是同一报表的第二个呈现出口、不复制留存权；不可达或无远端引用 ⇒ 显式说明并保留跳转兜底
   actions:
   - actionId: act-FUNC-03
     name: 发起安装
@@ -473,6 +483,9 @@ screens:
 - screenId: frmClcRef
   name: 引用与参数台
   screenType: LIST_MAINTENANCE
+  hostedIn: frmClcClusterConsole
+  tabName: 配置
+  carrierNote: v1.3 载体置换（Q-116）—— 退出侧栏菜单叶、屏与元素表一字不动，转为集群台「配置」页签主体（与集群基本信息同页签，9.10.2）；嵌入态的集群上下文由宿主屏注入（Q-118），本屏自身不带集群选择器
   layout: ''
   elements:
   - id: el01
@@ -552,6 +565,9 @@ screens:
 - screenId: frmClcSnap
   name: 快照与回滚台
   screenType: QUERY_LIST
+  hostedIn: frmClcClusterConsole
+  tabName: 生命周期
+  carrierNote: v1.3 载体置换（Q-116）—— 退出侧栏菜单叶、屏与元素表一字不动，转为集群台「生命周期」页签内的快照与回滚清单区段（9.10.2）；嵌入态由宿主屏注入集群上下文，屏顶集群选择器由头部徽章条取代（Q-118）
   layout: ''
   elements:
   - id: el01
@@ -643,6 +659,9 @@ screens:
 - screenId: frmClcHealth
   name: 健康与恢复台
   screenType: MASTER_DETAIL_FORM
+  hostedIn: frmClcClusterConsole
+  tabName: 生命周期
+  carrierNote: v1.3 载体置换（Q-116）—— 退出侧栏菜单叶、屏与元素表一字不动，转为集群台「生命周期」页签内的探活历史与显式恢复区段（9.10.2）；嵌入态的集群上下文由宿主屏注入（Q-118），本屏自身不带集群选择器
   layout: ''
   elements:
   - id: el01
@@ -975,7 +994,10 @@ screens:
 - screenId: frmClcWizard
   name: 装机向导与生命周期台
   screenType: MASTER_DETAIL_FORM
-  layout: 主从表维护形态：顶部集群选择 + 完备性预检条（不拦截），主区七段步进器（行集合完全来自 REP-12 数据行，界面不内置清单）+ 实时日志面板（REP-13 游标流式追加，上滑暂停跟随），右侧页签依次为配置（代理字段视图）/ 生命周期台 / 原文只读（独立权限码）
+  hostedIn: frmClcClusterConsole
+  tabName: 安装
+  carrierNote: v1.3 载体置换（Q-116 / Q-117 / Q-121）—— 退出侧栏菜单叶、转为集群台「安装」页签主体（步进器 + 两腿日志面板 + 完备性预检 + 原文只读）；屏内原「配置 / 生命周期台」两个页签上移到台级（配置代理入「配置」页签、动作卡入「生命周期」页签，元素登记位保持不删），FUNC-46 的**主登记行随之迁到 frmClcClusterConsole**（8.4 核对：本批唯一一处主登记位置换，权限码与档位不变）；顶部集群选择器由集群台头部徽章条取代（Q-118 / 9.10.1）
+  layout: 主从表维护形态：顶部集群选择 + 完备性预检条（不拦截），主区七段步进器（行集合完全来自 REP-12 数据行，界面不内置清单）+ 实时日志面板（两腿按执行位置二选一：REP-13 游标流式追加 / REP-19 对端原文代理直展，上滑暂停跟随），右侧页签依次为配置（代理字段视图）/ 生命周期台 / 原文只读（独立权限码）；v1.3 起本屏整体作为集群台「安装」页签主体呈现，右侧「配置 / 生命周期台」两页签的呈现上移到台级（分别入「配置」「生命周期」页签），本 tab 本体只保留步进与日志
   elements:
   - id: el01
     type: SELECT
@@ -984,7 +1006,7 @@ screens:
     required: true
     dataBinding: Cluster
     role: QUERY
-    sourceNote: 非终态集群；进入即锁链路徽章（执行位置只读，INV-32）
+    sourceNote: 非终态集群；进入即锁链路徽章（执行位置只读，INV-32）；v1.3 嵌入态不呈现该选择器（集群由宿主屏徽章条上下文唯一确定，Q-118），登记位保持不删
   - id: el02
     type: TEXT
     label: 来源模板（建成后只读）
@@ -1048,7 +1070,7 @@ screens:
     required: false
     dataBinding: ClusterTask.logs
     dataSource: REP-13
-    sourceNote: 禁整表拉取（口径 8）；远程链路此处显示「原始日志在执行交付域」+ 跳转，不留副本不留占位（REF-12）
+    sourceNote: 禁整表拉取（口径 8）；本面板只出 LOCAL 腿（TaskLogLine 游标回放）；v1.3 起远程腿改由 el18 的 FUNC-51 代理直展，两腿按执行位置二选一不并存（REF-16）
   - id: el11
     type: TAB
     label: 页签组（配置 / 生命周期台 / 原文只读）
@@ -1077,7 +1099,7 @@ screens:
     io: I
     required: false
     dataBinding: ''
-    sourceNote: 动作集取 CLC_TASK_KIND 既有着陆，不新增类别值；启停 / 升级 / 备份 / 恢复复用 frmClcOrch 的既有入口（FUNC-09~12）
+    sourceNote: 动作集取 CLC_TASK_KIND 既有着陆，不新增类别值；启停 / 升级 / 备份 / 恢复复用 frmClcOrch 的既有入口（FUNC-09~12）；v1.3 起本区段呈现在集群台「生命周期」页签、FUNC-46 的主登记行随之迁至 frmClcClusterConsole（元素登记位不动，8.4 核对）
   - id: el15
     type: BUTTON
     label: 提交销毁申请（生命周期台，仍走审批）
@@ -1098,6 +1120,14 @@ screens:
     required: false
     dataBinding: ''
     sourceNote: 即时读本域集群与任务行（重启台数 / 在途任务 / 负载迁移）
+  - id: el18
+    type: TEXTAREA
+    label: 远程执行日志面板（对端 ezctl 逐行原文，代理直展，只读）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-19
+    sourceNote: v1.3（Q-125）新增的远程腿。仅当任务执行位置为 REMOTE_EXECUTOR 时顶替 el10 呈现，两腿二选一不并存（REF-16）；入参 = 任务头 remoteTaskRef + sinceSeq + limit（REP-19 过滤参数，禁整表拉取同口径 8）；2~3 秒游标短轮询、每轮逐次留痕；响应即弃、行一律不落 clc_task_log（REF-12 / R-25 日志腿）；不可达或无远端引用 ⇒ 显式说明并保留跳转兜底，不留空面板、不拿上一轮行冒充现状；面板顶部标注当前腿与内容权威在 O-IGN
   actions:
   - actionId: act-FUNC-44
     name: 向导步进执行与单步重试
@@ -1111,12 +1141,6 @@ screens:
     behaviorRef: FUNC-45
     permissionRef:
     - PERM-FUNC-45
-  - actionId: act-FUNC-46
-    name: 集群交付动作派发（生命周期台）
-    actionType: OTHER
-    behaviorRef: FUNC-46
-    permissionRef:
-    - PERM-FUNC-46
   - actionId: act-FUNC-48
     name: 集群交付配置代理查看（字段级）
     actionType: QUERY
@@ -1135,6 +1159,79 @@ screens:
     behaviorRef: FUNC-50
     permissionRef:
     - PERM-FUNC-50
+  - actionId: act-FUNC-51
+    name: 交付执行日志代理查看（远程腿，el18 直展对端 ezctl 逐行原文）
+    actionType: QUERY
+    behaviorRef: FUNC-51
+    permissionRef:
+    - PERM-FUNC-51
+- screenId: frmClcClusterConsole
+  name: 集群台
+  screenType: MASTER_DETAIL_FORM
+  entryNote: v1.3 新增宿主屏（Q-122）—— 无菜单叶，由 frmClcCluster 行操作「台」进入；主 = 一个集群的头部徽章区，从 = 五页签组（落在既有四档形态里，不为新形态改枚举）
+  layout: 以「这一个集群的一生」为主体的主从表形态：顶部徽章条（名称 + 编号 + 生命周期状态 / 健康含来源与时间 / 推进模式 / 来源模板只读）是 INV-32「进入即锁链路」在台上的落点，也是 v1.3 起链路事实的唯一权威呈现位（取代各承载屏原屏顶的集群选择器，Q-118）；五页签按「配置｜安装｜生命周期｜节点｜日志」排布，可见性按页签主数据权限码不渲染（DEF-06 口径，Q-119 不为页签发新码），缺省页签按集群状态派生（Q-120 / 9.10.6：DRAFT 无在途 → 安装；RUNNING / DEGRADED → 配置；INSTALL_FAILED / STALLED → 安装并高亮首个未终态步骤）。宿主屏零新增语义：不新增功能点 / 报表 / 权限码 / 字典，页签内容逐条回指既有屏元素表（9.2 / 9.4~9.6 / 9.9），第四条界面纪律「载体置换不复制语义」的落点
+  elements:
+  - id: el01
+    type: TEXT
+    label: 集群徽章条（状态 / 健康 / 推进模式 / 来源模板，只读）
+    io: O
+    required: false
+    dataBinding: Cluster
+    dataSource: REP-02
+    sourceNote: 四组徽章 = 链路事实唯一呈现位（INV-32）；页签内任何状态变更后局部重取本报表，杜绝"页面说运行中、台账是安装失败"的两张皮（9.10.7 第 ① 条）；台内跳转出口与页签切换不重载徽章条
+  - id: el02
+    type: TAB
+    label: 页签组（配置 ｜ 安装 ｜ 生命周期 ｜ 节点 ｜ 日志）
+    io: I
+    required: false
+    dataBinding: ''
+    sourceNote: 五档划分按本域语义（参考实现的「安全」页签 = CA 续期，已由 FUNC-46 的 CERT_RENEW 着陆生命周期页签，不另立）；缺位页签不出现在序列里，深链直达无权限页签则不渲染并落回第一个有权页签，接口侧仍由各权限码把门（界面隐藏不是安全边界）
+  - id: el03
+    type: TEXT
+    label: 配置页签主体（集群详情 + 引用与参数 + 交付配置代理）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-17
+    sourceNote: 回指 9.4（frmClcRef 的 FUNC-13~15 / 22 / 23）与 9.9 的配置代理元素，本屏不重复登记元素（FUNC-48 字段级代理、去 O-IGN 改字段跳转）；FUNC-49 原文只读不上移，随 9.9 主体留在「安装」页签（Q-117 / 9.10.1，见 el04）；只读档 ROLE-04 在本页签仅见集群详情与徽章区，引用参数与代理区段不渲染
+  - id: el04
+    type: TEXT
+    label: 安装页签主体（步进器 + 预检 + 两腿日志 + 原文只读）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-19
+    sourceNote: 回指 9.9（frmClcWizard 主体，元素仍登记在该屏）—— 步进器行集完全来自 REP-12 数据行、界面不内置清单；日志区含 FUNC-51 远程代理直展腿（Q-125，本行不复制该元素）；el13 原文只读（FUNC-49 / REP-18）在本页签步进与日志之下以区段呈现，登记位仍在 9.9（Q-117：上移到台级的只有配置代理与生命周期动作卡，原文只读随主体留在安装页签）；其内部「配置 / 生命周期台」两页签的呈现随 v1.3 收口上移至本台，FUNC-46 的主登记行亦随之迁入本屏 actions（8.4 核对：唯一一处主登记位置换）
+  - id: el05
+    type: TEXT
+    label: 生命周期页签主体（动作卡 + 快照与回滚 + 探活与显式恢复）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-06
+    sourceNote: 动作卡回指 9.3 / 9.9（FUNC-09~12 与 FUNC-05 的主登记行仍在交付任务屏名下，FUNC-46 登记在本屏），按 hasPerm 不渲染；快照区段回指 9.5（frmClcSnap，REP-06）、探活区段回指 9.6（frmClcHealth，REP-08 + FUNC-16 / 26 / 27）；提交销毁申请成功后全部页签动作区即时转只读（终态不可逆）
+  - id: el06
+    type: TEXT
+    label: 节点页签主体（角色分组节点表 + 增删改与登录标识）
+    io: O
+    required: false
+    dataBinding: ''
+    sourceNote: 回指 9.2（frmClcNode 载体置换，FUNC-06~08 / 21 / 47 登记仍在该屏），分组视图与登录标识的元素不复制
+  - id: el07
+    type: TEXT
+    label: 日志页签主体（本集群任务行列表 + 游标回放）
+    io: O
+    required: false
+    dataBinding: ''
+    dataSource: REP-07
+    sourceNote: REP-07 / 12 / 13 的本集群 scope 是呈现形态、不是新报表（5.16 第 ⑰ 条同判据）；选中远程任务时回放面板按同一"二选一"规则切为 FUNC-51 代理直展 —— 本屏只是它的第二个呈现出口，主登记位在安装页签（frmClcWizard.el18）
+  actions:
+  - actionId: act-FUNC-46
+    name: 集群交付动作派发（生命周期页签动作台）
+    actionType: OTHER
+    behaviorRef: FUNC-46
+    permissionRef:
+    - PERM-FUNC-46
 - screenId: frmPublicEntry01
   name: 跨中心集群视图
   screenType: LIST_MAINTENANCE

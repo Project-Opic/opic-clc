@@ -1,5 +1,5 @@
 model_type: FLOW
-version: '1.2'
+version: '1.3'
 domain: 集群域
 flows:
 - id: FLOW-PROC-01
@@ -816,7 +816,7 @@ flows:
     nextActivities:
     - A11
   - activityId: A11
-    name: 交 PROC-06 执行内核（对 O-IGN 仍是一步一受理，R-19 请求体口径一字不改）
+    name: 交 PROC-06 执行内核（对 O-IGN 仍是一步一受理，R-19 请求体口径一字不改）；执行期日志面板按执行位置二选一、不并存两份（REF-16）——「本地腿」= FUNC-35 游标回放 clc_task_log；「远程腿」= v1.3 新增 FUNC-51 经既有交付门面按游标代理直展对端 ezctl 逐行原文，响应即弃、不留副本、不缓存、每轮留痕
     activityType: SUB_FLOW_CALL
     roleRef:
     behaviorRef: B-AUTO-10

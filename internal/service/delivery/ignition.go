@@ -25,6 +25,9 @@ const (
 	defaultConfigPath = "/api/v1/ign/delivery/config/{ref}"
 	// configRawSuffix 同一组内的原文只读通道(必带 file_face、一次一面;CLC FUNC-49 的对端)。
 	configRawSuffix = "/raw"
+	// defaultTaskLogPath O-IGN FUNC-51 跨中心交付执行日志只读通道(CLC FUNC-51 的对端;
+	// 与回执 FUNC-35 分牌 —— 回执给结论不发原文,本通道只给日志原文腿)。
+	defaultTaskLogPath = "/api/v1/ign/delivery/log/{ref}"
 )
 
 // ErrPeerNotConfigured 未配置对端地址(与「对端不可达」分列:一个是本部署没接线,一个是接了线连不上)。
@@ -347,6 +350,28 @@ func (a *Ignition) ReadConfigRaw(ctx context.Context, clusterRef, fileFace strin
 	var out map[string]any
 	q := url.Values{"file_face": []string{face}}
 	if err := a.do(ctx, http.MethodGet, pathWithRef(defaultConfigPath, clusterRef)+configRawSuffix,
+		q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReadTaskLog 代理读对端交付执行日志的逐行原文(CLC FUNC-51 的对端通道,O-IGN FUNC-51)。
+// 行已由对端在写入前掩码(INV-40),本域不二次解析、不重排、不留副本 —— 响应即弃。
+// 单页上限由对端 REF-14 封顶并如实回显 limit,本域只负责「不发无游标的整表请求」。
+func (a *Ignition) ReadTaskLog(ctx context.Context, remoteRef string, sinceSeq int64, limit int) (map[string]any, error) {
+	if a.cfg.BaseURL == "" {
+		return nil, ErrPeerNotConfigured
+	}
+	if strings.TrimSpace(remoteRef) == "" {
+		return nil, fmt.Errorf("代理读远程执行日志必须携带远端任务引用(INV-46)")
+	}
+	q := url.Values{
+		"since_seq": []string{fmt.Sprintf("%d", sinceSeq)},
+		"limit":     []string{fmt.Sprintf("%d", limit)},
+	}
+	var out map[string]any
+	if err := a.do(ctx, http.MethodGet, pathWithRef(defaultTaskLogPath, remoteRef),
 		q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}

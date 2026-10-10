@@ -1,6 +1,6 @@
-// clc_readonly_pg_test.go —— v1.2 只读代理与交付前置预检（FUNC-47 / 48 / 49 / 50）语义用例。
+// clc_readonly_pg_test.go —— 只读代理与交付前置预检（FUNC-47 / 48 / 49 / 50 / 51）语义用例。
 //
-// 覆盖口径（m2 :1027-1101 / m3 / m7 REP-16~18）：
+// 覆盖口径（m2 FUNC-47~51 / m3 / m7 REP-16~19）：
 //
 //	FUNC-47 REF-18 拼接串口径与平台全局变量取源、REMOVED 节点不入列、R-03 接管注记、
 //	        零凭据出口（INV-08 输出面延伸，对返回的 items 数据面做反向探针）、复制不留痕；
@@ -9,13 +9,19 @@
 //	FUNC-49 file_face 必带且一次一面、逐次留痕（含失败尝试）、审计明细不回写原文、
 //	        PERM-FUNC-49 是独立权限码（不随 48 附带）；
 //	FUNC-50 五档判定随本域事实翻转、不拦截（返回成功）、不写本域对象不发事件，
-//	        且模型侧 FUNC-50 无报表（M7 唯一显式例外），FUNC-47/48/49 与 REP-16/17/18 双向一对一。
+//	        且模型侧 FUNC-50 无报表（M7 唯一显式例外），FUNC-47/48/49 与 REP-16/17/18 双向一对一；
+//	FUNC-51（v1.3 Q-125）对端逐行原文原样透传（masked 行不二次改写）、复用同一令牌与门面腿、
+//	        响应即弃零落 clc_task_log、游标增量三页不重不漏、limit 入口护栏两档、每轮各留一条痕
+//	        且明细不回写行内容、无引用与不可达两档都 200 + 显式结论 + 跳转兜底、PERM-FUNC-51 独立成牌
+//	        且只读角色 04 不持、REP-19 ↔ FUNC-51 双向一对一。
 package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +40,7 @@ type roCall struct {
 	auth  string
 }
 
-// roPeer 只服务 defaultConfigPath 与其 /raw 后缀两条路径，按 mode 决定应答形态。
+// roPeer 只服务 defaultConfigPath 与其 /raw 后缀、以及 defaultTaskLogPath 三条路径，按 mode 决定应答形态。
 type roPeer struct {
 	mu    sync.Mutex
 	calls []roCall
@@ -82,8 +88,69 @@ func newROPeer() *roPeer {
 			"face_caliber": "四层取值结论由对端 R-20 唯一实现给出",
 		})
 	})
+	// O-IGN FUNC-51 跨中心交付执行日志只读通道的替身：固定 5 行（第 3 行为对端写前掩码行），
+	// 按 since_seq / limit 切片回吐并如实回显游标三件套（next_seq / cursor / truncated）。
+	mux.HandleFunc("/api/v1/ign/delivery/log/", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		q := map[string]string{}
+		for k, vs := range r.URL.Query() {
+			if len(vs) > 0 {
+				q[k] = vs[0]
+			}
+		}
+		p.calls = append(p.calls, roCall{path: r.URL.Path, query: q, auth: r.Header.Get("Authorization")})
+		if p.mode == "reject" {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"return_code": "IGN_STATE_0002", "error_msg": "该远端任务在对端不可读"})
+			return
+		}
+		const total = 5
+		ref := strings.TrimPrefix(r.URL.Path, "/api/v1/ign/delivery/log/")
+		since := atoiSafe(q["since_seq"])
+		limit := atoiSafe(q["limit"])
+		if limit <= 0 {
+			limit = total
+		}
+		lines := []map[string]any{}
+		next := since
+		for seq := since + 1; seq <= total && len(lines) < limit; seq++ {
+			text := fmt.Sprintf("ezctl progress seq=%d %s", seq, peerLineMark)
+			masked := false
+			if seq == 3 {
+				// 对端写前掩码后的行形态（其 INV-40）：本域原样透传，既不二次脱敏也不还原。
+				text = "ezctl setup --password ******（对端整行掩码）" + peerLineMark
+				masked = true
+			}
+			lines = append(lines, map[string]any{
+				"seq": seq, "direction": "TOOL", "log_line": text,
+				"masked": masked, "logged_at": fmt.Sprintf("2026-10-09 10:0%d:00", seq),
+			})
+			next = seq
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"remote_task_ref": ref,
+			"lines":           lines,
+			"since_seq":       since,
+			"next_seq":        next,
+			"cursor":          total,
+			"truncated":       next < total,
+			"limit":           limit,
+			"read_origin":     "上游代理只读(FUNC-51)",
+		})
+	})
 	p.srv = httptest.NewServer(mux)
 	return p
+}
+
+// peerLineMark 对端替身每行日志里的独有标记：用来反向探针审计明细（留痕只记游标与行数，
+// 绝不回写日志内容 —— INV-08），也用来验证本域逐行原样透传（不重排、不改写、不二次脱敏）。
+const peerLineMark = "RO51-LINE-MARK"
+
+func atoiSafe(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
 }
 
 func (p *roPeer) setMode(m string) {
@@ -637,5 +704,256 @@ func TestFunc50PreflightHasNoReportButThreeProxiesDo(t *testing.T) {
 		if seen[ref] != rep {
 			t.Fatalf("%s 的报表须恰为 %s(双向一对一),实际 %+v", ref, rep, seen)
 		}
+	}
+}
+
+// ---------- FUNC-51 交付执行日志代理查看（REP-19 / R-25 日志腿 / 逐次留痕，v1.3 Q-125） ----------
+
+// TestFunc51ProxyPassthroughAndNoCopy 覆盖 m2 FUNC-51 后置条件四条：对端逐行原文原样透传
+// （masked 行不被本域二次改写、顺序与内容都不动）、复用同一条门面腿与同一令牌、
+// 响应即弃（一行都不落 clc_task_log）、每次代理读一条留痕且明细不回写日志内容（INV-08）。
+func TestFunc51ProxyPassthroughAndNoCopy(t *testing.T) {
+	requireDB(t)
+	rt := freshRT(t, time.Minute)
+	peer := newROPeer()
+	attachROPeer(t, rt, peer)
+	clusterNo := seedCluster(t, ClusterStatusRunning)
+	taskNo := seedTask(t, clusterNo, TaskKindInstall, TaskStatusRunning, ExecPathRemoteExecutor)
+	ref := fmt.Sprintf("IGN-RO-51-%d", nextSeq())
+	mustSQL(t, `UPDATE clc_task SET remote_task_ref=? WHERE task_no=?`, ref, taskNo)
+
+	logsBefore := countRows(t, `SELECT COUNT(*) FROM clc_task_log`)
+	user := UserInfo{ID: 9, Username: "wizops"}
+
+	out, err := RemoteExecLogView(ref, 0, 0, user)
+	if err != nil {
+		t.Fatalf("FUNC-51 代理读失败: %v", err)
+	}
+	lines := rowsOf(out["lines"])
+	if len(lines) != 5 {
+		t.Fatalf("对端 5 行须逐行回吐,实际 %d 行: %+v", len(lines), out["lines"])
+	}
+	for i, l := range lines {
+		if Int(l["seq"]) != int64(i+1) {
+			t.Fatalf("第 %d 行序号乱序或漏行(本域不重排): %+v", i+1, l)
+		}
+		if !strings.Contains(Str(l["log_line"]), peerLineMark) {
+			t.Fatalf("行内容被本域改写(不二次加工): %+v", l)
+		}
+	}
+	if !truthy(lines[2]["masked"]) || !strings.Contains(Str(lines[2]["log_line"]), "******") {
+		t.Fatalf("对端写前掩码的行须原样透传(本域不二次脱敏也不还原): %+v", lines[2])
+	}
+	if Str(out["remote_task_ref"]) != ref || Str(out["cluster_no"]) != clusterNo ||
+		Str(out["local_task_no"]) != taskNo || Int(out["cursor"]) != 5 || Int(out["next_seq"]) != 5 {
+		t.Fatalf("引用 / 集群标签 / 游标三件套须齐备: %+v", out)
+	}
+	if truthy(out["peer_unreachable"]) || !truthy(out["leg_available"]) {
+		t.Fatalf("对端已答且成功,不得标不可达或缺腿: %+v", out)
+	}
+
+	calls := peer.received()
+	if len(calls) != 1 || calls[0].auth != "Bearer peer-token-42" {
+		t.Fatalf("代理读须复用部署期令牌与门面腿(R-25),实际 %+v", calls)
+	}
+	if want := "/api/v1/ign/delivery/log/" + ref; calls[0].path != want {
+		t.Fatalf("对端通道路径错配: want %s got %s", want, calls[0].path)
+	}
+	if calls[0].query["since_seq"] != "0" || calls[0].query["limit"] != strconv.Itoa(remoteExecLogPageDefault) {
+		t.Fatalf("游标缺省 0、单轮缺省档未生效: %+v", calls[0].query)
+	}
+
+	// 响应即弃：本域对这份数据没有留存权 ⇒ 日志表零增量（也不进 REF-15 清理）。
+	if n := countRows(t, `SELECT COUNT(*) FROM clc_task_log`); n != logsBefore {
+		t.Fatalf("远程行不得落 clc_task_log(REF-12 / R-25 日志腿): %d → %d", logsBefore, n)
+	}
+
+	// 逐次留痕：一次调用一行，齐「谁 / 哪个集群 / 哪个远端任务 / 取到哪个游标」，且不含日志内容。
+	if n := auditCountFor(t, "FUNC-51", clusterNo); n != 1 {
+		t.Fatalf("代理读必须逐次留痕: 期望 1 行,实际 %d 行", n)
+	}
+	row := mustOne(t, `SELECT username, detail FROM audit_logs WHERE action='FUNC-51' AND detail LIKE ?
+		ORDER BY id DESC LIMIT 1`, "%"+clusterNo+"%")
+	d := Str(row["detail"])
+	if Str(row["username"]) != user.Username || !strings.Contains(d, ref) || !strings.Contains(d, "取回 5 行") {
+		t.Fatalf("留痕须齐查看人 / 远端引用 / 行数: %s", d)
+	}
+	if strings.Contains(d, peerLineMark) || strings.Contains(d, "ezctl") {
+		t.Fatalf("审计明细不得回写日志内容(INV-08): %s", d)
+	}
+}
+
+// TestFunc51CursorPagingAndLimitCap 覆盖口径 8 在本域腿的落点：只按游标取增量、
+// 三页累计不重不漏、truncated / next_seq 如实回显；limit 的入口护栏（缺省档与硬上限档）
+// 作用在上行参数上，真正的封顶答案权留给对端（本域不复制对端配置）。
+func TestFunc51CursorPagingAndLimitCap(t *testing.T) {
+	requireDB(t)
+	rt := freshRT(t, time.Minute)
+	peer := newROPeer()
+	attachROPeer(t, rt, peer)
+	clusterNo := seedCluster(t, ClusterStatusRunning)
+	taskNo := seedTask(t, clusterNo, TaskKindInstall, TaskStatusRunning, ExecPathRemoteExecutor)
+	ref := fmt.Sprintf("IGN-RO-51P-%d", nextSeq())
+	mustSQL(t, `UPDATE clc_task SET remote_task_ref=? WHERE task_no=?`, ref, taskNo)
+
+	var seen []int64
+	since := int64(0)
+	for round := 1; round <= 3; round++ {
+		out, err := RemoteExecLogView(ref, since, 2, testUser)
+		if err != nil {
+			t.Fatalf("第 %d 轮代理读失败: %v", round, err)
+		}
+		lines := rowsOf(out["lines"])
+		if len(lines) > 2 {
+			t.Fatalf("第 %d 轮回吐 %d 行 > 请求的 2 行", round, len(lines))
+		}
+		for _, l := range lines {
+			seen = append(seen, Int(l["seq"]))
+		}
+		next := Int(out["next_seq"])
+		if next <= since && len(lines) > 0 {
+			t.Fatalf("游标未推进(INV-38 严格单调): since=%d next=%d", since, next)
+		}
+		since = next
+		wantTruncated := since < 5
+		if truthy(out["truncated"]) != wantTruncated {
+			t.Fatalf("第 %d 轮 truncated 未如实回显: %+v", round, out)
+		}
+		if Int(out["limit"]) != 2 {
+			t.Fatalf("对端回显的 limit 须原样透传: %+v", out)
+		}
+		if since == 5 {
+			break
+		}
+	}
+	if len(seen) != 5 || seen[0] != 1 || seen[4] != 5 {
+		t.Fatalf("三页累计须不重不漏覆盖 1~5,实际 %+v", seen)
+	}
+
+	// 入口护栏：limit 缺省 / 负数 ⇒ 缺省档；超大 ⇒ 上限档。封顶发生在上行参数,答案权在对端。
+	before := len(peer.received())
+	if _, err := RemoteExecLogView(ref, -7, 0, testUser); err != nil {
+		t.Fatalf("缺省档代理读失败: %v", err)
+	}
+	if _, err := RemoteExecLogView(ref, 0, 99999, testUser); err != nil {
+		t.Fatalf("上限档代理读失败: %v", err)
+	}
+	calls := peer.received()[before:]
+	if len(calls) != 2 {
+		t.Fatalf("两次护栏调用未打到对端: %+v", calls)
+	}
+	if calls[0].query["since_seq"] != "0" || calls[0].query["limit"] != strconv.Itoa(remoteExecLogPageDefault) {
+		t.Fatalf("负游标须归零、缺省 limit 须走缺省档: %+v", calls[0].query)
+	}
+	if calls[1].query["limit"] != strconv.Itoa(remoteExecLogPageMax) {
+		t.Fatalf("超限 limit 须按硬上限封顶: %+v", calls[1].query)
+	}
+	// 每轮都留痕：上面 3 页 + 2 次护栏 = 5 行。
+	if n := auditCountFor(t, "FUNC-51", clusterNo); n != 5 {
+		t.Fatalf("每轮代理读各留一条,期望 5 行,实际 %d 行", n)
+	}
+}
+
+// TestFunc51NoRefAndUnreachableEnvelope 覆盖「绝不留空面板、绝不拿上一轮行冒充现状」的三档：
+// 无远端引用（本地腿本就无此腿）⇒ 200 级显式结论且不打对端不留痕；对端已答拒绝 ⇒ 与 FUNC-48/49
+// 同一信封形态且体内不得有任何行；本域反查不到任务头 ⇒ 不拒绝读取（真伪由于对端判定）但如实标注。
+func TestFunc51NoRefAndUnreachableEnvelope(t *testing.T) {
+	requireDB(t)
+	rt := freshRT(t, time.Minute)
+	peer := newROPeer()
+	attachROPeer(t, rt, peer)
+	clusterNo := seedCluster(t, ClusterStatusRunning)
+	taskNo := seedTask(t, clusterNo, TaskKindInstall, TaskStatusRunning, ExecPathRemoteExecutor)
+	ref := fmt.Sprintf("IGN-RO-51E-%d", nextSeq())
+	mustSQL(t, `UPDATE clc_task SET remote_task_ref=? WHERE task_no=?`, ref, taskNo)
+
+	// 档 A：无引用 ⇒ 显式结论，一次都不该打到对端，也不该留痕（读根本没发生）。
+	out, err := RemoteExecLogView("   ", 0, 0, testUser)
+	if err != nil {
+		t.Fatalf("无引用是合法在册状态,不得升级为业务失败: %v", err)
+	}
+	if truthy(out["leg_available"]) || !strings.Contains(Str(out["notice"]), "远程日志暂不可读") {
+		t.Fatalf("无引用档须显式说明暂不可读: %+v", out)
+	}
+	if len(rowsOf(out["lines"])) != 0 || len(peer.received()) != 0 {
+		t.Fatalf("无引用不得打对端或回吐行: %+v", out)
+	}
+	if n := auditCountFor(t, "FUNC-51", clusterNo); n != 0 {
+		t.Fatalf("读没发生却留痕: %d 行", n)
+	}
+
+	// 档 B：对端已答但拒绝 ⇒ 与配置代理同一信封形态，体内不得有任何行冒充现状。
+	peer.setMode("reject")
+	out, err = RemoteExecLogView(ref, 0, 0, testUser)
+	if err != nil {
+		t.Fatalf("对端拒绝应转显式结论: %v", err)
+	}
+	if !truthy(out["peer_unreachable"]) || Str(out["unreachable_kind"]) != "peer_answered" ||
+		Int(out["peer_error_code"]) != 409 {
+		t.Fatalf("对端已答档口径不符: %+v", out)
+	}
+	if _, ok := out["lines"]; ok {
+		t.Fatalf("不可达时不得回吐日志行: %+v", out)
+	}
+	if !strings.Contains(Str(out["jump_entry"]), strings.TrimRight(config.Config.Delivery.IgnitionBaseURL, "/")) {
+		t.Fatalf("不可达必须保留跳转兜底入口(REF-12): %+v", out)
+	}
+	if n := auditCountFor(t, "FUNC-51", clusterNo); n != 1 {
+		t.Fatalf("失败读取也要留痕: 期望 1 行,实际 %d 行", n)
+	}
+	if d := Str(mustOne(t, `SELECT detail FROM audit_logs WHERE action='FUNC-51' AND detail LIKE ?
+		ORDER BY id DESC LIMIT 1`, "%"+clusterNo+"%")["detail"]); !strings.Contains(d, "被对端拒绝") {
+		t.Fatalf("留痕须点明拒绝方与原因: %s", d)
+	}
+
+	// 档 C：本域反查不到任务头（引用是外来的）⇒ 读取照做、集群标签如实写「未登记」。
+	peer.setMode("ok")
+	unknown := fmt.Sprintf("IGN-RO-51U-%d", nextSeq())
+	out, err = RemoteExecLogView(unknown, 0, 0, testUser)
+	if err != nil {
+		t.Fatalf("引用真伪由于对端判定,本域反查不到不得拒绝读取: %v", err)
+	}
+	if Str(out["cluster_no"]) != "" || Str(out["local_task_no"]) != "" {
+		t.Fatalf("反查不到任务头时不得凭空补集群标识: %+v", out)
+	}
+	if n := auditCountFor(t, "FUNC-51", unknown); n != 1 {
+		t.Fatalf("外来引用的读取也要留痕: 期望 1 行,实际 %d 行", n)
+	}
+	if d := Str(mustOne(t, `SELECT detail FROM audit_logs WHERE action='FUNC-51' AND detail LIKE ?
+		ORDER BY id DESC LIMIT 1`, "%"+unknown+"%")["detail"]); !strings.Contains(d, "本域无该远端引用的任务登记") {
+		t.Fatalf("留痕须如实标注集群未登记: %s", d)
+	}
+}
+
+// TestFunc51PermissionCardAndReportBinding FUNC-51 是独立一张牌（PERM-FUNC-51 挂 FUNC-51，
+// 只读角色 04 不持），且与 REP-19 双向一对一 —— 远程腿与本地腿（REP-13）分列不合并。
+func TestFunc51PermissionCardAndReportBinding(t *testing.T) {
+	requireDB(t)
+	reg := ontology.Load()
+	p := reg.Permissions["PERM-FUNC-51"]
+	if p == nil {
+		t.Fatal("m5 缺权限码 PERM-FUNC-51(远程日志腿独立发牌)")
+	}
+	if Str(p["targetRef"]) != "FUNC-51" {
+		t.Fatalf("PERM-FUNC-51 挂口须指向 FUNC-51,实际 %q", Str(p["targetRef"]))
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM sys_role_permission rp
+		JOIN sys_role ro ON ro.id=rp.role_id JOIN sys_permission pm ON pm.id=rp.permission_id
+		WHERE ro.code='CLC-ROLE-04' AND pm.code='PERM-FUNC-51'`); n != 0 {
+		t.Fatalf("只读角色 CLC-ROLE-04 不得持远程原文腿(与 PERM-FUNC-49 同档收紧): %d 条", n)
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM sys_role_permission rp
+		JOIN sys_role ro ON ro.id=rp.role_id JOIN sys_permission pm ON pm.id=rp.permission_id
+		WHERE ro.code='CLC-ROLE-03' AND pm.code='PERM-FUNC-51'`); n != 1 {
+		t.Fatal("集群审计员 CLC-ROLE-03 须默认持 PERM-FUNC-51")
+	}
+	var bound []string
+	for id, q := range reg.QueryReports {
+		if Str(q["behaviorRef"]) == "FUNC-51" {
+			bound = append(bound, id)
+		}
+	}
+	if len(bound) != 1 || bound[0] != "REP-19" {
+		t.Fatalf("FUNC-51 的报表须恰为 REP-19(双向一对一),实际 %+v", bound)
 	}
 }

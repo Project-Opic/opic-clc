@@ -1,12 +1,14 @@
-// clc_readonly.go —— v1.2 只读代理与前置预检的控制器
-// (FUNC-47 / FUNC-48 / FUNC-49 / FUNC-50;m5 权限码 PERM-FUNC-47 / 48 / 49 / 50)。
+// clc_readonly.go —— 只读代理与前置预检的控制器
+// (FUNC-47 / FUNC-48 / FUNC-49 / FUNC-50 / FUNC-51;m5 权限码 PERM-FUNC-47 / 48 / 49 / 50 / 51)。
 //
-// 四条都是用户侧 QUERY:走 OPIC 登录组信封(common.OKJSON/FailJSON);门面组由对端承担,
+// 五条都是用户侧 QUERY:走 OPIC 登录组信封(common.OKJSON/FailJSON);门面组由对端承担,
 // 本域不出现 flat JSON,也不新挂 middleware.FacadeRequired。控制器只做入参搬运 + 权限挂载,
 // 语义 / 不可达分档 / 留痕全部在服务层。
 package business
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 
 	"gitcode.com/opic-ontology/opic-techbase/internal/api/common"
@@ -71,4 +73,21 @@ func ClcDeliveryReadinessCheck(c *gin.Context) {
 		return
 	}
 	common.OKJSON(c, out, "交付前置完备性预检结论(即时提示、不拦截提交;各 INV / R 在写入瞬间执行拦截)")
+}
+
+// ClcRemoteExecLog GET /api/clc/exec-log/:ref?since_seq=&limit= (FUNC-51,REP-19)。
+// 交付执行日志代理查看:按远端任务引用(:ref = 任务头 remoteTaskRef)代理直展 O-IGN 的
+// ezctl 逐行运行原文 —— 游标增量、响应即弃、不落 clc_task_log(R-25 日志腿 / REF-12);
+// 对端写前已掩码,本域不二次脱敏也不据行文本做判定(INV-08 / R-17)。
+// 逐次留痕与不可达分档都在服务层,界面拿到的 peer_unreachable 决定「显式说明 + 跳转兜底」。
+// 权限:独立权限码 PERM-FUNC-51(与 PERM-FUNC-49 同档同判据,不与回执类可见性合并)。
+func ClcRemoteExecLog(c *gin.Context) {
+	sinceSeq, _ := strconv.ParseInt(c.Query("since_seq"), 10, 64)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	out, err := service.RemoteExecLogView(c.Param("ref"), sinceSeq, limit, common.UserOf(c))
+	if err != nil {
+		common.FailJSON(c, err)
+		return
+	}
+	common.OKJSON(c, out, "远程执行日志代理视图(对端逐行原文,游标增量、不留副本;不可达时显式说明并保留跳转入口)")
 }

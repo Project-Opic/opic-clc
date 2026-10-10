@@ -626,6 +626,49 @@ export interface ClcIgnConfigRawView {
   local_caliber_note?: string
 }
 
+/**
+ * FUNC-51 远程执行日志行（REP-19）。
+ * 列结构以 O-IGN FUNC-51 出参为唯一事实源，只有这五项：seq / logged_at / direction / masked / log_line。
+ * 本域不造「级别」「所属步骤序号」列（对端无此字段 —— 凭空造列即违反口径 9），
+ * direction 取对端原值（TOOL / PLATFORM 等）不做字典映射，前端亦不内置第二份方向表。
+ */
+export interface ClcRemoteExecLogLine {
+  seq: number
+  logged_at?: string
+  direction?: string
+  masked?: boolean
+  log_line?: string
+}
+
+/**
+ * FUNC-51 响应：成功=对端行原样透传 + 本域补充键；不可达=200 + peer_unreachable 信封 + jump_entry 兜底。
+ * 无远端引用时 leg_available=false + notice（显式说明，界面不留空面板）。
+ */
+export interface ClcRemoteExecLogView {
+  remote_task_ref?: string
+  cluster_no?: string
+  local_task_no?: string
+  lines?: ClcRemoteExecLogLine[]
+  since_seq?: number
+  next_seq?: number
+  cursor?: number
+  truncated?: boolean
+  limit?: number
+  limit_requested?: number
+  read_origin?: string
+  leg_available?: boolean
+  peer_unreachable?: boolean
+  unreachable_kind?: string
+  unreachable_reason?: string
+  peer_answered?: boolean
+  peer_error_code?: string
+  peer_error_msg?: string
+  notice?: string
+  jump_entry?: string
+  func_ref?: string
+  local_caliber_note?: string
+}
+
 const taskPath = (no: string) => `/api/clc/task/${encodeURIComponent(no)}`
 const clusterPath = (id: number) => `/api/clc/cluster/${id}`
 
@@ -671,6 +714,14 @@ export const wizardApi = {
   /** act-FUNC-50 交付前置完备性预检（即时判定五档；结论不拦截，缺项如实列出；只读本域事实，不做跨中心同步探活） */
   deliveryReadiness(id: number) {
     return http.get<ClcReadinessReport>(`${clusterPath(id)}/delivery-readiness`)
+  },
+  /**
+   * act-FUNC-51 远程执行日志代理查看（REP-19；独立权限码 PERM-FUNC-51，与 PERM-FUNC-49 同档）。
+   * ref 取任务头 remoteTaskRef；游标增量（since_seq 缺省 0）、单轮有硬上限。
+   * 每轮读都在后端逐次留痕，响应即弃不落本域 —— 所以前端同样不留副本，刷新即重取。
+   */
+  execLog(ref: string, params?: { since_seq?: number; limit?: number }) {
+    return http.get<ClcRemoteExecLogView>(`/api/clc/exec-log/${encodeURIComponent(ref)}`, params)
   },
 }
 

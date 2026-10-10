@@ -1,4 +1,4 @@
-// 集群域 · 装机向导台(MU frmClcWizard,MASTER_DETAIL_FORM;AGG-CLC-06/01,FUNC-44/45/46/48/49/50,v1.2)
+// 集群域 · 装机向导台(MU frmClcWizard,MASTER_DETAIL_FORM;AGG-CLC-06/01,FUNC-44/45/46/48/49/50/51,v1.2 + v1.3)
 // 落点与口径:
 //   el01 集群选择(非终态) + 进入即锁链路徽章(INV-32);el02 templateRef 建成后只读(INV-49);
 //   el03 推进模式只在任务创建前可选,创建请求显式带 step_mode(缺省 STEP,REF-17/DEF-07),创建后任务行只读徽章(INV-50);
@@ -7,7 +7,9 @@
 //   el07 执行本步只对队列首个 PENDING 开放,每个置灰必给原因、不谎报排队(R-23/INV-50);
 //   el08 重试本步 = 新建续跑任务(INV-31/R-17),原任务行永不改写;STALLED 给「显式换机」去台账(INV-32,绝不静默切换);
 //   el09 跳步仅未执行步 + 事由必填 + 后果明示(R-24/INV-37);
-//   el10 实时日志复用 TaskDetail 导出的 TaskLogPanel(游标增量 + SSE,禁整表拉取,INV-43;远程原文只在 O-IGN,REF-12 跳转不留副本);
+//   el10/el18 日志两腿按执行位置二选一、不并存(REF-16):LOCAL 腿复用 TaskDetail 导出的 TaskLogPanel
+//     (游标增量 + SSE,禁整表拉取,INV-43);REMOTE_EXECUTOR 腿用 RemoteExecLogPanel 代理直展点火中心的
+//     ezctl/ansible 逐行原文(FUNC-51 / REP-19,2~3 秒游标短轮询,响应即弃不落本域,不可达显式说明 + 跳转兜底);
 //   el11~13 右侧页签:配置(字段级代理,轴名取对端 file_face_label,缺位回显码值本身,DEF-05)/生命周期台/原文只读(独立权限码 PERM-FUNC-49,读取逐次留痕,不可达不显示历史原文);
 //   el14 生命周期台动作集取 CLC_TASK_KIND 既有着陆;动作选项按 hasPerm 分档「不渲染」(DEF-06);
 //   el15 提交销毁申请仍走审批 PROC-APP-01,本台永不直派 DESTROY(INV-33/R-10);el16 高危事由必填、el17 影响面即时读本域行。
@@ -34,14 +36,14 @@ import {
 import { usePermission } from '../../hooks/usePermission'
 import { useDictionaries } from '../../hooks/useDictionaries'
 import TableToolbar from '../../admin/components/TableToolbar'
-import { TaskLogPanel } from './TaskDetail'
+import { RemoteExecLogPanel, TaskLogPanel } from './TaskDetail'
 import {
-  CLUSTER_STATUS, EXEC_PATH, HIGH_RISK_LIFECYCLE_KINDS, LIFECYCLE_DISPATCH_KINDS, STEP_STATUS_TONE,
-  TASK_KIND, TASK_KIND_PERMS, TASK_STATUS, pill, withDictLabels,
+  CLUSTER_STATUS, EXEC_PATH, HIGH_RISK_LIFECYCLE_KINDS, LIFECYCLE_DISPATCH_KINDS, LIVE_TASK_STATUSES,
+  STEP_STATUS_TONE, TASK_KIND, TASK_KIND_PERMS, TASK_STATUS, pill, withDictLabels, type ConsoleCtx,
 } from './common'
 
-// 「在途」= 尚未出结论、占用 INV-48 单实例位的任务;STALLED 不占位但保留可见(挂起行给「重试/显式换机」)。
-const LIVE_TASK_STATUSES = ['QUEUED', 'RUNNING']
+// 「在途」= 尚未出结论、占用 INV-48 单实例位的任务判据，取自 common.tsx 唯一一份(台级徽章/轮询共用);
+// STALLED 不占位但保留可见(挂起行给「重试/显式换机」)。
 // 步骤「有结论」集(进度分子;权威行来自 REP-12)
 const RESOLVED_STEP_STATUSES = ['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELLED']
 
@@ -74,11 +76,9 @@ function GreyWithReason({ title, children }: { title: string; children: ReactNod
 
 export interface IgnConfigFieldViewProps {
   clusterId: number
-  /** 不可达信封里的 jump_entry(<ign_base>/ui/cluster/<cluster_no>)回抛给主屏,供 el10 远程日志跳转复用 */
-  onJumpEntry?: (entry: string) => void
 }
 
-export function IgnConfigFieldView({ clusterId, onJumpEntry }: IgnConfigFieldViewProps) {
+export function IgnConfigFieldView({ clusterId }: IgnConfigFieldViewProps) {
   const { token } = theme.useToken()
   const [view, setView] = useState<ClcIgnConfigView | null>(null)
   const [failure, setFailure] = useState<ClcIgnConfigView | null>(null)
@@ -95,7 +95,6 @@ export function IgnConfigFieldView({ clusterId, onJumpEntry }: IgnConfigFieldVie
         if (res.peer_unreachable) {
           // 不可达:表体保留上次读取(若有)并标注;失败信封单独渲染
           setFailure(res)
-          if (res.jump_entry) onJumpEntry?.(res.jump_entry)
         } else {
           setView(res)
           setFailure(null)
@@ -325,10 +324,11 @@ export function IgnConfigRawView({ clusterId }: { clusterId: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// el14/15/16/17 生命周期台(主屏右侧页签之一,内部组件)
+// el14/15/16/17 生命周期台(主屏右侧页签之一;v1.3 起同一组件也是集群台「生命周期」页签的动作卡载体
+//   —— 9.10.3 所记「唯一一处主登记位置换」的落点，FUNC-46 自身写入腿与权限码档位不变，不是宿主屏新开写口)
 // ---------------------------------------------------------------------------
 
-function LifecycleConsole({ cluster, onDispatched }: { cluster: ClcCluster; onDispatched: () => void }) {
+export function LifecycleConsole({ cluster, onDispatched }: { cluster: ClcCluster; onDispatched: () => void }) {
   const hasPerm = usePermission()
   const [highTarget, setHighTarget] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -541,7 +541,11 @@ function LifecycleConsole({ cluster, onDispatched }: { cluster: ClcCluster; onDi
 // 主屏
 // ---------------------------------------------------------------------------
 
-export default function WizardConsole() {
+// 集群台嵌入态(v1.3):传入 ctx 时本屏是「安装」页签的载体 —— 集群与任务行取自台级(REP-07 同一份行,
+// 不在页签内各拉一次),el01 集群选择器与右侧「配置/生命周期台/原文只读」页签组不渲染:
+// 前两块上移到台级同级页签(「配置」「生命周期」),el13 原文只读仍留在本「安装」页签、由宿主屏装配在步进与日志之下
+// (Q-117 / 9.10.1:安装页签 = 步进器 + 两腿日志 + 预检 + 原文只读),步进与日志本体、预检、派发链路一字不动。
+export default function WizardConsole({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
   const navigate = useNavigate()
   const { token } = theme.useToken()
@@ -549,9 +553,12 @@ export default function WizardConsole() {
   const dict = useDictionaries()
 
   const [clusters, setClusters] = useState<ClcCluster[]>([])
-  const [clusterId, setClusterId] = useState<number | null>(null)
-  const [cluster, setCluster] = useState<ClcCluster | null>(null)
-  const [tasks, setTasks] = useState<ClcTask[]>([])
+  const [clusterIdSelf, setClusterId] = useState<number | null>(null)
+  const [clusterSelf, setCluster] = useState<ClcCluster | null>(null)
+  const [tasksSelf, setTasks] = useState<ClcTask[]>([])
+  const clusterId = ctx?.cluster.id ?? clusterIdSelf
+  const cluster = ctx?.cluster ?? clusterSelf
+  const tasks = ctx?.tasks ?? tasksSelf
   const [steps, setSteps] = useState<ClcTaskStep[]>([])
   const [stepsError, setStepsError] = useState('')
   const [stepModeIntent, setStepModeIntent] = useState('STEP')
@@ -559,7 +566,6 @@ export default function WizardConsole() {
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [working, setWorking] = useState(false)
-  const [jumpEntry, setJumpEntry] = useState('')
   const [skipTarget, setSkipTarget] = useState<ClcTaskStep | null>(null)
   const [skipReason, setSkipReason] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -571,20 +577,25 @@ export default function WizardConsole() {
   )
   const attachedLive = !!attached && LIVE_TASK_STATUSES.includes(attached.task_status)
 
+  // 嵌入态下 REP-07 的任务行由台级持有 ⇒ 本屏不再各拉一次；cluster 行同理，刷新即 ctx.refresh()（9.10.7 ①）。
   const reloadTasks = useCallback((clusterNo: string) => {
-    if (!hasPerm('PERM-FUNC-25')) return
+    if (ctx || !hasPerm('PERM-FUNC-25')) return
     taskApi
       .list({ cluster_ref: clusterNo, page: 1, size: 20 })
       .then((r) => setTasks(r.list || []))
       .catch(() => undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPerm])
+  }, [hasPerm, ctx])
 
   const reloadCluster = useCallback((id: number) => {
+    if (ctx) {
+      ctx.refresh()
+      return
+    }
     if (!hasPerm('PERM-FUNC-20')) return
     clusterApi.get(id).then((c) => setCluster(c)).catch(() => undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPerm])
+  }, [hasPerm, ctx])
 
   const loadReadiness = useCallback((id: number) => {
     setReadinessLoading(true)
@@ -596,19 +607,22 @@ export default function WizardConsole() {
   }, [])
 
   // 集群切换:拉详情 + 任务序列 + 后台预检(§9.9.6:预检后台读取不遮挡;结论不拦截,el05)
+  // 嵌入态下行与任务序列已在台级就位,挂载只补预检,不再回头触发一次 ctx.refresh()。
   useEffect(() => {
     if (clusterId === null) return
     setSteps([])
     setStepsError('')
-    setJumpEntry('')
-    reloadCluster(clusterId)
-    reloadTasks(cluster?.cluster_no || '')
+    if (!ctx) {
+      reloadCluster(clusterId)
+      reloadTasks(cluster?.cluster_no || '')
+    }
     if (hasPerm('PERM-FUNC-50')) loadReadiness(clusterId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clusterId])
 
-  // 集群列表(el01:非终态集群;入口数据接口 PERM-FUNC-19)
+  // 集群列表(el01:非终态集群;入口数据接口 PERM-FUNC-19)。嵌入态集群由台级唯一确定,el01 不渲染也就不必拉清单。
   useEffect(() => {
+    if (ctx) return
     if (!hasPerm('PERM-FUNC-19')) return
     clusterApi
       .list({ page: 1, size: 100 })
@@ -649,19 +663,27 @@ export default function WizardConsole() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachedNo])
 
-  // 在途任务 5s 轮询刷新任务行 + 步骤行(步进解禁无需整屏刷新,§9.9.7③);日志面板自带 SSE 不在此列
+  // 在途任务 5s 轮询刷新任务行 + 步骤行(步进解禁无需整屏刷新,§9.9.7③);日志面板自带 SSE 不在此列。
+  // 嵌入态下 REP-02/REP-07 的轮询归台级(ClusterConsole),本页签只补步骤行,否则同一份行两个周期各拉一遍。
   useEffect(() => {
     if (!attachedLive || !clusterNo) return
     const timer = window.setInterval(() => {
-      reloadTasks(clusterNo)
-      if (clusterId !== null) reloadCluster(clusterId)
+      if (!ctx) {
+        reloadTasks(clusterNo)
+        if (clusterId !== null) reloadCluster(clusterId)
+      }
       loadSteps()
     }, 5000)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachedLive, attachedNo, clusterNo, clusterId])
+  }, [attachedLive, attachedNo, clusterNo, clusterId, ctx])
 
   const refreshAll = () => {
+    if (ctx) {
+      ctx.refresh()
+      loadSteps()
+      return
+    }
     if (clusterId !== null) reloadCluster(clusterId)
     if (clusterNo) reloadTasks(clusterNo)
     loadSteps()
@@ -829,7 +851,8 @@ export default function WizardConsole() {
     }
   }
 
-  if (!hasPerm('PERM-FUNC-19')) {
+  // PERM-FUNC-19 只挡独立形态的 el01 集群清单;嵌入态集群由台级(REP-02)带来,不再以 19 为前置。
+  if (!ctx && !hasPerm('PERM-FUNC-19')) {
     return (
       <Card>
         <Alert type="warning" showIcon message="当前角色未持有集群台账读取权限(PERM-FUNC-19),装机向导台无主数据可展示。" />
@@ -842,7 +865,7 @@ export default function WizardConsole() {
     tabItems.push({
       key: 'config',
       label: '配置（代理字段视图）',
-      children: <IgnConfigFieldView key={cluster.id} clusterId={cluster.id} onJumpEntry={setJumpEntry} />,
+      children: <IgnConfigFieldView key={cluster.id} clusterId={cluster.id} />,
     })
   }
   if (cluster) {
@@ -859,16 +882,18 @@ export default function WizardConsole() {
         description="步进器行集合完全来自后端 REP-12(不内置七步);执行位进入即锁(INV-32);步进/跳步/生命周期台全部真实端点派发,状态权威在后端"
         extra={
           <Space wrap>
-            {/* el01 集群选择(非终态) */}
-            <Select
-              showSearch
-              style={{ width: 260 }}
-              placeholder="选择集群(非终态)"
-              optionFilterProp="label"
-              value={clusterId ?? undefined}
-              onChange={(v: number) => { setClusterId(v); setCluster(null); setTasks([]) }}
-              options={clusters.map((c) => ({ value: c.id, label: `${c.name}（${c.cluster_no}｜${CLUSTER_STATUS[c.status]?.label || c.status}）` }))}
-            />
+            {/* el01 集群选择(非终态)。嵌入态:集群由台级唯一确定,9.10.1 明写不再重复回答「我在看哪个集群」。 */}
+            {!ctx && (
+              <Select
+                showSearch
+                style={{ width: 260 }}
+                placeholder="选择集群(非终态)"
+                optionFilterProp="label"
+                value={clusterId ?? undefined}
+                onChange={(v: number) => { setClusterId(v); setCluster(null); setTasks([]) }}
+                options={clusters.map((c) => ({ value: c.id, label: `${c.name}（${c.cluster_no}｜${CLUSTER_STATUS[c.status]?.label || c.status}）` }))}
+              />
+            )}
             <Button icon={<ReloadOutlined />} onClick={() => { refreshAll(); if (clusterId !== null && hasPerm('PERM-FUNC-50')) loadReadiness(clusterId) }}>刷新</Button>
           </Space>
         }
@@ -880,14 +905,15 @@ export default function WizardConsole() {
       {cluster && (
         <Row gutter={9} style={{ marginTop: 12 }}>
           {/* ---------------- 主区:任务附着 + 步进器 + 日志 ---------------- */}
-          <Col xs={24} xl={15}>
+          <Col xs={24} xl={ctx ? 24 : 15}>
             <Card
               size="small"
               style={{ marginBottom: 9 }}
               title={
                 <Space wrap size={6}>
-                  <span>{cluster.name}（{cluster.cluster_no}）</span>
-                  {pill(CLUSTER_STATUS, cluster.status)}
+                  {/* 嵌入态:名称/编号/生命周期状态归台级徽章条,此处不重播(9.10.1);执行位置锁仍是本区间的判据,保留 */}
+                  {!ctx && <span>{cluster.name}（{cluster.cluster_no}）</span>}
+                  {!ctx && pill(CLUSTER_STATUS, cluster.status)}
                   {/* 进入即锁链路徽章(§9.9.6 / INV-32):任务行权威;无任务时说明落定时机 */}
                   {attached?.execution_path ? (
                     <Tag color={attached.execution_path === 'REMOTE_EXECUTOR' ? 'purple' : 'blue'}>执行位置：{EXEC_PATH[attached.execution_path] || attached.execution_path}（已锁定，INV-32）</Tag>
@@ -897,11 +923,13 @@ export default function WizardConsole() {
                 </Space>
               }
             >
-              {/* el02 templateRef 建成后只读(INV-49),不给改 */}
+              {/* el02 templateRef 建成后只读(INV-49),不给改;嵌入态由徽章条「来源模板」呈现,此处不重复 */}
               <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  来源模板:{cluster.template_ref ? `${cluster.template_ref}（建成后只读，INV-49，不回写模板）` : '未使用模板'}
-                </Typography.Text>
+                {!ctx && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    来源模板:{cluster.template_ref ? `${cluster.template_ref}（建成后只读，INV-49，不回写模板）` : '未使用模板'}
+                  </Typography.Text>
+                )}
 
                 {/* el04 预检按钮 + el05 结论条:即时提示、不拦截(§9.9.6) */}
                 {hasPerm('PERM-FUNC-50') && (
@@ -1027,37 +1055,48 @@ export default function WizardConsole() {
               <Alert type="info" showIcon style={{ marginBottom: 9 }} message="当前角色无步骤查看牌(PERM-FUNC-34),步进器与行内动作不渲染(行权威=REP-12)。" />
             )}
 
-            {/* el10 实时日志:复用 TaskDetail 导出的同一面板(游标增量 + SSE,禁整表拉取,INV-43;上滑暂停跟随) */}
-            {attached && hasPerm('PERM-FUNC-35') && (
-              <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                <TaskLogPanel key={attached.task_no} task={attached} />
-                {attached.execution_path === 'REMOTE_EXECUTOR' && (
-                  <Typography.Text style={{ fontSize: 12, color: token.colorTextSecondary }}>
-                    原始日志在执行交付域（REF-12,本域不取远端原文、不留副本）
-                    {jumpEntry ? (
-                      <>
-                        ;跳转入口:
-                        <Typography.Link href={jumpEntry} target="_blank" rel="noreferrer">{jumpEntry}</Typography.Link>
-                      </>
-                    ) : (
-                      '（跳转入口在配置/原文页签代理读取到交付域后出现）'
-                    )}
-                    {attached.remote_task_ref ? `；远端任务引用 ${attached.remote_task_ref}` : ''}
-                  </Typography.Text>
-                )}
-              </Space>
-            )}
+            {/* 日志两腿按执行位置二选一、不并存(REF-16)：
+                LOCAL = el10 复用 TaskDetail 导出的 TaskLogPanel(游标增量 + SSE,禁整表拉取,INV-43;上滑暂停跟随);
+                REMOTE_EXECUTOR = el18 RemoteExecLogPanel(FUNC-51 代理直展 O-IGN 的 ezctl 逐行原文,2~3 秒游标短轮询,
+                响应即弃不落本域;不可达/无引用 ⇒ 显式说明 + 跳转兜底,不留空面板、不拿上一轮行冒充现状)。 */}
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              {attached &&
+                (attached.execution_path === 'REMOTE_EXECUTOR' ? (
+                  hasPerm('PERM-FUNC-51') ? (
+                    <RemoteExecLogPanel
+                      key={attached.task_no}
+                      remoteTaskRef={attached.remote_task_ref}
+                      live={attachedLive}
+                    />
+                  ) : (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="当前角色无远程执行日志牌(PERM-FUNC-51),el18 面板不渲染(行权威=REP-19,内容在 O-IGN)。"
+                    />
+                  )
+                ) : (
+                  hasPerm('PERM-FUNC-35') && (
+                    <TaskLogPanel key={attached.task_no} task={attached} />
+                  )
+                ))}
+            </Space>
           </Col>
 
-          {/* ---------------- 右侧页签组(el11) ---------------- */}
-          <Col xs={24} xl={9}>
-            <Card size="small" title="配置 / 生命周期台 / 原文只读">
-              <Tabs items={tabItems} destroyOnHidden />
-            </Card>
-          </Col>
+          {/* ---------------- 右侧页签组(el11) ----------------
+              嵌入态不渲染:「配置」「生命周期」两块上移集群台同级页签,「原文只读」(el13)按 §9.10.1 / Q-117
+              留在本「安装」页签、由宿主屏装配在步进与日志之下;主区因此放宽为整行,
+              独立形态(旧深链兼容一版)保持左右分栏不变。 */}
+          {!ctx && (
+            <Col xs={24} xl={9}>
+              <Card size="small" title="配置 / 生命周期台 / 原文只读">
+                <Tabs items={tabItems} destroyOnHidden />
+              </Card>
+            </Col>
+          )}
         </Row>
       )}
-      {!cluster && clusters.length === 0 && (
+      {!ctx && !cluster && clusters.length === 0 && (
         <Alert type="info" showIcon style={{ marginTop: 12 }} message="暂无非终态集群:请先在集群台账建档(FUNC-01),回到本屏选择。" />
       )}
 

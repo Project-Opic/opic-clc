@@ -12,7 +12,7 @@ import { clusterApi, nodeApi, wizardApi, type ClcLoginIdentity, type ClcNode } f
 import { usePermission } from '../../hooks/usePermission'
 import { useDictionaries } from '../../hooks/useDictionaries'
 import TableToolbar from '../../admin/components/TableToolbar'
-import { NODE_HEALTH, NODE_ROLE, NODE_STATUS, pill } from './common'
+import { NODE_HEALTH, NODE_ROLE, NODE_STATUS, pill, type ConsoleCtx } from './common'
 
 const ROLE_OPTIONS = Object.keys(NODE_ROLE).map((k) => ({ value: k, label: NODE_ROLE[k] }))
 const STATUS_OPTIONS = Object.keys(NODE_STATUS).map((k) => ({ value: k, label: NODE_STATUS[k].label }))
@@ -44,7 +44,9 @@ function execCopy(text: string): boolean {
   }
 }
 
-export default function NodeManage() {
+// 集群台嵌入态(v1.3 载体置换):传入 ctx 时集群由台级唯一确定(INV-32)—— 不拉集群清单、不渲染集群选择器,
+// cluster_ref 固定为本集群编号;写动作成功后除本屏刷新外还要 ctx.refresh() 重取徽章条(9.10.7 ①)。
+export default function NodeManage({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
   const [form] = Form.useForm()
   const [rebindForm] = Form.useForm()
@@ -52,7 +54,9 @@ export default function NodeManage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(10)
-  const [filters, setFilters] = useState<{ cluster_ref?: string; node_role?: string; node_status?: string }>({})
+  const [filters, setFilters] = useState<{ cluster_ref?: string; node_role?: string; node_status?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
   const [clusters, setClusters] = useState<{ id: number; cluster_no: string; name: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -69,10 +73,10 @@ export default function NodeManage() {
 
   // REP-16 的参数 p1「集群」必填(模型 m7 REP-16 parameters.p1 required:true),
   // 而节点清单行只有 cluster_ref(cluster_no),故用已加载的集群清单换算 :id。
-  const clusterIdByNo = useMemo(
-    () => Object.fromEntries(clusters.map((c) => [c.cluster_no, c.id])) as Record<string, number>,
-    [clusters],
-  )
+  const clusterIdByNo = useMemo(() => {
+    const base = Object.fromEntries(clusters.map((c) => [c.cluster_no, c.id])) as Record<string, number>
+    return ctx ? { ...base, [ctx.cluster.cluster_no]: ctx.cluster.id } : base
+  }, [clusters, ctx])
 
   // MU el15 分组呈现:三档各归各档——异常=UNREACHABLE(探测过且不可达),UNKNOWN(未知)是没探测过,
   // 既不算健康也不算异常;否则刚登记的整组节点会读成「全组异常」,把管理员引去查并不存在的事件。
@@ -123,7 +127,9 @@ export default function NodeManage() {
 
   useEffect(() => {
     load()
-    clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name })))).catch(() => undefined)
+    if (!ctx) {
+      clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name })))).catch(() => undefined)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, size])
 
@@ -136,6 +142,7 @@ export default function NodeManage() {
       message.success('节点已登记为待加入,ADD_NODE 任务排队执行(成功后回填 K8s 节点名 INV-14)')
       setAddTarget(null)
       load()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     } finally {
@@ -151,6 +158,7 @@ export default function NodeManage() {
       message.success('节点已重绑定(R-12)')
       setRebindTarget(null)
       load()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     }
@@ -217,9 +225,14 @@ export default function NodeManage() {
     },
   }] : []
 
+  // `REP-03` 的登记列结构（5.4）不含集群列；台内「节点」页签由徽章条唯一确定集群 ⇒ 不渲染，独立形态保留跨集群识别。
+  const clusterColumn: ColumnsType<ClcNode> = ctx ? [] : [
+    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+  ]
+
   const columns: ColumnsType<ClcNode> = [
     { title: '节点编号', dataIndex: 'node_no', key: 'node_no', width: 170 },
-    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+    ...clusterColumn,
     { title: '角色', dataIndex: 'node_role', key: 'node_role', width: 90, render: (v: string) => NODE_ROLE[v] || v },
     { title: 'IP', dataIndex: 'ip_address', key: 'ip_address', width: 130 },
     { title: 'K8s 节点名', dataIndex: 'k8s_nodename', key: 'k8s_nodename', render: (v: string | null) => v || '-' },
@@ -243,6 +256,7 @@ export default function NodeManage() {
                   await nodeApi.remove(row.id)
                   message.success('移除已受理,节点置移除中(DEL_NODE 任务成功后置 REMOVED,终局保留行)')
                   load()
+                  ctx?.refresh()
                 } catch { /* 拦截器已提示 */ }
               }}>
               <Button type="link" size="small" danger icon={<MinusCircleOutlined />}>移除</Button>
@@ -261,10 +275,13 @@ export default function NodeManage() {
         total={total}
         extra={
           <Space wrap>
-            <Select allowClear showSearch placeholder="集群" style={{ width: 190 }}
-              options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-              optionFilterProp="label"
-              onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            {/* 独立形态(mcc 侧栏)保留集群选择器;台内嵌入时集群由上下文唯一确定,不再重复回答「我在看哪个集群」(9.10.1) */}
+            {!ctx && (
+              <Select allowClear showSearch placeholder="集群" style={{ width: 190 }}
+                options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                optionFilterProp="label"
+                onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            )}
             <Select allowClear placeholder="节点角色" style={{ width: 130 }} options={ROLE_OPTIONS}
               onChange={(v) => { const f = { ...filters, node_role: v }; setFilters(f); setPage(1); load(1, size, f) }} />
             <Select allowClear placeholder="状态" style={{ width: 120 }} options={STATUS_OPTIONS}
@@ -276,7 +293,11 @@ export default function NodeManage() {
             </Tooltip>
             <Button icon={<ReloadOutlined />} onClick={() => load()}>刷新</Button>
             {hasPerm('PERM-FUNC-06') && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => { setAddTarget({ id: 0 } as ClcNode); form.resetFields() }}>添加节点</Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                setAddTarget({ id: 0 } as ClcNode)
+                form.resetFields()
+                if (ctx) form.setFieldsValue({ cluster_id: ctx.cluster.id })
+              }}>添加节点</Button>
             )}
           </Space>
         }
@@ -328,8 +349,10 @@ export default function NodeManage() {
       >
         <Form form={form} layout="vertical">
           <Form.Item name="cluster_id" label="目标集群" rules={[{ required: true, message: '请选择目标集群' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择集群"
-              options={clusters.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
+            {/* 台内嵌入:目标集群 = 当前集群,预填并锁死(9.10.1「集群由上下文唯一确定」) */}
+            <Select showSearch optionFilterProp="label" placeholder="选择集群" disabled={!!ctx}
+              options={(ctx ? [{ id: ctx.cluster.id, cluster_no: ctx.cluster.cluster_no, name: ctx.cluster.name }] : clusters)
+                .map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
           </Form.Item>
           <Form.Item name="ip_address" label="IP 地址(必填;裸机凭 IP 人工接管 INV-12)" rules={[{ required: true, message: '请输入 IP 地址' }]}>
             <Input placeholder="如 10.26.8.101" />

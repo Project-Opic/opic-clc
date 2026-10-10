@@ -152,7 +152,7 @@ func buildOntologySystemPrompt() string {
 
 	// 1) 软件需求概述
 	b.WriteString("【业务域概述】集群域负责:集群台账(四步向导创建、信息维护、显式恢复)、节点管理(添加/移除/重绑定,资产占用拦截)、" +
-		"交付编排(安装/续跑/升级/备份/恢复/启停/销毁审批)、引用与参数(中心引用双写、参数派生与覆写、待同步确认)、" +
+		"交付任务(安装/续跑/升级/备份/恢复/启停/销毁审批)、引用与参数(中心引用双写、参数派生与覆写、待同步确认)、" +
 		"快照与回滚(序号单调、现存性校验、放弃引用回滚)、健康探活(双源口径、降级显式恢复)。\n" +
 		"集群生命周期:DRAFT → INSTALLING → RUNNING / INSTALL_FAILED(续跑)→ DESTROYING → DESTROYED(终态保留);销毁为单级审批(FLOW-PROC-APP-01,CLC-ROLE-02 审批,强制不免审批)。\n\n")
 
@@ -166,7 +166,7 @@ func buildOntologySystemPrompt() string {
 
 	// 行为清单
 	if n := len(reg.Behaviors); n > 0 {
-		b.WriteString(fmt.Sprintf("\n【行为清单】共 %d 个行为(编号 FUNC-01~32,前端按钮一一对应):\n", n))
+		b.WriteString(fmt.Sprintf("\n【行为清单】共 %d 个行为(以 FUNC-xx 编号登记,界面入口按 PERM-FUNC-xx 一一把门):\n", n))
 		i := 0
 		for id, bh := range reg.Behaviors {
 			i++
@@ -200,8 +200,8 @@ func buildOntologySystemPrompt() string {
 	if n := len(reg.DataDictionaries); n > 0 {
 		b.WriteString(fmt.Sprintf("\n【数据字典】共 %d 个字典组(CLC_CLUSTER_STATUS/CLC_HEALTH/CLC_TASK_STATUS/CLC_TASK_KIND/CLC_NODE_ROLE/CLC_TARGET_CAPABILITY 等 20 组),经 /api/meta/dictionaries 取用。\n", n))
 	}
-	// 菜单导航
-	b.WriteString("\n【页面导航】集群台账 /clc/cluster、节点管理 /clc/node、交付编排 /clc/orch、引用与参数 /clc/ref、快照与回滚 /clc/snap、健康探活 /clc/health、运行观测 /clc/ops、平台参数 /clc/params、审批中心 /workbench/todo。\n")
+	// 菜单导航（v1.3 载体置换后的形态：侧栏一级四叶 + 集群台五页签，MU application.menus / retiredMenus）
+	b.WriteString("\n【页面导航】集群 /clc/cluster(列表,行操作「台」进集群台 /clc/console/:id,五页签 ?tab=config|install|lifecycle|node|log = 配置/安装/生命周期/节点/日志)、集群模板 /clc/template、交付任务 /clc/orch、运行观测 /clc/ops、审批中心 /workbench/todo。节点管理/装机向导/引用与参数/快照与回滚/健康探活/平台参数六叶已换成集群台页签,旧深链自动重定向。\n")
 
 	// 3) 只读能力清单
 	b.WriteString("\n【可用只读工具】\n")
@@ -210,7 +210,7 @@ func buildOntologySystemPrompt() string {
 
 	// 4) 安全边界与渲染协议
 	b.WriteString("\n【安全边界】动态 SQL 严格只读:仅 SELECT、仅白名单表(上列业务表)、自动追加 LIMIT、禁多语句、执行留审计。\n")
-	b.WriteString("【渲染约定】普通回答用文字;列表/统计结果建议用户输入 SELECT 语句以表格呈现;需要操作时给出页面路径(如「请到 交付编排 页面执行」)。\n")
+	b.WriteString("【渲染约定】普通回答用文字;列表/统计结果建议用户输入 SELECT 语句以表格呈现;需要操作时给出页面路径(如「请到 交付任务 页面执行」)。\n")
 	b.WriteString("与系统无关的问题请礼貌拒绝。用中文简洁回答。")
 	return b.String()
 }
@@ -384,7 +384,7 @@ func AssistantChat(uid int64, question string, accountID int64, model string, te
 			Hints: []string{"显式恢复怎么操作？", "探活防抖阈值是多少？"}}, nil
 	case strings.Contains(q, "销毁") || strings.Contains(q, "审批") || strings.Contains(q, "怎么操作") || strings.Contains(q, "如何"):
 		return &AssistantReply{
-			Answer: "集群销毁审批(单级)操作指引:① 集群管理员在「交付编排」选择集群点击「销毁」,系统清点影响面(引用台账 + 节点 + 证书清单,R-10)并强制展示;② 填写强制原因(必填)后「提交」,生成审批单,审批通过前集群状态不变;③ 平台运维管理员(CLC-ROLE-02)在「审批中心-我的待办」通过或驳回(强制不免审批);④ 通过后自动创建 DESTROY 任务并执行销毁编排(R-07):级联清理引用台账 → 状态置 DESTROYED(终态保留行)→ 发布销毁事件;不删他域资源。",
+			Answer: "集群销毁审批(单级)操作指引:① 集群管理员从集群列表行操作「台」进入集群台,在「生命周期」页签的动作卡点击「提交销毁申请」,弹层先清点影响面(引用台账 + 节点 + 证书清单,R-10)并强制展示;② 填写事由(必填,R-24)后提交,生成审批单,审批通过前集群状态不变;③ 平台运维管理员(CLC-ROLE-02)在「审批中心-我的待办」通过或驳回(强制不免审批);④ 通过后自动创建 DESTROY 任务并执行销毁编排(R-07):级联清理引用台账 → 状态置 DESTROYED(终态保留行)→ 发布销毁事件;不删他域资源。",
 			Action: "/workbench/todo", Hints: []string{"我有哪些待办？", "集群台账有哪些？"},
 		}, nil
 	case strings.Contains(q, "恢复") || strings.Contains(q, "降级原因"):

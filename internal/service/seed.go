@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -247,44 +248,42 @@ func syncM5Authorization() (map[string]int64, error) {
 
 // seedResources 菜单资源(mu-ui-model application.menus + 工作台)。
 // clc-* 菜单 path 对应前端路由,permission_code 控制可见性(m5 权限矩阵)。
+//
+// v1.3 载体置换(Q-116 / MU menuNote)：侧栏收为**一级 4 叶**——集群 / 集群模板 / 交付任务 /
+// 运行观测。节点管理 / 装机向导 / 引用与参数 / 快照与回滚 / 健康探活五叶退出侧栏(登记在 MU
+// retiredMenus，屏幕与元素表一字不动，呈现载体换成集群台页签)；集群台宿主屏
+// frmClcClusterConsole 从来没有菜单叶，由「集群」台账行操作「台」进入。旧库存量行由
+// convergeMenusV13 置不可见，不物理删除。
+//
+// PermCode 一律取该屏**主数据接口**的行为码(菜单只管入口可见，屏内动作各按自己的牌收口)：
+// 19 集群清单 / 36 模板清单 / 25 任务台账 / 29 统计总览。
+// Sort 沿用重组前这些叶的既有取值(11/12/13/21)——只换挂载位与可见性，不重排序号，
+// 与"存量库不重排运维自定义排序"的既有纪律同档(两条分支落库后数据一致,见 menusV13Kept)。
 var seedResources = []struct {
 	Parent, Name, Code, PermCode, Type, Path, Icon string
 	Sort                                           int
 }{
-	// 集群管理(menu-l1-01)
-	{"", "集群管理", "menu-l1-01", "", "DIRECTORY", "", "Cluster", 10},
-	{"menu-l1-01", "集群台账", "clc-cluster", "PERM-FUNC-19", "MENU", "/clc/cluster", "Database", 11},
-	{"menu-l1-01", "节点管理", "clc-node", "PERM-FUNC-21", "MENU", "/clc/node", "Hdd", 12},
-	// MU menu-clc-template「集群模板」→ screenRef frmClcTemplate(AGG-CLC-08, FUNC-36~43)。
-	// code 沿用本仓 clc-* 菜单约定(与 clc-cluster/clc-node 同族,不带 menu- 前缀);
-	// PermCode 取本屏主数据接口 PERM-FUNC-36(模板清单查询)——与姊妹仓「菜单挂主列表行为码」同口径,
-	// m5 里 CLC-ROLE-01/02/03 均有 36,故三岗位都见入口、只读岗位进去只能看不能改(按钮由 38~43 各自发牌控制)。
-	// Sort 与 MU 前驱(节点管理)同为 12:GetMenus 按 (sort_order, id) 升序,本行 id 必大于节点管理,
-	// 于是新屏正好落在 MU 声明的「节点管理与交付编排之间」——既有 11~16 的取值一律不重排
-	// (存量库只补插不迁移,重排会打乱运维自定义),与姊妹仓 v1.3 菜单同法(同 sort 靠 id 定序)。
-	{"menu-l1-01", "集群模板", "clc-template", "PERM-FUNC-36", "MENU", "/clc/template", "ListChecks", 12},
-	{"menu-l1-01", "交付编排", "clc-orch", "PERM-FUNC-25", "MENU", "/clc/orch", "DeploymentUnit", 13},
-	// MU menu-clc-wizard「装机向导」→ screenRef frmClcWizard(AGG-CLC-06, FUNC-44/45/46 + 只读代理 47~50)。
-	// PermCode 取本屏主数据接口 PERM-FUNC-34(步进器 REP-12 = GET /clc/task/:no/steps)——与 clc-template
-	// 「菜单挂主列表行为码」同口径:菜单只管入口可见,屏内动作各按自己的牌收口
-	// (步进 44 / 跳步 45 / 生命周期派发 46 且其内再按 task_kind 复查行为档,原文页签 49 独立于字段视图 48)。
-	// 发牌面:m5 里 CLC-ROLE-01/02/03 均有 34、CLC-ROLE-04 只读岗位没有 ⇒ 不见本入口(与它同样看不见交付编排一致)。
-	// Sort 与前驱「交付编排」同为 13:GetMenus 按 (sort_order, id) 升序,本行 id 必大于 clc-orch,
-	// 于是正好落在 MU 声明的「交付编排与引用与参数之间」,既有 14~16 不重排(同 clc-template 手法)。
-	{"menu-l1-01", "装机向导", "clc-wizard", "PERM-FUNC-34", "MENU", "/clc/wizard", "Compass", 13},
-	{"menu-l1-01", "引用与参数", "clc-ref", "PERM-FUNC-22", "MENU", "/clc/ref", "Api", 14},
-	{"menu-l1-01", "快照与回滚", "clc-snap", "PERM-FUNC-24", "MENU", "/clc/snap", "History", 15},
-	{"menu-l1-01", "健康探活", "clc-health", "PERM-FUNC-26", "MENU", "/clc/health", "Heartbeat", 16},
-	// 运行观测(menu-l1-02)
-	{"", "运行观测", "menu-l1-02", "", "DIRECTORY", "", "Dashboard", 20},
-	{"menu-l1-02", "运行观测", "clc-ops", "PERM-FUNC-29", "MENU", "/clc/ops", "FundView", 21},
-	{"menu-l1-02", "平台参数", "clc-params", "", "MENU", "/clc/params", "Setting", 22},
-	// 审批中心(工作台)
+	{"", "集群", "clc-cluster", "PERM-FUNC-19", "MENU", "/clc/cluster", "Database", 11},
+	{"", "集群模板", "clc-template", "PERM-FUNC-36", "MENU", "/clc/template", "ListChecks", 12},
+	{"", "交付任务", "clc-orch", "PERM-FUNC-25", "MENU", "/clc/orch", "DeploymentUnit", 13},
+	{"", "运行观测", "clc-ops", "PERM-FUNC-29", "MENU", "/clc/ops", "FundView", 21},
+	// 审批中心(底座工作台，MU menuNote 只声明其存在，非本域登记)
 	{"", "审批中心", "menu-workbench", "", "DIRECTORY", "", "ClipboardList", 30},
 	{"menu-workbench", "我的待办", "menu-workbench-todo", "", "MENU", "/workbench/todo", "Inbox", 31},
 	{"menu-workbench", "我的已办", "menu-workbench-done", "", "MENU", "/workbench/done", "CheckSquare", 32},
 	{"menu-workbench", "我的申请", "menu-workbench-requested", "", "MENU", "/workbench/requested", "FileText", 33},
 }
+
+// menusV13Kept v1.3 保留在侧栏的 clc 叶 code(与 seedResources 的 MENU 行同源)。
+var menusV13Kept = []string{"clc-cluster", "clc-template", "clc-orch", "clc-ops"}
+
+// menusV13Retired 退出侧栏的叶 code：MU retiredMenus 五行(载体置换为集群台页签)，
+// 再加 clc-params(平台参数)——它从未登记在 MU：frmClcOps 的元素表 el07~el09 就是运行参数区段
+// (spec 9.7.2)，独立叶与独立屏是实现期多出来的，收回同屏后一并置不可见。
+var menusV13Retired = []string{"clc-node", "clc-wizard", "clc-ref", "clc-snap", "clc-health", "clc-params"}
+
+// menusV13Dirs v1.3 后不再需要的种子目录(其业务叶升到一级，目录自身按"已无可见子项"隐去)。
+var menusV13Dirs = []string{"menu-l1-01", "menu-l1-02"}
 
 // seedUsers 用户(admin + 四岗位各一,便于销毁审批全链路演示;CLC-ROLE-05 为服务身份不建账号)。
 var seedUsers = []struct{ Username, Password, RealName, RoleCode string }{
@@ -308,11 +307,9 @@ func EnsureSeed() error {
 	}
 	if count > 0 {
 		// 存量库只走上面这条发牌分支，seedResources 的新行不会自己长出来(资源插入只在
-		// sys_user 为空的首建路径上)——v1.2 两张新屏「集群模板」「装机向导」的挂口按幂等 backfill 补插。
-		for _, code := range []string{"clc-template", "clc-wizard"} {
-			if err := backfillClcMenu(code); err != nil {
-				return err
-			}
+		// sys_user 为空的首建路径上)——菜单侧按 v1.3 口径做一次幂等收敛(见 convergeMenusV13)。
+		if err := convergeMenusV13(); err != nil {
+			return err
 		}
 		return ensureFlowDefinitions()
 	}
@@ -359,8 +356,8 @@ func EnsureSeed() error {
 
 // backfillClcMenu 按 seedResources 的登记口径补插一条缺失菜单(存量库幂等回填)。
 // 只在 code 不存在时插入;已存在(含运维改过名称/权限/次序)一律不动。
-// 父目录不在(被删或改名)时不强造菜单树，直接返回 nil —— 与本仓种子纪律一致，
-// 树形结构归资源管理屏管，种子不越权补父节点。
+// 一级叶(Parent 为空)直接挂 parent_id=0；需要父目录的叶若父目录不在(被删或改名)则不强造
+// 菜单树，直接返回 nil —— 树形结构归资源管理屏管，种子不越权补父节点。
 func backfillClcMenu(code string) error {
 	exists, err := qOne(`SELECT id FROM sys_resource WHERE code = ?`, code)
 	if err != nil || exists != nil {
@@ -370,14 +367,84 @@ func backfillClcMenu(code string) error {
 		if r.Code != code {
 			continue
 		}
-		parent, err := qOne(`SELECT id FROM sys_resource WHERE code = ?`, r.Parent)
-		if err != nil || parent == nil {
-			return err
+		parentID := int64(0)
+		if r.Parent != "" {
+			parent, err := qOne(`SELECT id FROM sys_resource WHERE code = ?`, r.Parent)
+			if err != nil || parent == nil {
+				return err
+			}
+			parentID = toInt(parent["id"])
 		}
 		_, err = qExec(`INSERT INTO sys_resource (parent_id, name, code, permission_code, type, path, component, icon, sort_order, status)
 			VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, 1)`,
-			toInt(parent["id"]), r.Name, r.Code, r.PermCode, r.Type, r.Path, r.Icon, r.Sort)
+			parentID, r.Name, r.Code, r.PermCode, r.Type, r.Path, r.Icon, r.Sort)
 		return err
+	}
+	return nil
+}
+
+// convergeMenusV13 v1.3 菜单收敛(Q-116，存量库幂等)：把重组前的「两个目录 + 十个叶」
+// 收成「一级四叶」，动作只有三类，且都不物理删除、都不碰运维自定义：
+//  1. 退出侧栏的叶(menusV13Retired)⇒ status 置 0。MU menuNote 的口径是"置不可见而非物理
+//     删除"——旧深链兼容一版期间地址仍在库里可追溯，页签内容由集群台承载。
+//  2. 四保留叶 ⇒ 缺行按 seedResources 补插；名称跟 MU 走(集群台账→集群、交付编排→交付任务)；
+//     挂载位升到一级，但**仅当其当前父行是种子目录时**才动——运维把叶挪到别的分组是它的自定义。
+//  3. 种子目录 ⇒ 只有当它已没有任何可见 MENU 子项时才置不可见(运维在同目录下另有自定义叶则保留)。
+func convergeMenusV13() error {
+	for _, code := range menusV13Retired {
+		if _, err := qExec(`UPDATE sys_resource SET status = 0 WHERE code = ? AND type = 'MENU' AND status <> 0`, code); err != nil {
+			return err
+		}
+	}
+	for _, code := range menusV13Kept {
+		if err := backfillClcMenu(code); err != nil {
+			return err
+		}
+		var wantName string
+		for _, r := range seedResources {
+			if r.Code == code {
+				wantName = r.Name
+			}
+		}
+		row, err := qOne(`SELECT id, name, parent_id FROM sys_resource WHERE code = ?`, code)
+		if err != nil || row == nil {
+			return err
+		}
+		if Str(row["name"]) != wantName {
+			if _, err := qExec(`UPDATE sys_resource SET name = ? WHERE id = ?`, wantName, toInt(row["id"])); err != nil {
+				return err
+			}
+		}
+		pid := toInt(row["parent_id"])
+		if pid == 0 {
+			continue
+		}
+		dir, err := qOne(`SELECT code FROM sys_resource WHERE id = ?`, pid)
+		if err != nil {
+			return err
+		}
+		if dir == nil || !slices.Contains(menusV13Dirs, Str(dir["code"])) {
+			continue
+		}
+		if _, err := qExec(`UPDATE sys_resource SET parent_id = 0 WHERE id = ?`, toInt(row["id"])); err != nil {
+			return err
+		}
+	}
+	for _, code := range menusV13Dirs {
+		dir, err := qOne(`SELECT id FROM sys_resource WHERE code = ? AND type = 'DIRECTORY'`, code)
+		if err != nil || dir == nil {
+			return err
+		}
+		n, err := qCount(`SELECT COUNT(*) FROM sys_resource WHERE parent_id = ? AND type = 'MENU' AND status = 1`, toInt(dir["id"]))
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := qExec(`UPDATE sys_resource SET status = 0 WHERE id = ? AND status <> 0`, toInt(dir["id"])); err != nil {
+			return err
+		}
 	}
 	return nil
 }

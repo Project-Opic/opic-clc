@@ -1,46 +1,41 @@
-// 集群域 · 交付编排(MU frmClcOrch,MASTER_DETAIL_FORM):交付动作台 + 任务台账 + 销毁审批(影响面强制展示 + 保存草稿/提交双按钮)
-// + 交付执行内核入口(v1.1):act-FUNC-33 取消(二次确认+原因必填)、act-FUNC-34/35 步骤/日志行内入口(详情抽屉三段式)。
+// 集群域 · 交付任务(MU frmClcOrch,MASTER_DETAIL_FORM + 审核界面形态):全局任务台账 + 下钻流水线 + 取消 + 销毁审批(影响面强制展示)。
+// v1.3 收口(Q-121):「发起交付动作」表单(发起安装/升级/备份三个工具栏按钮)退出本屏,动作入口收口进集群台「安装」「生命周期」页签;
+//   本屏仍是 FUNC-03/04/09~12/05 的主登记屏(登记的是权限与行为归属,不是按钮坐标),「续跑/取消/重试换机」是台账行内操作、原样保留。
+// act-FUNC-33 取消(二次确认+原因必填)、act-FUNC-34/35 步骤/日志行内入口(详情抽屉三段式)。
 // R-10 销毁强制不免审批;R-09 失败步骤索引写回;INV-28 STALLED 与 FAILED 分列;取消 ≠ 回滚(R-15);步骤权威在后端(裁定二)。
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Descriptions, Form, Input, Modal, Select, Space, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { CaretRightOutlined, ReloadOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ReloadOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { clusterApi, taskApi, type ClcTask } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
 import TaskDetailDrawer, { type TaskDetailDrawerProps } from './TaskDetail'
-import { EXEC_PATH, ORCH_DISPATCH_KINDS, TASK_FAIL_REASON, TASK_KIND, TASK_KIND_PERMS, TASK_STATUS, pill } from './common'
+import { EXEC_PATH, TASK_FAIL_REASON, TASK_KIND, TASK_STATUS, pill, type ConsoleCtx } from './common'
 
 const KIND_OPTIONS = Object.keys(TASK_KIND).map((k) => ({ value: k, label: TASK_KIND[k] }))
-// DEF-06 行为级分档：kind→权限码常量已提到 ./common.tsx 与装机向导生命周期台共用（不出第二份）；
-// 本口受理集取 ORCH_DISPATCH_KINDS（CERT_RENEW 属生命周期台 FUNC-46 派发口，不在编排口渲染）。
 
 /** act-FUNC-33 前置(m2):仅 QUEUED/RUNNING 可取消、DESTROY 拒绝、终态不渲染入口 */
 function cancellable(t: ClcTask): boolean {
   return (t.task_status === 'QUEUED' || t.task_status === 'RUNNING') && t.task_kind !== 'DESTROY'
 }
 
-export default function OrchManage() {
+// 集群台嵌入态(v1.3):「日志」页签 = 本集群 scope 的 REP-07 行列表 + REP-13 回放面板(9.10.2,同一报表第二个呈现入口)。
+// 集群由台级唯一确定 ⇒ 不出集群选择器、cluster_ref 固定;销毁入口在「生命周期」页签,嵌入态不渲染(9.10.1 动作卡)。
+export default function OrchManage({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
-  // DEF-06：交付动作选择器按档收口 —— 当前用户没有该动作的牌时，选项「不渲染」（不是 disabled 置灰）。
-  // 后端同一 handler 在 any 副作用之前按 task_kind 复查这一档（business/clc.go ClcTaskAction +
-  // service.CheckTaskKindPermission），界面只是把必然 403 的动作提前藏掉，不改请求体也不改响应形状。
-  const deliverableKinds = ORCH_DISPATCH_KINDS
-    .filter((k) => hasPerm(TASK_KIND_PERMS[k]))
-    .map((k) => ({ value: k, label: TASK_KIND[k] }))
-  const [form] = Form.useForm()
   const [destroyForm] = Form.useForm()
   const [cancelForm] = Form.useForm<{ reason: string }>()
   const [data, setData] = useState<ClcTask[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(10)
-  const [filters, setFilters] = useState<{ cluster_ref?: string; task_kind?: string; task_status?: string }>({})
+  const [filters, setFilters] = useState<{ cluster_ref?: string; task_kind?: string; task_status?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
   const [clusters, setClusters] = useState<{ id: number; cluster_no: string; name: string; status: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [actionTarget, setActionTarget] = useState<{ id: number; cluster_no: string } | null>(null)
-  const [running, setRunning] = useState(false)
   const [destroyTarget, setDestroyTarget] = useState<{ id: number; cluster_no: string; name: string } | null>(null)
   const [impact, setImpact] = useState<Record<string, unknown> | null>(null)
   const [destroying, setDestroying] = useState(false)
@@ -48,6 +43,9 @@ export default function OrchManage() {
   const [cancelTarget, setCancelTarget] = useState<ClcTask | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const cancelReason = Form.useWatch('reason', cancelForm)
+
+  // 独立形态的销毁入口只对着「已选定集群」开：原实现取 clusters[0]，等于把破坏性动作指向清单里恰好排第一的集群。
+  const destroyCluster = clusters.find((c) => c.cluster_no === filters.cluster_ref)
 
   const load = async (p = page, s = size, f = filters) => {
     setLoading(true)
@@ -64,6 +62,7 @@ export default function OrchManage() {
   }
 
   const loadClusters = () => {
+    if (ctx) return
     clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name, status: c.status })))).catch(() => undefined)
   }
 
@@ -72,31 +71,6 @@ export default function OrchManage() {
     loadClusters()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, size])
-
-  const openAction = (cluster?: { id: number; cluster_no: string }) => {
-    if (!cluster) return
-    setActionTarget(cluster)
-    form.resetFields()
-    // 缺省值取当前可见的第一档（全档用户仍是 INSTALL，行为不变）：避免表单落在一个没渲染的选项上。
-    form.setFieldsValue({ task_kind: deliverableKinds[0]?.value, execution_path: 'LOCAL' })
-  }
-
-  const handleAction = async () => {
-    if (!actionTarget) return
-    const values = await form.validateFields()
-    setRunning(true)
-    try {
-      await clusterApi.taskAction(actionTarget.id, values)
-      message.success('交付动作已受理,任务排队执行(可在任务列表查看步骤与日志)')
-      setActionTarget(null)
-      load()
-      loadClusters()
-    } catch (e) {
-      if ((e as { errorFields?: unknown }).errorFields) return
-    } finally {
-      setRunning(false)
-    }
-  }
 
   // 销毁申请:影响面强制展示(R-10)→ 保存草稿 / 提交 双按钮
   const openDestroy = async (cluster: { id: number; cluster_no: string; name: string }) => {
@@ -127,6 +101,8 @@ export default function OrchManage() {
       await clusterApi.destroySubmit(destroyTarget.id, values)
       message.success('销毁申请已提交(CLC-ROLE-02 审批,审批通过前状态不变)')
       setDestroyTarget(null)
+      load()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     } finally {
@@ -155,6 +131,7 @@ export default function OrchManage() {
           message.success('任务已取消(取消不是回滚,已执行步骤的效果由交付工具幂等性承担)')
           setCancelTarget(null)
           load()
+          ctx?.refresh()
         } finally {
           setCancelling(false)
         }
@@ -162,9 +139,14 @@ export default function OrchManage() {
     })
   }
 
+  // `REP-07` 的登记列结构（5.8）不含集群列；台内「日志」页签由徽章条唯一确定集群 ⇒ 不渲染，全局台账形态保留。
+  const clusterColumn: ColumnsType<ClcTask> = ctx ? [] : [
+    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+  ]
+
   const columns: ColumnsType<ClcTask> = [
     { title: '任务编号', dataIndex: 'task_no', key: 'task_no', width: 170 },
-    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+    ...clusterColumn,
     { title: '类别', dataIndex: 'task_kind', key: 'task_kind', width: 90, render: (v: string) => TASK_KIND[v] || v },
     { title: '执行位置', dataIndex: 'execution_path', key: 'execution_path', width: 100, render: (v: string) => EXEC_PATH[v] || v },
     { title: '状态', dataIndex: 'task_status', key: 'task_status', width: 90, render: (v: string) => pill(TASK_STATUS, v) },
@@ -197,25 +179,25 @@ export default function OrchManage() {
   return (
     <Card>
       <TableToolbar
-        title="交付编排"
-        description="交付动作经任务台账留痕(只增不改 INV-31);安装失败携带失败步骤索引并写回集群(R-09/INV-30);销毁强制不免审批(R-10)"
+        title="交付任务"
+        description="交付动作经任务台账留痕(只增不改 INV-31);安装失败携带失败步骤索引并写回集群(R-09/INV-30);销毁强制不免审批(R-10);v1.3 起发起交付动作的表单收口进集群台,本屏是台账 + 行内续跑/取消/下钻"
         total={total}
         extra={
           <Space wrap>
-            <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
-              options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-              onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            {!ctx && (
+              <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
+                options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            )}
             <Select allowClear placeholder="任务类别" style={{ width: 130 }} options={KIND_OPTIONS}
               onChange={(v) => { const f = { ...filters, task_kind: v }; setFilters(f); setPage(1); load(1, size, f) }} />
             <Select allowClear placeholder="状态" style={{ width: 120 }}
               options={Object.keys(TASK_STATUS).map((k) => ({ value: k, label: TASK_STATUS[k].label }))}
               onChange={(v) => { const f = { ...filters, task_status: v }; setFilters(f); setPage(1); load(1, size, f) }} />
             <Button icon={<ReloadOutlined />} onClick={() => load()}>刷新</Button>
-            {hasPerm('PERM-FUNC-03') && (
-              <Button type="primary" icon={<CaretRightOutlined />} onClick={() => openAction(clusters[0])}>发起交付动作</Button>
-            )}
-            {hasPerm('PERM-FUNC-05') && clusters.length > 0 && (
-              <Button danger icon={<DeleteOutlined />} onClick={() => openDestroy(clusters[0])}>集群销毁</Button>
+            {/* v1.3 Q-121:发起交付动作表单退出本屏(动作入口在集群台「安装/生命周期」页签);销毁在「生命周期」页签有同名入口,嵌入态不渲染 */}
+            {!ctx && hasPerm('PERM-FUNC-05') && !!destroyCluster && (
+              <Button danger icon={<DeleteOutlined />} onClick={() => openDestroy(destroyCluster)}>集群销毁</Button>
             )}
           </Space>
         }
@@ -231,39 +213,6 @@ export default function OrchManage() {
           onChange: (p, s) => { setPage(p); setSize(s) },
         }}
       />
-      <Modal
-        title={`发起交付动作 → ${actionTarget?.cluster_no || ''}`}
-        open={!!actionTarget} onOk={handleAction} onCancel={() => setActionTarget(null)} confirmLoading={running} width={560}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="task_kind" label="任务类别(INSTALL 前置 DRAFT/INSTALL_FAILED;其余前置 RUNNING)" rules={[{ required: true }]}>
-            <Select options={deliverableKinds} />
-          </Form.Item>
-          <Form.Item name="execution_path" label="执行位置(INV-32:登记值与真实执行位置一致,绝不静默切换)" rules={[{ required: true }]}>
-            <Select options={[{ value: 'LOCAL', label: '本地链路' }, { value: 'REMOTE_EXECUTOR', label: '远程执行机' }]} />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate={(a, b) => a.task_kind !== b.task_kind}>
-            {({ getFieldValue }) =>
-              getFieldValue('task_kind') === 'UPGRADE' ? (
-                <Form.Item name="version_ref" label="目标交付版本引用"><Input placeholder="IGN-VER-xxxx" /></Form.Item>
-              ) : null
-            }
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate={(a, b) => a.task_kind !== b.task_kind}>
-            {({ getFieldValue }) =>
-              getFieldValue('task_kind') === 'INSTALL' ? (
-                <>
-                  <Form.Item name="master_endpoints" label="主控入口(可空,成功落点 R-13 自动生成)"><Input placeholder="https://api.xxx:6443" /></Form.Item>
-                  <Form.Item name="kubeconfig_ref" label="凭据存放标识(仅位置标识,INV-08)"><Input placeholder="vault://opic/clc/..." /></Form.Item>
-                  <Form.Item name="fail_step_index" label="注入失败步骤(可空;仅故障注入验证用,步骤权威在后端,R-09 写回集群)">
-                    <Input type="number" min={0} placeholder="如 3" />
-                  </Form.Item>
-                </>
-              ) : null
-            }
-          </Form.Item>
-        </Form>
-      </Modal>
       <Modal
         title={`集群销毁申请 → ${destroyTarget?.name || ''}(${destroyTarget?.cluster_no || ''})`}
         open={!!destroyTarget} width={680} onCancel={() => setDestroyTarget(null)}

@@ -7,18 +7,21 @@ import { CameraOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/ic
 import { clusterApi, snapshotApi, type ClcSnapshot } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
-import { SNAPSHOT_TYPE, pill } from './common'
+import { SNAPSHOT_TYPE, pill, type ConsoleCtx } from './common'
 
 const TYPE_OPTIONS = Object.keys(SNAPSHOT_TYPE).map((k) => ({ value: k, label: SNAPSHOT_TYPE[k].label }))
 
-export default function SnapManage() {
+// 集群台嵌入态(v1.3):「快照与回滚」区段落在生命周期页签(9.10.2),集群由台级唯一确定 ⇒ 不出集群选择器。
+export default function SnapManage({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
   const [form] = Form.useForm()
   const [data, setData] = useState<ClcSnapshot[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(10)
-  const [filters, setFilters] = useState<{ cluster_ref?: string; snapshot_type?: string }>({})
+  const [filters, setFilters] = useState<{ cluster_ref?: string; snapshot_type?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
   const [clusters, setClusters] = useState<{ id: number; cluster_no: string; name: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -42,7 +45,9 @@ export default function SnapManage() {
 
   useEffect(() => {
     load()
-    clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name })))).catch(() => undefined)
+    if (!ctx) {
+      clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name })))).catch(() => undefined)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, size])
 
@@ -54,6 +59,7 @@ export default function SnapManage() {
       message.success('快照已创建(INV-24 序号单调递增)')
       setCreateTarget(null)
       load()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     } finally {
@@ -68,12 +74,18 @@ export default function SnapManage() {
       message.success(abandon ? '回滚完成(放弃引用,引用置空并留痕)' : '回滚完成(已产生新快照,INV-25)')
       setRollbackTarget(null)
       load()
+      ctx?.refresh()
     } catch { /* 拦截器已提示 */ }
   }
 
+  // `REP-06` 的登记列结构（5.7）不含集群列；台内（9.10.1 徽章条唯一确定集群）不渲染该列，独立形态保留跨集群识别。
+  const clusterColumn: ColumnsType<ClcSnapshot> = ctx ? [] : [
+    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+  ]
+
   const columns: ColumnsType<ClcSnapshot> = [
     { title: '快照编号', dataIndex: 'snapshot_no', key: 'snapshot_no', width: 170 },
-    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+    ...clusterColumn,
     { title: '序号', dataIndex: 'revision_no', key: 'revision_no', width: 70 },
     { title: '类型', dataIndex: 'snapshot_type', key: 'snapshot_type', width: 100, render: (v: string) => pill(SNAPSHOT_TYPE, v) },
     { title: '变更摘要', dataIndex: 'change_summary', key: 'change_summary', ellipsis: true },
@@ -95,14 +107,19 @@ export default function SnapManage() {
         total={total}
         extra={
           <Space wrap>
-            <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
-              options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-              onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            {!ctx && (
+              <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
+                options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            )}
             <Select allowClear placeholder="快照类型" style={{ width: 130 }} options={TYPE_OPTIONS}
               onChange={(v) => { const f = { ...filters, snapshot_type: v }; setFilters(f); setPage(1); load(1, size, f) }} />
             <Button icon={<ReloadOutlined />} onClick={() => load()}>刷新</Button>
             {hasPerm('PERM-FUNC-17') && (
-              <Button type="primary" icon={<CameraOutlined />} onClick={() => { setCreateTarget({}); form.resetFields() }}>创建快照</Button>
+              <Button type="primary" icon={<CameraOutlined />} onClick={() => {
+                setCreateTarget({}); form.resetFields()
+                if (ctx) form.setFieldsValue({ cluster_id: ctx.cluster.id })
+              }}>创建快照</Button>
             )}
           </Space>
         }
@@ -121,7 +138,9 @@ export default function SnapManage() {
       <Modal title="创建版本快照(FUNC-17)" open={!!createTarget} onOk={handleCreate} onCancel={() => setCreateTarget(null)} confirmLoading={saving} width={520}>
         <Form form={form} layout="vertical">
           <Form.Item name="cluster_id" label="目标集群" rules={[{ required: true, message: '请选择' }]}>
-            <Select showSearch optionFilterProp="label" options={clusters.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
+            <Select showSearch optionFilterProp="label" disabled={!!ctx}
+              options={(ctx ? [{ id: ctx.cluster.id, cluster_no: ctx.cluster.cluster_no, name: ctx.cluster.name }] : clusters)
+                .map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
           </Form.Item>
           <Form.Item name="change_summary" label="变更摘要" rules={[{ required: true, message: '必填' }]}>
             <Input placeholder="如 升级前基线" />

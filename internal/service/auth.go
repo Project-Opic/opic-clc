@@ -128,7 +128,8 @@ func HasPermission(db *gorm.DB, userID int64, code string) (bool, error) {
 	return false, nil
 }
 
-// GetMenus 取用户可见菜单(DIRECTORY 聚合可见 MENU 子项)。
+// GetMenus 取用户可见菜单(parent_id=0 的可见 MENU 直接成一级叶；DIRECTORY 聚合其可见 MENU 子项，
+// 无可见子项的目录不出)。resources 已按 (sort_order, id) 升序，两类条目同序输出。
 func GetMenus(db *gorm.DB, userID int64) ([]map[string]any, error) {
 	codes, err := GetPermissionCodes(db, userID)
 	if err != nil {
@@ -155,10 +156,23 @@ func GetMenus(db *gorm.DB, userID int64) ([]map[string]any, error) {
 		}
 	}
 	var menus []map[string]any
-	for _, dir := range resources {
-		if Str(dir["type"]) != "DIRECTORY" {
+	for _, r := range resources {
+		// 一级叶(v1.3 Q-116：侧栏四叶不带目录)：parent_id=0 的可见 MENU 直接成项。
+		if Str(r["type"]) == "MENU" && Int(r["parent_id"]) == 0 && allowed[Int(r["id"])] {
+			menus = append(menus, map[string]any{
+				"id":              Int(r["id"]),
+				"name":            r["name"],
+				"code":            r["code"],
+				"icon":            r["icon"],
+				"path":            r["path"],
+				"permission_code": r["permission_code"],
+			})
 			continue
 		}
+		if Str(r["type"]) != "DIRECTORY" {
+			continue
+		}
+		dir := r
 		var children []map[string]any
 		for _, c := range resources {
 			if Int(c["parent_id"]) == Int(dir["id"]) && allowed[Int(c["id"])] {

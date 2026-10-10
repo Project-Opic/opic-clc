@@ -1,5 +1,5 @@
 model_type: ACTOR
-version: '1.2'
+version: '1.3'
 domain: 集群域
 actors:
 - actorId: ACTOR-CLC-ROLE-01
@@ -76,6 +76,7 @@ roles:
   - PERM-FUNC-48
   - PERM-FUNC-49
   - PERM-FUNC-50
+  - PERM-FUNC-51
 - roleId: CLC-ROLE-02
   name: 平台运维管理员
   permissions:
@@ -118,6 +119,7 @@ roles:
   - PERM-FUNC-47
   - PERM-FUNC-48
   - PERM-FUNC-49
+  - PERM-FUNC-51
 - roleId: CLC-ROLE-04
   name: 集群只读用户
   permissions:
@@ -334,3 +336,8 @@ permissions:
   targetType: BEHAVIOR
   targetRef: FUNC-50
   dataScope: ALL
+- permissionId: PERM-FUNC-51
+  targetType: BEHAVIOR
+  targetRef: FUNC-51
+  dataScope: ALL
+  note: 远程执行日志代理直展独立发牌（v1.3 Q-125）：不随 PERM-FUNC-35（本地日志回放）或 PERM-FUNC-48（字段级视图）附带，与 PERM-FUNC-49 原文可见性同档（R-25 三条腿 / 8.6 第 20 项）；默认发 CLC-ROLE-03，CLC-ROLE-01 需另行授权，每次代理读逐次留痕

@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { EyeOutlined, PlusOutlined, ReloadOutlined, SafetyOutlined, EditOutlined } from '@ant-design/icons'
+import { EyeOutlined, PlusOutlined, ReloadOutlined, SafetyOutlined, EditOutlined, AppstoreOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { clusterApi, type ClcCluster } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
@@ -26,6 +27,7 @@ interface FormValues {
 
 export default function ClusterManage() {
   const hasPerm = usePermission()
+  const navigate = useNavigate()
   const [form] = Form.useForm<FormValues>()
   const [recoverForm] = Form.useForm()
   const [data, setData] = useState<ClcCluster[]>([])
@@ -141,10 +143,14 @@ export default function ClusterManage() {
     {
       title: '操作',
       key: 'action',
-      width: 230,
+      width: 260,
       fixed: 'right',
       render: (_, row) => (
         <Space size={4}>
+          {/* 行操作「台」= v1.3 集群台宿主屏唯一入口(8.1.1 表后 / 9.10);终态行不给(已销毁无一生可看),主数据牌 PERM-FUNC-20 缺位即不渲染 */}
+          {hasPerm('PERM-FUNC-20') && row.status !== 'DESTROYED' && (
+            <Button type="link" size="small" icon={<AppstoreOutlined />} onClick={() => navigate(`/clc/console/${row.id}`)}>台</Button>
+          )}
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>详情</Button>
           {hasPerm('PERM-FUNC-02') && row.status !== 'DESTROYED' && (
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>编辑</Button>

@@ -53,11 +53,30 @@ missing_perm = mu_acts.flat_map { |_, a| a['permissionRef'] || [] }.uniq.reject 
 fails << "MU permissionRef missing in M5: #{missing_perm.join(',')}" unless missing_perm.empty?
 screen_ids = mu['screens'].map { |s| s['screenId'] }
 menu_refs = []
-mu['application']['menus'].each do |m|
-  (m['children'] || []).each { |c| menu_refs << c['screenRef'] }
+collect_refs = lambda do |list|
+  list.each do |m|
+    menu_refs << m['screenRef'] if m['screenRef']
+    collect_refs.call(m['children']) if m['children']
+  end
 end
+collect_refs.call(mu['application']['menus'])
+# v1.3 载体置换：退出侧栏的菜单叶（retiredMenus）与页签承载屏（hostedIn）都是合法登记位，
+# 但宿主屏自身无菜单叶 —— 由被承载屏的 hostedIn 反查，做到不动点（宿主屏可挂宿主屏）。
+(mu['application']['retiredMenus'] || []).each { |m| menu_refs << m['screenRef'] if m['screenRef'] }
+loop do
+  add = []
+  mu['screens'].each do |s|
+    next unless s['hostedIn'] && menu_refs.include?(s['screenId'])
+    add << s['hostedIn']
+  end
+  break if (add - menu_refs).empty?
+  menu_refs.concat(add)
+end
+menu_refs.uniq!
 bad_menu = menu_refs.reject { |s| screen_ids.include?(s) }
 fails << "menu screenRef missing: #{bad_menu.join(',')}" unless bad_menu.empty?
+unhosted = mu['screens'].select { |s| s['hostedIn'] && !screen_ids.include?(s['hostedIn']) }
+fails << "MU hostedIn missing screen: #{unhosted.map { |s| "#{s['screenId']}=#{s['hostedIn']}" }.join(',')}" unless unhosted.empty?
 orphan = screen_ids.reject { |s| menu_refs.include?(s) || s.start_with?('frmPublic') }
 puts "MU: screens=#{screen_ids.size} actions=#{mu_acts.size} menuLeafRefs=#{menu_refs.size} unmenued=#{orphan.join(',')}"
 bad_ds = mu['screens'].flat_map { |s| (s['elements'] || []).map { |e| [s['screenId'], e['id'], e['dataSource']] } }

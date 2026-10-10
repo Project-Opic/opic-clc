@@ -1,31 +1,41 @@
 // 集群域 · 引用与参数(MU frmClcRef,LIST_MAINTENANCE + TAB):引用台账 + 参数清单(待同步页签)。
 // R-01 双写、R-04 派生与覆写保护、FUNC-15 显式确认同步(派生归派生、生效归运维)。
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tabs, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import { bindingApi, clusterApi, paramApi, type ClcBinding, type ClcParam } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
-import { BINDING_PURPOSE, BINDING_SOURCE, PARAM_SOURCE, TARGET_CAPABILITY, TARGET_KIND, pill } from './common'
+import { BINDING_PURPOSE, BINDING_SOURCE, PARAM_SOURCE, TARGET_CAPABILITY, TARGET_KIND, pill, type ConsoleCtx } from './common'
 
 const CAP_OPTIONS = Object.keys(TARGET_CAPABILITY).map((k) => ({ value: k, label: TARGET_CAPABILITY[k] }))
 const KIND_OPTIONS = Object.keys(TARGET_KIND).map((k) => ({ value: k, label: TARGET_KIND[k] }))
 const PURPOSE_OPTIONS = Object.keys(BINDING_PURPOSE).map((k) => ({ value: k, label: BINDING_PURPOSE[k] }))
 
-export default function RefManage() {
+// 集群台嵌入态(v1.3 载体置换,frmClcRef 的载体已是「配置」页签):集群由台级唯一确定 ⇒
+// 不拉集群清单、不出集群选择器、两个筛选的 cluster_ref 固定为本集群编号;写动作后 ctx.refresh() 重取徽章条(9.10.7 ①)。
+export default function RefManage({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
   const [bindingForm] = Form.useForm()
   const [paramForm] = Form.useForm()
   const [clusters, setClusters] = useState<{ id: number; cluster_no: string; name: string; sync_pending_count?: number }[]>([])
+  const clusterOptions = useMemo(
+    () => (ctx ? [{ id: ctx.cluster.id, cluster_no: ctx.cluster.cluster_no, name: ctx.cluster.name }] : clusters),
+    [ctx, clusters],
+  )
   const [bindingData, setBindingData] = useState<ClcBinding[]>([])
   const [bindingTotal, setBindingTotal] = useState(0)
   const [paramData, setParamData] = useState<ClcParam[]>([])
   const [paramTotal, setParamTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(10)
-  const [bFilters, setBFilters] = useState<{ cluster_ref?: string; target_capability?: string }>({})
-  const [pFilters, setPFilters] = useState<{ cluster_ref?: string; sync_pending?: string }>({})
+  const [bFilters, setBFilters] = useState<{ cluster_ref?: string; target_capability?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
+  const [pFilters, setPFilters] = useState<{ cluster_ref?: string; sync_pending?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [bindingTarget, setBindingTarget] = useState<Record<string, unknown> | null>(null)
@@ -34,6 +44,7 @@ export default function RefManage() {
   const [saving, setSaving] = useState(false)
 
   const loadClusters = () => {
+    if (ctx) return
     clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name })))).catch(() => undefined)
   }
 
@@ -80,6 +91,7 @@ export default function RefManage() {
       message.success('引用已调整(内联列与台账双写 R-01,参数派生 R-04)')
       setBindingTarget(null)
       loadBindings()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     } finally {
@@ -94,6 +106,7 @@ export default function RefManage() {
       message.success('参数已人工覆写(留痕,不覆盖保护 R-04)')
       setParamTarget(null)
       loadParams()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     }
@@ -106,6 +119,7 @@ export default function RefManage() {
       message.success('参数同步已确认执行(待同步标记清除)')
       setSyncTarget(null)
       loadParams()
+      ctx?.refresh()
     } catch { /* 拦截器已提示 */ }
   }
 
@@ -122,8 +136,14 @@ export default function RefManage() {
     { title: '对账注记', dataIndex: 'reconcile_note', key: 'reconcile_note', ellipsis: true, render: (v: string | null) => v || '-' },
   ]
 
-  const paramColumns: ColumnsType<ClcParam> = [
+  // `REP-04`（5.5）登记列结构含集群列（反查引用集群是它的口径注记）⇒ 两态都保留；
+  // `REP-05` 参数清单（5.6）不含 ⇒ 台内不渲染，独立形态保留跨集群识别。
+  const paramClusterColumn: ColumnsType<ClcParam> = ctx ? [] : [
     { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+  ]
+
+  const paramColumns: ColumnsType<ClcParam> = [
+    ...paramClusterColumn,
     { title: '参数键', dataIndex: 'param_key', key: 'param_key', width: 200 },
     { title: '值', dataIndex: 'param_value', key: 'param_value', ellipsis: true },
     { title: '来源', dataIndex: 'param_source', key: 'param_source', width: 100, render: (v: string) => pill(PARAM_SOURCE, v) },
@@ -135,7 +155,7 @@ export default function RefManage() {
           <Space size={4}>
             <Button type="link" size="small" icon={<SyncOutlined />} disabled={!hasPerm('PERM-FUNC-15')}
               onClick={() => {
-                const cluster = clusters.find((c) => c.cluster_no === r.cluster_ref)
+                const cluster = clusterOptions.find((c) => c.cluster_no === r.cluster_ref)
                 if (cluster) setSyncTarget(cluster as unknown as Record<string, unknown>)
                 else message.warning('集群清单未加载,请刷新后重试')
               }}>确认同步</Button>
@@ -161,14 +181,19 @@ export default function RefManage() {
                   total={bindingTotal}
                   extra={
                     <Space wrap>
-                      <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
-                        options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-                        onChange={(v) => { const f = { ...bFilters, cluster_ref: v }; setBFilters(f); setPage(1); loadBindings(1, size, f) }} />
+                      {!ctx && (
+                        <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
+                          options={clusterOptions.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                          onChange={(v) => { const f = { ...bFilters, cluster_ref: v }; setBFilters(f); setPage(1); loadBindings(1, size, f) }} />
+                      )}
                       <Select allowClear placeholder="目标能力" style={{ width: 130 }} options={CAP_OPTIONS}
                         onChange={(v) => { const f = { ...bFilters, target_capability: v }; setBFilters(f); setPage(1); loadBindings(1, size, f) }} />
                       <Button icon={<ReloadOutlined />} onClick={() => loadBindings()}>刷新</Button>
                       {hasPerm('PERM-FUNC-13') && (
-                        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setBindingTarget({}); bindingForm.resetFields() }}>调整引用</Button>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                          setBindingTarget({}); bindingForm.resetFields()
+                          if (ctx) bindingForm.setFieldsValue({ cluster_id: ctx.cluster.id })
+                        }}>调整引用</Button>
                       )}
                     </Space>
                   }
@@ -189,15 +214,20 @@ export default function RefManage() {
                   total={paramTotal}
                   extra={
                     <Space wrap>
-                      <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
-                        options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-                        onChange={(v) => { const f = { ...pFilters, cluster_ref: v }; setPFilters(f); setPage(1); loadParams(1, size, f) }} />
+                      {!ctx && (
+                        <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
+                          options={clusterOptions.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                          onChange={(v) => { const f = { ...pFilters, cluster_ref: v }; setPFilters(f); setPage(1); loadParams(1, size, f) }} />
+                      )}
                       <Select allowClear placeholder="待同步" style={{ width: 120 }}
                         options={[{ value: '1', label: '待同步' }, { value: '0', label: '已生效' }]}
                         onChange={(v) => { const f = { ...pFilters, sync_pending: v }; setPFilters(f); setPage(1); loadParams(1, size, f) }} />
                       <Button icon={<ReloadOutlined />} onClick={() => loadParams()}>刷新</Button>
                       {hasPerm('PERM-FUNC-14') && (
-                        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setParamTarget({}); paramForm.resetFields() }}>参数人工覆写</Button>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                          setParamTarget({}); paramForm.resetFields()
+                          if (ctx) paramForm.setFieldsValue({ cluster_id: ctx.cluster.id })
+                        }}>参数人工覆写</Button>
                       )}
                     </Space>
                   }
@@ -213,7 +243,8 @@ export default function RefManage() {
       <Modal title="调整中心引用(新增/替换;R-01 双写)" open={!!bindingTarget} onOk={handleBinding} onCancel={() => setBindingTarget(null)} confirmLoading={saving} width={560}>
         <Form form={bindingForm} layout="vertical">
           <Form.Item name="cluster_id" label="目标集群" rules={[{ required: true, message: '请选择' }]}>
-            <Select showSearch optionFilterProp="label" options={clusters.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
+            <Select showSearch optionFilterProp="label" disabled={!!ctx}
+              options={clusterOptions.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
           </Form.Item>
           <Form.Item name="target_capability" label="目标能力" rules={[{ required: true, message: '必填' }]}>
             <Select options={CAP_OPTIONS} />
@@ -238,7 +269,8 @@ export default function RefManage() {
       <Modal title="参数人工覆写(INV-21 留痕)" open={!!paramTarget} onOk={handleParam} onCancel={() => setParamTarget(null)} width={520}>
         <Form form={paramForm} layout="vertical">
           <Form.Item name="cluster_id" label="目标集群" rules={[{ required: true, message: '请选择' }]}>
-            <Select showSearch optionFilterProp="label" options={clusters.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
+            <Select showSearch optionFilterProp="label" disabled={!!ctx}
+              options={clusterOptions.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
           </Form.Item>
           <Form.Item name="param_key" label="参数键" rules={[{ required: true, message: '必填' }]}>
             <Input placeholder="如 image.mirror.endpoint" />

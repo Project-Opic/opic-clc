@@ -7,18 +7,22 @@ import { ReloadOutlined, MonitorOutlined } from '@ant-design/icons'
 import { clusterApi, probeApi, type ClcProbe } from '../../api/clc'
 import { usePermission } from '../../hooks/usePermission'
 import TableToolbar from '../../admin/components/TableToolbar'
-import { CLUSTER_HEALTH, DEGRADED_REASON, PROBE_RESULT, pill } from './common'
+import { CLUSTER_HEALTH, DEGRADED_REASON, PROBE_RESULT, pill, type ConsoleCtx } from './common'
 
 const RESULT_OPTIONS = Object.keys(PROBE_RESULT).map((k) => ({ value: k, label: PROBE_RESULT[k].label }))
 
-export default function HealthManage() {
+// 集群台嵌入态(v1.3):「探活历史与显式恢复」区段落在生命周期页签(9.10.2)——
+// 集群由台级唯一确定:不出集群选择器,聚合健康只留本集群一行(同一份 REP-08 行,不是第二张报表)。
+export default function HealthManage({ ctx }: { ctx?: ConsoleCtx } = {}) {
   const hasPerm = usePermission()
   const [form] = Form.useForm()
   const [data, setData] = useState<ClcProbe[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [size, setSize] = useState(10)
-  const [filters, setFilters] = useState<{ cluster_ref?: string; probe_result?: string }>({})
+  const [filters, setFilters] = useState<{ cluster_ref?: string; probe_result?: string }>(
+    () => (ctx ? { cluster_ref: ctx.cluster.cluster_no } : {}),
+  )
   const [clusters, setClusters] = useState<{ id: number; cluster_no: string; name: string; health: string; degraded_reason: string | null }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -33,7 +37,7 @@ export default function HealthManage() {
       const res = await probeApi.list({ page: p, size: s, ...f })
       setData(res.list || [])
       setTotal(res.total || 0)
-      const agg = await probeApi.aggregate({})
+      const agg = await probeApi.aggregate(ctx ? { cluster_ref: ctx.cluster.cluster_no } : {})
       setAggregate(agg.list || [])
     } catch (e) {
       setError((e as Error).message || '探活历史加载失败')
@@ -44,7 +48,9 @@ export default function HealthManage() {
 
   useEffect(() => {
     load()
-    clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name, health: c.health, degraded_reason: c.degraded_reason })))).catch(() => undefined)
+    if (!ctx) {
+      clusterApi.list({ page: 1, size: 100 }).then((r) => setClusters((r.list || []).map((c) => ({ id: c.id, cluster_no: c.cluster_no, name: c.name, health: c.health, degraded_reason: c.degraded_reason })))).catch(() => undefined)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, size])
 
@@ -62,6 +68,7 @@ export default function HealthManage() {
       message.success('探活已登记(健康经 R-08 防抖窗口写回;不覆盖 DEGRADED)')
       setProbeTarget(null)
       load()
+      ctx?.refresh()
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return
     } finally {
@@ -69,9 +76,18 @@ export default function HealthManage() {
     }
   }
 
+  // `REP-08`（5.9）与 `REP-09`（5.10 分区结构）的登记列都不含集群列；台内「生命周期」页签由徽章条唯一确定集群
+  // ⇒ 两表的集群列不渲染，独立形态保留跨集群识别。
+  const probeClusterColumn: ColumnsType<ClcProbe> = ctx ? [] : [
+    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+  ]
+  const aggClusterColumn: ColumnsType<Record<string, unknown>> = ctx ? [] : [
+    { title: '集群', key: 'cluster', width: 170, render: (_, r) => `${String(r.cluster_name ?? '-')}(${String(r.cluster_no ?? '-')})` },
+  ]
+
   const probeColumns: ColumnsType<ClcProbe> = [
     { title: '记录编号', dataIndex: 'probe_no', key: 'probe_no', width: 170 },
-    { title: '集群', dataIndex: 'cluster_ref', key: 'cluster_ref', width: 150, render: (v: string, r) => r.cluster_name ? `${r.cluster_name}(${v})` : v },
+    ...probeClusterColumn,
     { title: '探活时间', dataIndex: 'probed_at', key: 'probed_at', width: 180 },
     { title: '触发方式', dataIndex: 'trigger_source', key: 'trigger_source', width: 90, render: (v: string) => (v === 'MANUAL' ? '人工' : '定时') },
     { title: '控制面', dataIndex: 'apiserver_reachable', key: 'apiserver_reachable', width: 80, render: (v: number) => (v === 1 ? '可达' : '不可达') },
@@ -82,7 +98,7 @@ export default function HealthManage() {
   ]
 
   const aggColumns: ColumnsType<Record<string, unknown>> = [
-    { title: '集群', key: 'cluster', width: 170, render: (_, r) => `${String(r.cluster_name ?? '-')}(${String(r.cluster_no ?? '-')})` },
+    ...aggClusterColumn,
     { title: '状态', key: 'status', width: 90, render: (_, r) => String(r.status ?? '-') },
     { title: '集群自身健康', key: 'health', width: 150, render: (_, r) => (<Space size={4}>{pill(CLUSTER_HEALTH, String(r.health))}{r.degraded_reason ? <span style={{ fontSize: 12, color: '#d46b08' }}>{DEGRADED_REASON[String(r.degraded_reason)] || String(r.degraded_reason)}</span> : null}</Space>) },
     { title: '交付执行机', dataIndex: 'executor_ref', key: 'executor_ref', render: (v: unknown) => String(v ?? '-') },
@@ -100,14 +116,19 @@ export default function HealthManage() {
         total={total}
         extra={
           <Space wrap>
-            <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
-              options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
-              onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            {!ctx && (
+              <Select allowClear showSearch placeholder="集群" style={{ width: 190 }} optionFilterProp="label"
+                options={clusters.map((c) => ({ value: c.cluster_no, label: `${c.name}(${c.cluster_no})` }))}
+                onChange={(v) => { const f = { ...filters, cluster_ref: v }; setFilters(f); setPage(1); load(1, size, f) }} />
+            )}
             <Select allowClear placeholder="结论" style={{ width: 110 }} options={RESULT_OPTIONS}
               onChange={(v) => { const f = { ...filters, probe_result: v }; setFilters(f); setPage(1); load(1, size, f) }} />
             <Button icon={<ReloadOutlined />} onClick={() => load()}>刷新</Button>
             {hasPerm('PERM-FUNC-26') && (
-              <Button type="primary" icon={<MonitorOutlined />} onClick={() => { setProbeTarget({}); form.resetFields() }}>人工探活</Button>
+              <Button type="primary" icon={<MonitorOutlined />} onClick={() => {
+                setProbeTarget({}); form.resetFields()
+                if (ctx) form.setFieldsValue({ cluster_id: ctx.cluster.id })
+              }}>人工探活</Button>
             )}
           </Space>
         }
@@ -129,7 +150,9 @@ export default function HealthManage() {
       <Modal title="人工探活登记(INV-34 口径校验)" open={!!probeTarget} onOk={handleProbe} onCancel={() => setProbeTarget(null)} confirmLoading={saving} width={560}>
         <Form form={form} layout="vertical">
           <Form.Item name="cluster_id" label="目标集群" rules={[{ required: true, message: '请选择' }]}>
-            <Select showSearch optionFilterProp="label" options={clusters.map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
+            <Select showSearch optionFilterProp="label" disabled={!!ctx}
+              options={(ctx ? [{ id: ctx.cluster.id, cluster_no: ctx.cluster.cluster_no, name: ctx.cluster.name }] : clusters)
+                .map((c) => ({ value: c.id, label: `${c.name}(${c.cluster_no})` }))} />
           </Form.Item>
           <Space style={{ display: 'flex' }} align="start">
             <Form.Item name="apiserver_reachable" valuePropName="checked" label="控制面可达" initialValue={true}>

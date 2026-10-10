@@ -1,5 +1,5 @@
 model_type: BEHAVIOR
-version: '1.2'
+version: '1.3'
 domain: 集群域
 behaviors:
 - id: FUNC-01
@@ -1101,7 +1101,32 @@ behaviors:
   - PERM-FUNC-50
   syncTriggers: []
   queryReportRef: null
-  reportException: "第五部分 5.16 登记的唯一显式例外：交付前置预检是「一次判定 + 一份即时提示」，无留存价值也无列表形态，故不建报表 —— 是 19 个查询功能点 ↔ 18 张报表之间唯一的一处不配对"
+  reportException: "第五部分 5.16 登记的唯一显式例外：交付前置预检是「一次判定 + 一份即时提示」，无留存价值也无列表形态，故不建报表 —— 是 20 个查询功能点 ↔ 19 张报表之间唯一的一处不配对"
+- id: FUNC-51
+  name: 交付执行日志代理查看
+  ownerEntity: AGG-CLC-06
+  behaviorType: QUERY
+  triggerType: USER_ACTION
+  preconditions:
+  - "入参 = 远端任务引用 remoteTaskRef（取 2.6 集群任务头既有属性，INV-46 已要求远程链路必写）+ 游标 sinceSeq（缺省 0）+ 单轮上限 limit（有硬上限，禁无游标整表出口）"
+  - "只服务 REMOTE_EXECUTOR 腿；LOCAL 腿仍由 FUNC-35 出数，两腿按任务/步骤的执行位置字段二选一、不并存（REF-16）"
+  - "无 remoteTaskRef（本地链路本就无此腿）或对端不可达 ⇒ 显式呈现「远程日志暂不可读」并保留跳转兜底入口，绝不拿上一轮行冒充现状"
+  postconditions:
+  - "本域后端经既有交付门面（同一服务令牌，不新开通道、不新增服务身份）代理直展 O-IGN 的 TOOL 方向逐行原文（ezctl 驱动 ansible 的输出，对端写前已脱敏，其 INV-40 / R-16）"
+  - "日志行一律不落 clc_task_log、不缓存、不产生事件；本域不重排、不二次加工、不重算成功判定（判定权威仍是对端回执与本域步骤行，R-17 / INV-45）"
+  - "每次代理读逐次留痕（谁、何时、哪个集群 / 哪个远端任务、取到哪个游标），与 REP-18 同口径"
+  - "呈现节奏 = 与 O-IGN 自有界面同口径的游标短轮询（2~3 秒增量追加），不新造推送通道、不在本域建第二条 SSE"
+  appliedRules:
+  - INV-08
+  - INV-43
+  - INV-46
+  - REF-12
+  - REF-16
+  - R-25
+  requiredPermissions:
+  - PERM-FUNC-51
+  syncTriggers: []
+  queryReportRef: REP-19
 - id: B-AUTO-01
   name: 健康探活调度
   ownerEntity: AGG-CLC-07

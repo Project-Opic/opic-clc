@@ -1,5 +1,5 @@
 model_type: REPORT
-version: '1.2'
+version: '1.3'
 domain: 集群域
 query_reports:
 - id: REP-01
@@ -929,7 +929,7 @@ query_reports:
     maxPageSize: 500
   reportOptions: null
   version: '1.1'
-  caliberNote: 口径注记（v1.1，口径 8 的本域落点）：禁整表拉取 —— 只按游标取增量，接口不提供无游标整表出口；本地链路内容来自本域交付日志表，远程链路本区显示「原始日志在 O-IGN 侧」+ 跳转标识、不留副本不留占位假数据（REF-12）；保留期外显式提示「已按 REF-15 清理」而非空结果（INV-44）；级别为 CLC_LOG_LEVEL 三类
+  caliberNote: 口径注记（v1.1，口径 8 的本域落点；v1.3 Q-125 精确化）：禁整表拉取 —— 只按游标取增量，接口不提供无游标整表出口；本地链路内容来自本域交付日志表；远程链路本区不再由本报表出数 —— 其逐行原文由 REP-19（FUNC-51 代理直展）呈现，本报表在该位置按执行位置二选一不并存（REF-16）；保留期外显式提示「已按 REF-15 清理」而非空结果（INV-44）；级别为 CLC_LOG_LEVEL 三类
 - id: REP-14
   name: 集群模板列表
   alias: rep14
@@ -1348,3 +1348,106 @@ query_reports:
   reportOptions: null
   version: '1.2'
   caliberNote: 口径注记（v1.2）：无编辑态（1.2.2 范围外第 9 条，要改字段走 O-IGN 的字段级覆写）；本域不二次解析掩码串、不据原文做判定（口径 9）；每次读留痕（谁、何时、哪个集群、哪个文件面）—— 与 REP-16 登录标识的「不留痕」刻意分档；不可达时不显示历史原文
+- id: REP-19
+  name: 交付执行日志代理视图
+  alias: rep19
+  objectType: LIST_QUERY
+  description: 远程链路的 ezctl 逐行运行原文代理视图（v1.3 新增，绑定 FUNC-51，来源 Q-125）；CLC-ROLE-03 默认发牌、CLC-ROLE-01 需另行授权，每次代理读逐次留痕。行只活在对端与本域那一次响应体里，本域无留存权。
+  behaviorRef: FUNC-51
+  sourceObjects:
+  - objectRef: EXT-EXTERNAL
+    alias: ign_exec_log_proxy
+    primary: true
+    sourceNote: 明细（跨中心游标增量原文）；由本域后端经既有交付门面代理取自 O-IGN 的 TOOL 方向日志行，不落 clc_task_log、不缓存（R-25 日志腿 / REF-12）
+  joins: []
+  parameters:
+  - name: p1
+    label: 远端任务引用（取 2.6 任务头 remoteTaskRef）
+    dataType: String
+    required: true
+    allowedOperators:
+    - EQ
+    sourceField: remoteTaskRef
+  - name: p2
+    label: 游标起点 sinceSeq（缺省 0）
+    dataType: Integer
+    required: false
+    allowedOperators:
+    - GTE
+    sourceField: sinceSeq
+  - name: p3
+    label: 单轮上限 limit（有硬上限）
+    dataType: Integer
+    required: true
+    allowedOperators:
+    - LTE
+    sourceField: limit
+  conditions:
+  - conditionId: C01
+    leftExpression: remoteTaskRef
+    operator: EQ
+    parameterRef: p1
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  - conditionId: C02
+    leftExpression: 对端日志序号
+    operator: GTE
+    parameterRef: p2
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: true
+  - conditionId: C03
+    leftExpression: 本轮返回行数
+    operator: LTE
+    parameterRef: p3
+    logicalConnector: AND
+    group: BASE
+    skipWhenParameterEmpty: false
+  resultColumns:
+  - name: c1
+    label: 对端日志序号
+    dataType: Integer
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c2
+    label: 对端写入时间
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: true
+  - name: c3
+    label: 方向（取对端字段原值，本域不映射字典）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c4
+    label: 是否已被对端掩码（取对端 masked 字段原值）
+    dataType: Boolean
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c5
+    label: 内容（对端写前已脱敏的逐行原文，ezctl 驱动 ansible 的输出）
+    dataType: String
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  - name: c6
+    label: 下一游标
+    dataType: Integer
+    sourceExpression: ''
+    aggregateFunction: NONE
+    sortable: false
+  groupBy: []
+  having: []
+  orderBy: []
+  pagination:
+    enabled: false
+    defaultPageSize: 0
+    maxPageSize: 0
+  reportOptions: null
+  version: '1.3'
+  caliberNote: 口径注记（v1.3，Q-125）：逐行原样、不重排不折叠不二次脱敏（口径 1 的 v1.3 延伸 + 口径 9）；响应即弃、不落 clc_task_log、不进 REF-15 保留期清理（本域没有这份数据的留存权）；不可达或无 remoteTaskRef ⇒ 显式说明 + 跳转兜底、绝不拿上一轮行冒充现状；每轮读留痕（谁、何时、哪个集群、哪个远端任务、取到哪个游标）；只服务 REMOTE_EXECUTOR 腿，LOCAL 腿仍由 REP-13 出数，两腿按执行位置二选一不并存（REF-16）；方向列取对端原值不建本域字典（DEF-08 同族纪律，第二处应用）；列结构以 O-IGN FUNC-51 的出参为唯一事实源 —— 对端日志行只有 seq / logged_at / direction / masked / log_line 五项，故本报表不设「级别」列（那是 REP-13 本地腿的 CLC_LOG_LEVEL 口径，套到远程腿即要求本域凭空造一列，违反口径 9「代理显示即对端事实」），亦不设「所属步骤序号」列（步骤归属由任务头 remoteTaskRef 与「安装」页签的当前步骤上下文承载，报表列复制一份即第二份权威）
