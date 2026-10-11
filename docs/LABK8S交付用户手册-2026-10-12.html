@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang='zh-CN'><head><meta charset='utf-8'/><meta name='viewport' content='width=device-width,initial-scale=1'/><title>LABK8S 集群交付用户手册</title><style>
+:root{--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--bg:#fff;--code:#f6f8fa;}
+*{box-sizing:border-box}
+body{margin:0;background:#f3f4f6;color:var(--ink);font:16px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+main{max-width:1000px;margin:24px auto;background:var(--bg);padding:48px 56px 72px;border:1px solid var(--line);border-radius:10px;}
+h1{font-size:30px;line-height:1.35;margin:0 0 4px;letter-spacing:-.2px}
+h2{font-size:23px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--accent)}
+h3{font-size:18px;margin:30px 0 10px}
+h4{font-size:16px;margin:22px 0 8px;color:#374151}
+p,li{color:#374151}
+hr{border:0;border-top:1px solid var(--line);margin:32px 0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:13.5px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{background:var(--code);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;padding:14px 16px;overflow:auto}
+pre code{background:none;padding:0;font-size:13px;line-height:1.65}
+table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:#f9fafb;font-weight:600;white-space:nowrap}
+tbody tr:nth-child(even){background:#fcfcfd}
+td code{white-space:nowrap}
+blockquote{margin:16px 0;padding:10px 16px;background:#eff6ff;border-left:4px solid var(--accent);border-radius:0 6px 6px 0;color:#1e3a5f}
+ul,ol{padding-left:24px}
+li{margin:4px 0}
+.sub{color:var(--muted);font-size:14px;margin-top:2px}
+figure{margin:20px 0;text-align:center}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.meta{color:var(--muted);font-size:13.5px;margin:0 0 28px}
+@media print{body{background:#fff}main{border:0;margin:0;padding:0;max-width:none}h2{page-break-after:avoid}table,pre,figure{page-break-inside:avoid}a{color:inherit}}
+</style></head><body><main>
+<h1 id="labk8s-集群交付用户手册">LABK8S 集群交付用户手册</h1>
+<h2 id="-用点火中心--集群中心的用户工作台把一台裸机装成可验收的-k8s-集群">—— 用「点火中心 + 集群中心」的用户工作台，把一台裸机装成可验收的 K8S 集群</h2>
+<table>
+<thead><tr>
+<th>项</th>
+<th>值</th>
+</tr></thead>
+<tbody>
+<tr><td>交付对象</td><td>集群 <code>LABK8S</code>（编号 <code>CLU-20261011-0001</code>），单节点 <code>192.168.3.165</code></td></tr>
+<tr><td>交付方式</td><td>全程通过两个能力中心的<strong>用户工作台</strong>界面完成，不手工敲 <code>ezctl</code></td></tr>
+<tr><td>涉及系统</td><td>点火中心 ignition-center（<code>https://ign.opic-ai.ccoe.tech</code>）、集群中心 cluster-center-mcc（<code>https://clc.opic-ai.ccoe.tech</code>），均部署在 <code>192.168.3.200</code></td></tr>
+<tr><td>交付底座</td><td>kubeasz 3.7.0 + 执行位 <code>EXE-20261004-0001</code>（local-ignition）</td></tr>
+<tr><td>私有镜像仓库</td><td>Harbor 2.12.2 <code>http://harbor.cic.ccoe.tech:18700</code>（<code>192.168.3.200:18700</code>）</td></tr>
+<tr><td>手册日期</td><td>2026-10-12（验收实测数据均为当日采集）</td></tr>
+<tr><td>读者</td><td>新人：照第 4~6 章顺序做即可交付一套集群；管理员：重点看第 7~12 章（定制点、缺陷修复、失败重派、运维 SOP）</td></tr>
+</tbody>
+</table>
+<blockquote>本手册所有截图来自本次真实交付界面，存放于 <code>labk8s-shots/</code>。所有结论都有对应实测命令与输出，见第 6 章与附录 A。</blockquote>
+<hr/>
+<h2 id="目录">目录</h2>
+<ol><li><a href="#1-本次任务书与最终结果">本次任务书与最终结果</a></li><li><a href="#2-系统地图两个中心各管什么">系统地图：两个中心各管什么</a></li><li><a href="#3-动手前检查清单">动手前检查清单</a></li><li><a href="#4-操作流程-a在点火中心把怎么装定下来">操作流程 A：在点火中心把"怎么装"定下来</a></li><li><a href="#5-操作流程-b在集群中心跑七步装机向导">操作流程 B：在集群中心跑七步装机向导</a></li><li><a href="#6-交付验收逐项对账">交付验收：逐项对账</a></li><li><a href="#7-本次交付的三个定制点">本次交付的三个定制点</a></li><li><a href="#8-私有镜像仓库接管harbor-侧要做的事">私有镜像仓库接管：Harbor 侧要做的事</a></li><li><a href="#9-失败与重派单步重试--跳步--破门径重派">失败与重派：单步重试 / 跳步 / 破门径重派</a></li><li><a href="#10-日常运维-sop">日常运维 SOP</a></li><li><a href="#11-已知偏差与产品缺口诚实披露">已知偏差与产品缺口（诚实披露）</a></li><li><a href="#12-常见坑速查">常见坑速查</a></li></ol>
+<ul><li><a href="#附录-a本次交付的台账数据快照">附录 A：本次交付的台账数据快照</a></li><li><a href="#附录-b完整时间线">附录 B：完整时间线</a></li><li><a href="#附录-c术语速查">附录 C：术语速查</a></li></ul>
+<hr/>
+<h2 id="1-本次任务书与最终结果">1. 本次任务书与最终结果</h2>
+<h3 id="11-任务书原文口径">1.1 任务书原文口径</h3>
+<blockquote>使用点火中心、集群中心的用户工作台，为 <code>192.168.3.165</code> 安装名为 <code>LABK8S</code> 的 K8S 集群。组件配置：k8s v1.36.3、etcd v3.7.1、containerd 2.3.3、runc v1.5.1、cni v1.9.1、coredns 1.14.6、pause 3.10.2、headlamp 0.43.0、higress 2.2.3、cilium 1.17.4、node-problem-detector v1.35.3、kube-prometheus-stack 88.1.5；<code>SERVICE_CIDR=10.39.0.0/16</code>、<code>CLUSTER_CIDR=172.38.0.0/16</code>；域名使用 <code>*.opic-lab.ccoe.tech</code>；私有镜像仓库使用 <code>http://harbor</code>。</blockquote>
+<h3 id="12-最终结果一句话">1.2 最终结果（一句话）</h3>
+<p><strong>已交付并通过实测验收</strong>：<code>LABK8S</code> 在集群中心台账为 <code>运行中 / 健康</code>，节点 <code>192.168.3.165</code> 状态 <code>Ready</code>，12 项组件版本与任务书<strong>逐字一致</strong>，两个网段、域名、私有仓库三项环境口径全部落地；集群内 16 个 Pod 全部 <code>Running</code>，Prometheus 17 个抓取目标全部 <code>up</code>。</p>
+<h3 id="13-需要你知道的两处绕了一下">1.3 需要你知道的两处"绕了一下"</h3>
+<ol><li>任务书要求的 12 个版本<strong>恰好等于 kubeasz 3.7.0 发行包的默认版本目录</strong>，所以组件版本一个都没覆写——这不是偷懒，而是"选对交付版本"就能少改配置的正确用法（见 4.2）。</li><li>私有镜像仓库这项<strong>不是一次装好的</strong>：集群先按默认离线仓库装完，再切到 Harbor，切换过程需要重跑第 03、07 两步（见第 8、9 章）。这条路径值得新人重点读，因为它就是日常"改配置后怎么让已交付集群跟上"的标准答案。</li></ol>
+<hr/>
+<h2 id="2-系统地图两个中心各管什么">2. 系统地图：两个中心各管什么</h2>
+<p>一句话分工：<strong>集群中心管"我要什么集群"（业务台账），点火中心管"具体怎么装出来"（交付执行）</strong>。</p>
+<pre><code>你（运维） 
+   │
+   ├─ 集群中心 CLC  https://clc.opic-ai.ccoe.tech
+   │     菜单：集群 / 集群模板 / 交付任务 / 运行观测 / 审批中心
+   │     集群台页签：配置 · 安装 · 生命周期 · 节点 · 日志
+   │     职责：集群台账、节点登记、七步向导推进、探活与健康态、生命周期动作
+   │                    │  交付动作派发（HTTP 门面，绑定执行位）
+   │                    ▼
+   ├─ 点火中心 IGN  https://ign.opic-ai.ccoe.tech
+   │     菜单：集群交付 / 交付资产 / 执行位 / 交付任务 / 运行观测 / 审批中心
+   │     集群交付台页签：配置 · 任务 · 日志与对账
+   │     职责：交付配置四层取值（hosts 面 / config 面）、参数覆写、
+   │            配置校验 dry-run、执行 ezctl.setup 01~07、任务与原文日志
+   │                    │  SSH / ansible
+   │                    ▼
+   └─ 执行位 EXE-20261004-0001（192.168.3.200 上的 kubeasz 3.7.0）
+         └─ 目标节点 192.168.3.165（被装成 LABK8S 的 master/worker）
+         └─ 周边：Harbor :18700（镜像）、DNS（*.opic-lab.ccoe.tech → 165）</code></pre>
+<p>三个必须建立的心智模型：</p>
+<table>
+<thead><tr>
+<th>模型</th>
+<th>含义</th>
+<th>为什么重要</th>
+</tr></thead>
+<tbody>
+<tr><td><strong>步骤号是共用的</strong></td><td><code>01 环境准备 / 02 etcd / 03 容器运行时 / 04 控制面 / 05 工作节点 / 06 网络插件 / 07 扩展组件</code>，CLC 向导与 IGN 的 <code>ezctl.setup</code> 一一对应</td><td>排障时你在两边说的是同一件事</td></tr>
+<tr><td><strong>配置只有一份</strong></td><td>落盘配置在 IGN 侧生成（<code>/etc/kubeasz/clusters/CLU-20261011-0001/{hosts,config.yml}</code>），CLC 只做<strong>只读代理视图</strong>（REP-17/REP-18）</td><td>改配置只能在点火中心改，在集群中心改不动也不该改</td></tr>
+<tr><td><strong>覆写"下次生效"</strong></td><td>规则 R-21：点火中心的覆写只影响<strong>下一次派发</strong>，不会自动重跑已完成的步骤</td><td>这是第 9 章"重派"存在的根本原因</td></tr>
+</tbody>
+</table>
+<hr/>
+<h2 id="3-动手前检查清单">3. 动手前检查清单</h2>
+<p>开始前 10 分钟把这张表打勾，能省掉后面一半的返工。</p>
+<table>
+<thead><tr>
+<th>#</th>
+<th>检查项</th>
+<th>怎么查</th>
+<th>本次实测值</th>
+</tr></thead>
+<tbody>
+<tr><td>1</td><td>两个中心可登录</td><td>浏览器打开 CLC / IGN，用工作台账号登录</td><td>管理员账号可登录，菜单齐</td></tr>
+<tr><td>2</td><td>目标机 SSH 可达、可 root</td><td>从执行位 <code>ssh root@&lt;目标IP&gt;</code></td><td><code>192.168.3.200 → 192.168.3.165</code> 通</td></tr>
+<tr><td>3</td><td>执行位 <code>READY</code></td><td>IGN → 执行位</td><td><code>EXE-20261004-0001 local-ignition 127.0.0.1:9709 READY</code>，能力 <code>DEPLOY,SKOPEO,BACKUP,PREFLIGHT,OFFLINE</code></td></tr>
+<tr><td>4</td><td>交付版本已入库且含所需组件目录</td><td>IGN → 交付资产 / 交付版本</td><td><code>VER-20261006-0001</code>（<code>kubeasz-3.7.0-k8s-1.36.3</code>）</td></tr>
+<tr><td>5</td><td>镜像可取（离线包或仓库）</td><td>节点上 <code>crictl images</code> / 仓库 catalog</td><td>见第 8 章</td></tr>
+<tr><td>6</td><td><strong>域名已解析到目标节点</strong></td><td><code>getent hosts api.&lt;你的域&gt;</code></td><td><code>api/headlamp/console.opic-lab.ccoe.tech → 192.168.3.165</code></td></tr>
+<tr><td>7</td><td><strong>目标机端口没被别人占</strong></td><td><code>ss -lntp</code></td><td><code>80/443</code> 被他人容器占（<code>docker-proxy</code>）、<code>9100</code> 被 ongrid 占 → 触发第 7 章定制点</td></tr>
+<tr><td>8</td><td>目标机无残留 swap/防火墙干扰</td><td>kubeasz 的 01 步会做，但先自查更快</td><td>01 步通过</td></tr>
+<tr><td>9</td><td>你要的网段不与现有网络冲突</td><td>对照 <code>192.168.3.0/24</code>、已有集群网段</td><td><code>10.39.0.0/16</code>、<code>172.38.0.0/16</code> 均空闲</td></tr>
+<tr><td>10</td><td>若已有同名集群：<strong>别碰它</strong></td><td>CLC → 集群列表核对编号</td><td>既有真集群 <code>CLU-20261007-0001</code> 全程未被触碰</td></tr>
+</tbody>
+</table>
+<blockquote>新人提示：第 6、7 两项是"装完才发现不对"的高发区。域名不解析→证书 SAN 不对；端口被占→higress/node-exporter 起不来。</blockquote>
+<hr/>
+<h2 id="4-操作流程-a在点火中心把怎么装定下来">4. 操作流程 A：在点火中心把"怎么装"定下来</h2>
+<p>入口：<strong>IGN → 集群交付</strong>，进入某个集群的"集群交付台"（页面标题形如 <code>集群交付台 · CLU-20261011-0001</code>）。页内三个页签：<strong>配置 / 任务 / 日志与对账</strong>。</p>
+<figure><img src="labk8s-shots/ign-03-hosts-face.png" alt="点火中心 集群交付台 配置页签（主机清单面）"/><figcaption>点火中心 集群交付台 配置页签（主机清单面）</figcaption></figure>
+<h3 id="41-第-1-步绑定执行位谁来装">4.1 第 1 步：绑定执行位（谁来装）</h3>
+<p>集群台账与执行位的绑定在<strong>集群中心</strong>侧登记（配置页 → 引用台账），点火中心按绑定接单。本次绑定关系：</p>
+<table>
+<thead><tr>
+<th>绑定编号</th>
+<th>集群</th>
+<th>目标能力</th>
+<th>资源类型</th>
+<th>资源标识</th>
+<th>用途</th>
+</tr></thead>
+<tbody>
+<tr><td><code>BND-20261011-0001</code></td><td>LABK8S(CLU-20261011-0001)</td><td>交付执行</td><td>执行机</td><td><code>EXE-20261004-0001</code></td><td>交付运行时</td></tr>
+</tbody>
+</table>
+<figure><img src="labk8s-shots/clc-01-config.png" alt="集群中心 配置页签：基本信息 + 引用台账"/><figcaption>集群中心 配置页签：基本信息 + 引用台账</figcaption></figure>
+<h3 id="42-第-2-步选交付版本决定-12-个组件的默认版本">4.2 第 2 步：选交付版本（决定 12 个组件的默认版本）</h3>
+<p>点火中心的配置是<strong>四层取值</strong>（规则 R-20），优先级从低到高：</p>
+<pre><code>第 4 层 平台缺省面  →  第 3 层 参数面模板值  →  第 2 层 交付版本派生  →  第 1 层 集群覆写（最高，界面标"生效覆写"）</code></pre>
+<p><strong>做法</strong>：在配置页选对交付版本，让第 2 层直接给你要的默认值；只有版本目录给不了的字段才做集群覆写。</p>
+<p>本次核对结果（重要经验）：kubeasz 3.7.0 的发行默认版本目录已包含任务书全部 12 项——</p>
+<pre><code>k8s v1.36.3 / etcd v3.7.1 / containerd 2.3.3 / runc v1.5.1 / cni v1.9.1
+coredns 1.14.6 / pause 3.10.2 / headlamp 0.43.0 / higress 2.2.3
+cilium 1.17.4 / node-problem-detector v1.35.3 / kube-prometheus-stack 88.1.5</code></pre>
+<p>所以<strong>组件版本零覆写</strong>，配置页顶部"生效覆写"只有 5 个字段（都是网络与仓库口径，见 4.3）。</p>
+<blockquote>判断依据在界面上是可见的：配置页每行都有"命中层（来源档）"，本次 12 个版本字段的来源档都是"交付版本派生 / 发行包自身版本"，不是"集群覆写"。</blockquote>
+<h3 id="43-第-3-步做-5-条覆写网络与仓库口径">4.3 第 3 步：做 5 条覆写（网络与仓库口径）</h3>
+<p>在配置页用<strong>文件面下拉</strong>切换两张表：<code>主机清单（hosts）</code> 与 <code>集群配置（config.yaml）</code>。每行右侧有 <code>覆写</code> / <code>回落</code> 按钮。</p>
+<figure><img src="labk8s-shots/ign-04-config-face.png" alt="点火中心 配置页签：集群配置（config.yaml）面"/><figcaption>点火中心 配置页签：集群配置（config.yaml）面</figcaption></figure>
+<p>本次实际写入的 5 条覆写（含界面上填写的理由，理由会落库、可追溯）：</p>
+<table>
+<thead><tr>
+<th>文件面</th>
+<th>字段键</th>
+<th>名称</th>
+<th>平台缺省</th>
+<th>覆写值</th>
+<th>形态</th>
+<th>理由（界面填写）</th>
+</tr></thead>
+<tbody>
+<tr><td>HOSTS</td><td><code>deploy_service_cidr</code></td><td>Service 网段</td><td><code>10.68.0.0/16</code></td><td><code>10.39.0.0/16</code></td><td>SCALAR</td><td>任务书指定 <code>SERVICE_CIDR</code></td></tr>
+<tr><td>HOSTS</td><td><code>deploy_pod_cidr</code></td><td>Pod 网段</td><td><code>10.200.0.0/16</code></td><td><code>172.38.0.0/16</code></td><td>SCALAR</td><td>任务书指定 <code>CLUSTER_CIDR</code></td></tr>
+<tr><td>HOSTS</td><td><code>deploy_dns_domain</code></td><td>集群 DNS 后缀</td><td><code>cluster.local</code></td><td><code>opic-lab.ccoe.tech</code></td><td>SCALAR</td><td>域名口径 <code>*.opic-lab.ccoe.tech</code>，与集群台账 <code>cluster_dns_domain</code> 同源</td></tr>
+<tr><td>HOSTS</td><td><code>deploy_network_plugin</code></td><td>CNI 插件</td><td><code>flannel</code></td><td><code>cilium</code></td><td>SCALAR</td><td>任务书列明 cilium 1.17.4 作为 CNI（枚举受 REF-20 约束）</td></tr>
+<tr><td>CONFIG</td><td><code>deploy_image_mirror</code></td><td>内网镜像仓库地址</td><td><code>easzlab.io.local:5000</code></td><td><code>harbor.cic.ccoe.tech:18700</code></td><td>LIST</td><td>私有仓库收敛为内网 Harbor 单点（详见第 8 章）</td></tr>
+</tbody>
+</table>
+<p>未覆写、保持平台缺省的字段（同样值得记住，说明"能不改就不改"）：<code>deploy_container_runtime=containerd</code>、<code>deploy_proxy_mode=iptables</code>、<code>deploy_node_port_range=30000-32767</code>、<code>deploy_install_source=online</code>。</p>
+<p><strong>填完必做</strong>：点配置页顶部 <code>配置校验 dry-run</code>，再点 <code>查看原文</code> 核对渲染出的 <code>hosts</code> / <code>config.yml</code> 关键行。本次核对到的生效行：</p>
+<pre><code># hosts
+[all:vars]
+CLUSTER_NETWORK="cilium"
+PROXY_MODE="iptables"
+SERVICE_CIDR="10.39.0.0/16"
+CLUSTER_CIDR="172.38.0.0/16"
+CLUSTER_DNS_DOMAIN="opic-lab.ccoe.tech"
+NODE_PORT_RANGE="30000-32767"
+NODE_CIDR_LEN=24            # 单节点集群：每节点一个 /24
+
+# config.yml（关键行）
+K8S_VER: "1.36.3"
+ENABLE_MIRROR_REGISTRY: "true"
+INSECURE_REG:
+  - "http://harbor.cic.ccoe.tech:18700"     # 只留 Harbor，见 8.3
+SANDBOX_IMAGE: "harbor.cic.ccoe.tech:18700/easzlab/pause:3.10.2"
+MASTER_CERT_HOSTS: ["192.168.3.165","api.opic-lab.ccoe.tech"]
+cilium_ver: "1.17.4"   corednsVer: "1.14.6"   headlampVer: "0.43.0"
+prom_chart_ver: "88.1.5"   node_problem_detector_ver: "v1.35.3"   higress_ver: "2.2.3"</code></pre>
+<blockquote>界面顶部徽标 <code>生效覆写 5 字段 · 未决偏差 0</code> 就是"配置已定稿"的信号；<code>未决偏差</code> 非 0 时不要开始装机。</blockquote>
+<h3 id="44-第-4-步登记节点在哪几台机器上装">4.4 第 4 步：登记节点（在哪几台机器上装）</h3>
+<p>节点在<strong>集群中心 → 集群台 → 节点</strong>页签登记（IP、角色、期望的 <code>k8s_nodename</code>）。单节点 all-in-one 部署时，同一台机器同时进 <code>etcd / kube_master / kube_node</code> 三个组，IGN 会据此渲染 hosts：</p>
+<pre><code>[etcd]
+192.168.3.165 k8s_nodename=clu-20261011-0001-192-168-3-165
+[kube_master]
+192.168.3.165
+[kube_node]
+192.168.3.165</code></pre>
+<p>节点命名规则：<code>&lt;集群编号小写&gt;-&lt;IP 用短横替换&gt;</code>，便于多集群共用节点时不串号。</p>
+<hr/>
+<h2 id="5-操作流程-b在集群中心跑七步装机向导">5. 操作流程 B：在集群中心跑七步装机向导</h2>
+<p>入口：<strong>CLC → 集群 → 打开 LABK8S → 页签「安装」</strong>。</p>
+<figure><img src="labk8s-shots/clc-02-install.png" alt="集群中心 安装页签：完备性预检 + 七步步进器"/><figcaption>集群中心 安装页签：完备性预检 + 七步步进器</figcaption></figure>
+<h3 id="51-第-1-步完备性预检func-50">5.1 第 1 步：完备性预检（FUNC-50）</h3>
+<p>页签顶部是预检面板，把"装下去会不会白装"的前置条件一次查完（执行位绑定、交付版本、节点登记、必填参数、镜像口径…）。<strong>全通过再往下走</strong>，本次预检结果：全部通过。</p>
+<blockquote>预检不通过时，界面会指出缺哪一项、去哪个页签补。这是新人和"直接敲 ezctl"最大的差别：系统替你把门。</blockquote>
+<h3 id="52-第-2-步选推进模式">5.2 第 2 步：选推进模式</h3>
+<p>向导支持两种模式，界面上是"推进模式"徽标：</p>
+<table>
+<thead><tr>
+<th>模式</th>
+<th>徽标文案</th>
+<th>行为</th>
+<th>适合谁</th>
+</tr></thead>
+<tbody>
+<tr><td>整装</td><td>一次跑完 01~07</td><td>提交后自动串完七步</td><td>环境干净、想一把梭</td></tr>
+<tr><td><strong>向导单步</strong>（本次用）</td><td><code>推进模式：向导单步</code></td><td>每步一个"运行第 0X 步"按钮，跑完一步看一眼再点下一步</td><td>新人学习、共享主机、需要中途改配置</td></tr>
+</tbody>
+</table>
+<p>单步模式下每步右侧都有 WebSSH 入口，方便你直接去节点上验证（<code>kubectl get pod -A</code>、<code>crictl images</code> 等）。</p>
+<h3 id="53-第-3-步依次跑-0107">5.3 第 3 步：依次跑 01~07</h3>
+<p>七步的界面名称与本次实际结果：</p>
+<table>
+<thead><tr>
+<th>步</th>
+<th>名称</th>
+<th>本步做什么</th>
+<th>本次结果</th>
+</tr></thead>
+<tbody>
+<tr><td>01</td><td>环境准备（prepare）</td><td>内核参数、swap、时间同步、目录与二进制分发</td><td>成功（耗时 58s）</td></tr>
+<tr><td>02</td><td>部署 etcd 集群</td><td>生成 etcd 证书、拉起 etcd</td><td>成功（13s）</td></tr>
+<tr><td>03</td><td>部署容器运行时（runtime）</td><td>装 containerd + 写 <code>config.toml</code>、<code>certs.d</code> 取像配置</td><td>成功（19s；后因切 Harbor 重跑 2 次）</td></tr>
+<tr><td>04</td><td>部署 K8s 控制面（master）</td><td>apiserver/controller-manager/scheduler + 证书 SAN</td><td><strong>首次失败</strong>（代理劫持域名访问），修复后成功（71s）</td></tr>
+<tr><td>05</td><td>加入工作节点（worker）</td><td>kubelet + kube-proxy（systemd 单元）</td><td>成功（4s）</td></tr>
+<tr><td>06</td><td>部署网络插件（network）</td><td>cilium 1.17.4</td><td><strong>首次失败</strong>（取像路径），修复后成功（25s）</td></tr>
+<tr><td>07</td><td>部署扩展组件（addons）</td><td>coredns / metrics-server / headlamp / npd / prometheus-stack / higress</td><td><strong>首次失败</strong>（共享主机端口冲突），定制后成功（47s；后又重跑 3 次）</td></tr>
+</tbody>
+</table>
+<p>每步的"远端回执（0）"表示 <code>ezctl</code> 退出码 0 且 ansible <code>PLAY RECAP</code> 无 <code>failed</code>；这是界面判定成功的依据（结论依据列写"脚本汇总判定"）。</p>
+<h3 id="54-第-4-步看日志两边都能看看的是同一份">5.4 第 4 步：看日志（两边都能看，看的是同一份）</h3>
+<ul><li><strong>CLC → 集群台 → 日志</strong>：交付任务台账（4 条），每行 <code>查看步骤</code> / <code>查看日志</code>。</li></ul>
+<figure><img src="labk8s-shots/clc-04-log.png" alt="集群中心 日志页签：交付任务台账"/><figcaption>集群中心 日志页签：交付任务台账</figcaption></figure>
+<ul><li><strong>IGN → 集群交付台 → 日志与对账 → 任务台账与日志</strong>：本集群 14 条 <code>ezctl.setup</code> 执行记录，可下钻到 ezctl 原文日志（Q-125 打通的 FUNC-51 代理通道，CLC 侧也能直接看到同一份原文）。</li></ul>
+<figure><img src="labk8s-shots/ign-02-log.png" alt="点火中心 日志与对账：任务台账 14 条"/><figcaption>点火中心 日志与对账：任务台账 14 条</figcaption></figure>
+<figure><img src="labk8s-shots/ign-05-tasks.png" alt="点火中心 任务状态筛选（RUNNING/COMPLETED/FAILED/…）"/><figcaption>点火中心 任务状态筛选（RUNNING/COMPLETED/FAILED/…）</figcaption></figure>
+<h3 id="55-第-5-步节点登记确认--探活">5.5 第 5 步：节点登记确认 + 探活</h3>
+<p>装完后到 <strong>节点</strong> 页签确认节点从"已登记"变成 <code>ADDED / 健康</code>，然后到 <strong>配置</strong> 页签点 <code>探活</code>（FUNC-26）。</p>
+<figure><img src="labk8s-shots/clc-03-node.png" alt="集群中心 节点页签：分组视图与节点行"/><figcaption>集群中心 节点页签：分组视图与节点行</figcaption></figure>
+<p><strong>必须理解的规则（R-08 / REF-03 / REF-11）</strong>：健康态转换要<strong>连续 3 次</strong>同向探活才翻转（防抖）。所以刚装完时集群是 <code>UNKNOWN</code>，需要连点 3 次探活才会变 <code>HEALTHY</code>——这不是 bug，是防抖动设计。本次正是 3 次人工探活（<code>PRB-20261012-0001/0002/0003</code>）把 LABK8S 从 <code>UNKNOWN</code> 推到 <code>HEALTHY</code>。</p>
+<p>探活记录字段：<code>apiserver_reachable</code>、<code>tls_handshake_ok</code>、<code>ready_nodes</code>、<code>total_nodes</code>、<code>probe_result</code>；失败时 <code>fail_reason</code> 必填（INV-34）。</p>
+<h3 id="56-交付完成后你会得到">5.6 交付完成后你会得到</h3>
+<table>
+<thead><tr>
+<th>项</th>
+<th>值</th>
+</tr></thead>
+<tbody>
+<tr><td>主控入口</td><td><code>https://api.opic-lab.ccoe.tech:6443</code>（台账 <code>master_endpoints</code>）</td></tr>
+<tr><td>凭据存放标识</td><td><code>vault://opic/clc/CLU-20261011-0001/kubeconfig</code>（<strong>只登记标识，内容不入库</strong>，INV-07/INV-08）</td></tr>
+<tr><td>kubeconfig 实际位置</td><td>执行位上 <code>/etc/kubeasz/clusters/CLU-20261011-0001/kubectl.kubeconfig</code></td></tr>
+<tr><td>集群内访问</td><td><code>headlamp.opic-lab.ccoe.tech</code>（NodePort 31800）、<code>console.opic-lab.ccoe.tech</code>（higress-console NodePort 31299）</td></tr>
+<tr><td>业务入口</td><td>higress-gateway NodePort <code>30238</code>(80) / <code>32231</code>(443)</td></tr>
+</tbody>
+</table>
+<blockquote>注意 kubeconfig 里的 <code>server</code> 默认是 IP（<code>https://192.168.3.165:6443</code>）。要用域名访问，显式覆盖：<br/><code>SERVER=https://api.opic-lab.ccoe.tech:6443 kubectl --kubeconfig=&lt;...&gt; get --raw=/version</code></blockquote>
+<hr/>
+<h2 id="6-交付验收逐项对账">6. 交付验收逐项对账</h2>
+<h3 id="61-组件版本对账1212-一致">6.1 组件版本对账（12/12 一致）</h3>
+<table>
+<thead><tr>
+<th>任务书要求</th>
+<th>实测（采集于 2026-10-12）</th>
+<th>证据来源</th>
+<th>结论</th>
+</tr></thead>
+<tbody>
+<tr><td>k8s v1.36.3</td><td><code>v1.36.3</code></td><td><code>kubectl get node</code>、<code>kubectl version</code>（client+server）</td><td>✅</td></tr>
+<tr><td>etcd v3.7.1</td><td><code>etcd Version: 3.7.1</code>；<code>endpoint health</code> 4.8ms 健康</td><td>节点 <code>/opt/kube/bin/etcd --version</code></td><td>✅</td></tr>
+<tr><td>containerd 2.3.3</td><td><strong>运行中的 daemon = v2.3.3</strong>（<code>/opt/kube/bin/containerd-bin/containerd</code>；kubelet 上报 <code>containerd://2.3.3</code>）</td><td>systemd <code>ExecStart</code> 指向的二进制 + <code>node.status.nodeInfo.containerRuntimeVersion</code></td><td>✅（⚠️ 测量口径见 12.4）</td></tr>
+<tr><td>runc v1.5.1</td><td><code>runc version 1.5.1</code></td><td>节点 <code>runc --version</code></td><td>✅</td></tr>
+<tr><td>cni v1.9.1</td><td><code>CNI bridge plugin v1.9.1</code></td><td>节点 <code>/opt/cni/bin/bridge --version</code></td><td>✅</td></tr>
+<tr><td>coredns 1.14.6</td><td><code>easzlab.io.local:5000/easzlab/coredns:1.14.6</code></td><td>Pod spec</td><td>✅</td></tr>
+<tr><td>pause 3.10.2</td><td><code>sandbox = 'harbor.cic.ccoe.tech:18700/easzlab/pause:3.10.2'</code></td><td>节点 <code>/etc/containerd/config.toml</code></td><td>✅</td></tr>
+<tr><td>headlamp 0.43.0</td><td><code>easzlab/headlamp:v0.43.0</code></td><td>Pod spec</td><td>✅</td></tr>
+<tr><td>higress 2.2.3</td><td>chart 2.2.3 + 镜像 <code>higress/{higress,pilot,gateway,console}:2.2.3</code></td><td>helm release + Pod spec</td><td>✅</td></tr>
+<tr><td>cilium 1.17.4</td><td><code>Client: 1.17.4</code> / <code>Daemon: 1.17.4</code></td><td><code>cilium-agent</code> 容器内 <code>cilium version</code></td><td>✅</td></tr>
+<tr><td>node-problem-detector v1.35.3</td><td>镜像 <code>easzlab/node-problem-detector:v1.35.3</code></td><td>Pod spec（⚠️ chart 元数据 <code>appVersion</code> 显示 v1.35.1，属上游元数据陈旧，见 11.4）</td><td>✅</td></tr>
+<tr><td>kube-prometheus-stack 88.1.5</td><td>chart <code>88.1.5</code></td><td>helm release</td><td>✅</td></tr>
+</tbody>
+</table>
+<h3 id="62-网络与域名对账">6.2 网络与域名对账</h3>
+<table>
+<thead><tr>
+<th>口径</th>
+<th>要求</th>
+<th>配置层证据</th>
+<th>运行时证据</th>
+<th>结论</th>
+</tr></thead>
+<tbody>
+<tr><td>Service 网段</td><td><code>10.39.0.0/16</code></td><td><code>hosts: SERVICE_CIDR</code></td><td>apiserver/kcm 参数 <code>--service-cluster-ip-range=10.39.0.0/16</code>；实际 ClusterIP <code>10.39.0.1/10.39.0.2/10.39.91.117…</code></td><td>✅</td></tr>
+<tr><td>Pod 网段</td><td><code>172.38.0.0/16</code></td><td><code>hosts: CLUSTER_CIDR</code></td><td>kcm <code>--cluster-cidr=172.38.0.0/16 --node-cidr-mask-size=24</code>；节点 <code>podCIDR=172.38.0.0/24</code>；Pod IP <code>172.38.0.x</code></td><td>✅</td></tr>
+<tr><td>集群 DNS 后缀</td><td><code>opic-lab.ccoe.tech</code></td><td><code>hosts: CLUSTER_DNS_DOMAIN</code></td><td>svc FQDN 后缀 <code>…svc.opic-lab.ccoe.tech</code> 出现在 apiserver 证书 SAN</td><td>✅</td></tr>
+<tr><td>外部域名</td><td><code>*.opic-lab.ccoe.tech</code></td><td><code>MASTER_CERT_HOSTS</code> 含 <code>api.opic-lab.ccoe.tech</code></td><td>DNS 解析到 <code>192.168.3.165</code>；<code>openssl s_client</code> SAN 含该 DNS 名；带凭据 <code>kubectl --server=https://api.opic-lab.ccoe.tech:6443 get --raw=/version</code> 返回 <code>v1.36.3</code></td><td>✅</td></tr>
+</tbody>
+</table>
+<h3 id="63-集群健康对账">6.3 集群健康对账</h3>
+<table>
+<thead><tr>
+<th>指标</th>
+<th>实测</th>
+</tr></thead>
+<tbody>
+<tr><td>节点</td><td><code>clu-20261011-0001-192-168-3-165 Ready master 171m v1.36.3</code>（1/1 Ready）</td></tr>
+<tr><td>Pod</td><td>全集群 16 个 Pod，<strong>16 个 Running</strong>，无未就绪</td></tr>
+<tr><td>监控</td><td>Prometheus <code>targets=17 up=17</code>（apiserver/kubelet×3/etcd/coredns/kube-proxy/scheduler/controller-manager/kube-state-metrics/node-exporter/grafana/alertmanager×2/operator/prometheus）</td></tr>
+<tr><td>DaemonSet</td><td><code>cilium 1/1</code>、<code>node-local-dns 1/1</code>、<code>node-problem-detector 1/1</code>、<code>prometheus-node-exporter 1/1</code></td></tr>
+<tr><td>台账</td><td>CLC：<code>RUNNING / HEALTHY</code>，最后探活 <code>2026-10-12 02:32:50</code>；IGN：最近一次交付 <code>完成 TSK-20261012-0007</code>，<code>未决偏差 0</code></td></tr>
+</tbody>
+</table>
+<h3 id="64-验收复核命令管理员直接抄">6.4 验收复核命令（管理员直接抄）</h3>
+<pre><code># 在 192.168.3.200 上执行；务必显式指定 kubeconfig，否则会落到别的上下文
+export KUBECONFIG=/etc/kubeasz/clusters/CLU-20261011-0001/kubectl.kubeconfig
+export NO_PROXY="*"            # 见 12.1：3.200 有全局代理，域名访问会被代理拒
+kubectl get node -o wide
+kubectl get pods -A --no-headers | awk '$4!="Running"'      # 期望：无输出
+kubectl get pods -A -o json | python3 -c "import json,sys;d=json.load(sys.stdin);print(*sorted({c['image'] for p in d['items'] for c in p['spec']['containers']}),sep='\n')"
+kubectl get --raw "/api/v1/namespaces/monitor/services/http:prometheus-operated:9090/proxy/api/v1/targets" \
+  | python3 -c "import json,sys;d=json.load(sys.stdin)['data']['activeTargets'];print('targets',len(d),'up',sum(t['health']=='up' for t in d))"
+
+# 节点侧版本（etcd/kubelet/cni 二进制在 /opt/kube/bin，不在 PATH）
+ssh root@192.168.3.165 '/opt/kube/bin/etcd --version | head -1; runc --version | head -1; /opt/cni/bin/bridge --version'
+# containerd：看 systemd 真正用的那个二进制，别看 PATH
+ssh root@192.168.3.165 'systemctl show -p ExecStart --value containerd; /opt/kube/bin/containerd-bin/containerd --version | head -1'</code></pre>
+<hr/>
+<h2 id="7-本次交付的三个定制点">7. 本次交付的三个定制点</h2>
+<p>kubeasz 的官方个性化点是<strong>角色模板</strong>（<code>roles/&lt;role&gt;/templates/**.j2</code>）。改模板前先留 <code>.orig-bak</code> 备份，改完在 <code>/etc/kubeasz</code> 里 <code>git diff</code> 一目了然：</p>
+<pre><code> M roles/cluster-addon/templates/higress/values.yaml.j2
+ M roles/cluster-addon/templates/prometheus/values.yaml.j2
+ M roles/containerd/templates/easzlab.io.local_5000/hosts.toml.j2</code></pre>
+<h3 id="71-higress关掉-hostnetwork改用-nodeport">7.1 higress：关掉 hostNetwork，改用 NodePort</h3>
+<p><strong>症状</strong>：07 步跑完，<code>higress-gateway</code> 起不来。 <strong>根因</strong>：<code>192.168.3.165</code> 是<strong>共享主机</strong>，<code>80/443</code> 已被他人容器占用（<code>ss -lntp</code> 显示 <code>docker-proxy</code>）。kubeasz 默认让 higress-gateway 用 <code>hostNetwork: true</code> 直接占主机端口。 <strong>改法</strong>（官方个性化点，不改代码逻辑）：</p>
+<pre><code> higress-core:
+   gateway:
+     replicas: 1
+-    hostNetwork: true
++    hostNetwork: false
+     nodeSelector:
+       ingress-controller/provider: higress
+     service:
+-      type: ClusterIP
++      type: NodePort</code></pre>
+<p><strong>结果</strong>：<code>higress-gateway</code> 走 Pod 网络 + NodePort <code>30238/32231</code>，<code>1/1 Running</code>；对外访问用 NodePort 或把域名反代到该端口。 <strong>别忘了</strong>：gateway 有 <code>nodeSelector</code>，节点必须打标签，否则 Pending：</p>
+<pre><code>kubectl label node clu-20261011-0001-192-168-3-165 ingress-controller/provider=higress</code></pre>
+<h3 id="72-higress-console镜像显式走内网仓库">7.2 higress-console：镜像显式走内网仓库</h3>
+<p><strong>症状</strong>：console 镜像引用会落到公网 hub，节点取不到。 <strong>改法</strong>：</p>
+<pre><code> higress-console:
++  image:
++    repository: easzlab.io.local:5000/higress/console
++    tag: "2.2.3"
+   replicaCount: 1</code></pre>
+<p>引用坐标统一走 <code>easzlab.io.local:5000</code>（再由 7.3 的重定向落到 Harbor），集群里所有 addon 镜像都是同一口径：<code>cilium</code>、<code>prometheus</code>、<code>headlamp</code>、<code>node-problem-detector</code> 的 values 里 <code>registry/repository</code> 全部指向 <code>easzlab.io.local:5000</code>。</p>
+<h3 id="73-prometheus-node-exporter关掉-hostnetwork">7.3 prometheus-node-exporter：关掉 hostNetwork</h3>
+<p><strong>症状</strong>：node-exporter CrashLoop / 端口绑定失败。 <strong>根因</strong>：主机 <code>9100</code> 已被 ongrid 容器占用，而 node-exporter 默认 <code>hostNetwork: true</code> 要占 <code>9100</code>。 <strong>改法</strong>：</p>
+<pre><code> prometheus-node-exporter:
++  hostNetwork: false
+   image:
+     registry: easzlab.io.local:5000</code></pre>
+<p><strong>结果</strong>：<code>node-exporter</code> 用 Pod IP 提供指标，Prometheus 抓取正常（<code>node-exporter up</code>）。 <strong>代价（管理员需知）</strong>：非 hostNetwork 下 exporter 看到的是 Pod 网络视角，部分宿主网卡/文件系统指标语义会变；独占主机上建议改回 <code>hostNetwork: true</code> 或换端口。</p>
+<h3 id="74-改完模板后怎么让它生效">7.4 改完模板后怎么让它生效</h3>
+<p>模板只影响<strong>下一次渲染</strong>，所以要走第 9 章的重派流程（本次是删在位 Deployment + 重跑 07 步）。</p>
+<hr/>
+<h2 id="8-私有镜像仓库接管harbor-侧要做的事">8. 私有镜像仓库接管：Harbor 侧要做的事</h2>
+<p>任务书要求"私有镜像仓库使用 <code>http://harbor</code>"。本章是完整做法 + 本次踩到的 Harbor 存量缺陷。</p>
+<h3 id="81-目标形态">8.1 目标形态</h3>
+<pre><code>Pod spec 里的镜像引用（保持不变）      containerd certs.d 重定向            实际服务方
+easzlab.io.local:5000/cilium/cilium  ───────────────────────────▶  harbor.cic.ccoe.tech:18700/cilium/cilium
+easzlab.io.local:5000/easzlab/pause  （pause 直接写成 Harbor 地址）  harbor.cic.ccoe.tech:18700/easzlab/pause</code></pre>
+<p>好处：<strong>镜像引用不用改</strong>，只改取像路径；回退时把 <code>hosts.toml</code> 换回去即可。</p>
+<h3 id="82-把镜像装进-harbor本次用复制拉取不用-push">8.2 把镜像装进 Harbor（本次用"复制拉取"，不用 push）</h3>
+<p>Harbor 建好同名 project（<code>easzlab</code> / <code>cilium</code> / <code>higress</code> / <code>prometheus</code> / <code>flannel</code>，本次设为公开，节点可匿名 bearer-token 拉取），然后配一个从本地离线仓库 <code>:5000</code> <strong>拉取</strong>的复制策略 <code>lab-from-ign-mirror</code> 并触发 execution：</p>
+<pre><code>2026-10-12 01:55:05 ~ 01:55:22   execution 24  Succeed
+落库仓库数：easzlab 9 + cilium 2 + higress 4 + prometheus 7 (+ flannel 2) = 24 个仓库</code></pre>
+<p><strong>为什么用复制拉取而不是 push</strong>：本次 push 路径当时不可用（见 8.4 缺陷），而 Harbor 的"从源仓库 pull"能绕开写入鉴权链路，且不动别人的镜像。</p>
+<p>凭据使用纪律（<strong>新人务必照做</strong>）：Harbor 账号口令放在一个 root-only 的 curl 配置文件里（本次 <code>/tmp/harbor.cfg</code>，位于 3.200），只允许 <code>curl -K /tmp/harbor.cfg</code> 这种形式引用；<strong>绝不 <code>cat</code> 该文件</strong>、绝不把口令写进任何交付物/日志/命令行参数。</p>
+<h3 id="83-节点侧certsd-重定向--insecure-reg-的坑">8.3 节点侧：certs.d 重定向 + INSECURE_REG 的坑</h3>
+<p>改 kubeasz 的 containerd 角色模板，让离线仓库的取像路径指向 Harbor：</p>
+<pre><code> # roles/containerd/templates/easzlab.io.local_5000/hosts.toml.j2
+-server = "http://easzlab.io.local:5000"
++# 离线包暂存仓库(easzlab.io.local:5000)的取像路径改由内网 Harbor 承载：
++# 引用坐标保持不变，实际由 harbor.cic.ccoe.tech:18700 服务（同一 project/repo 路径）。
++server = "http://harbor.cic.ccoe.tech:18700"
+ 
+-[host."http://easzlab.io.local:5000"]
++[host."http://harbor.cic.ccoe.tech:18700"]
+   capabilities = ["pull", "resolve"]
+   skip_verify = true</code></pre>
+<p>落盘结果（节点上 <code>/etc/containerd/certs.d/easzlab.io.local:5000/hosts.toml</code>）与之一致；<code>/etc/hosts</code> 保留 <code>192.168.3.200 easzlab.io.local</code> 作为兜底。</p>
+<p><strong>⚠️ 关键坑（本次踩过，务必记住）</strong>：kubeasz 的 containerd 角色会按 <code>INSECURE_REG</code> 列表<strong>逐条回写</strong> <code>certs.d/&lt;host&gt;/hosts.toml</code>，最后一条会覆盖同名文件。如果 <code>INSECURE_REG</code> 里同时有 <code>easzlab.io.local:5000</code>，你手工改的重定向模板就会被<strong>冲掉</strong>回默认值。</p>
+<pre><code># config.yml —— 正确写法：只留 Harbor，不要加 easzlab
+INSECURE_REG:
+  - "http://harbor.cic.ccoe.tech:18700"</code></pre>
+<p>这也是为什么 <code>deploy_image_mirror</code>（REF-25，LIST 形态）在界面上要收敛成<strong>只填 Harbor 一项</strong>。</p>
+<p>改完 <code>config.yml</code> / 模板后，<strong>必须重跑 03 步</strong>（容器运行时）才会把 <code>certs.d</code> 重写；再重跑 07 步让 addons 从 Harbor 取镜像。本次即 <code>IGN → 交付任务 → 重派 03 → 重派 07</code>（见 9.3）。</p>
+<h3 id="84-harbor-存量缺陷与修复记录管理员案例">8.4 Harbor 存量缺陷与修复记录（管理员案例）</h3>
+<p><strong>症状</strong>：向 Harbor 推送/复制镜像一律失败（v2 写入路径报 400/401），但<strong>匿名拉取公开项目完全正常</strong>——很容易误判成"网络或权限问题"。</p>
+<p><strong>定位过程</strong>（全部只读排查）：</p>
+<ol><li><code>docker ps</code> 看 Harbor 组件全 <code>healthy</code>，<code>/api/v2.0/health</code> 也全绿 → 不是组件挂了。</li><li>看 registry 配置：<code>/opt/harbor/common/config/registry/config.yml</code>（Harbor 2.12 的 <code>registry</code> 容器把该目录挂到 <code>/etc/registry</code>）：</li></ol>
+<p>``<code>yaml auth: htpasswd: realm: harbor-registry-basic-realm path: /etc/registry/passwd </code>``</p>
+<p>即：registry 的写入鉴权依赖 <code>/etc/registry/passwd</code>。</p>
+<ol><li>进容器看这个路径 → <strong>容器里的 <code>/etc/registry</code> 是空的/旧的</strong>：宿主机上该配置目录在容器启动之后被重建过，容器的 bind mount 仍指向<strong>已删除的旧 inode</strong>（stale mount）。于是 registry 读不到当前 <code>passwd</code>，与 harbor-core 注入的 Basic 凭据<strong>失配</strong> → 所有 v2 写请求被拒。</li></ol>
+<p><strong>结论</strong>：这是 Harbor 实例的<strong>存量偏差</strong>，与本次交付动作无关；拉取不受影响是因为公开项目匿名 token 路径不经过这条 htpasswd 校验。</p>
+<p><strong>修复</strong>：根因修复 = 让 bind mount 重新解析 → <code>docker restart registry</code>（只重启 registry 一个容器，不动整个 Harbor、不重启 dockerd）。</p>
+<pre><code>registry 容器 StartedAt = 2026-10-11T17:52:36Z（本地 01:52:36），RestartCount=0
+重启后 01:55:05~01:55:22 复制 execution 24 成功装载 24 个仓库</code></pre>
+<p><strong>给管理员的两条经验</strong>：</p>
+<ul><li>判断"stale mount"的通用手法：<code>docker inspect &lt;c&gt; --format '{{range .Mounts}}{{.Source}} -&gt; {{.Destination}}{{end}}'</code> 拿到宿主源路径，比较宿主目录 <strong>ctime/inode</strong> 与容器启动时间；若宿主目录比容器新，八成是挂载陈旧。</li><li>重启共享组件前先确认：它当前<strong>已经是坏的</strong>（重启是修复而非碰运气）、影响面（只有 registry）、以及是否有他人在用。本次符合"根因修复"而非"走捷径重启共享设施"。</li></ul>
+<hr/>
+<h2 id="9-失败与重派单步重试--跳步--破门径重派">9. 失败与重派：单步重试 / 跳步 / 破门径重派</h2>
+<h3 id="91-单步重试最常用">9.1 单步重试（最常用）</h3>
+<p><strong>入口</strong>：CLC → 集群台 → 安装页签 → 失败步骤上的"重试本步"（FUNC-44），或 IGN → 交付任务 → 对该步重派 <code>ezctl.setup &lt;步&gt;</code>。</p>
+<p><strong>规则 INV-03</strong>：续跑安装时，<strong>上次已成功的步骤不会重跑</strong>，界面上显示 <code>本次跳过（上次已成功）</code>。本次最后一条成功任务 <code>TSK-20261012-0001</code> 的步骤行就是活教材：</p>
+<pre><code>1|01 环境准备（prepare）      SKIPPED   上次任务该步已成功（INV-03 不重跑）
+2|02 部署 etcd 集群           SKIPPED   同上
+3|03 部署容器运行时（runtime） SKIPPED   同上
+4|04 部署 K8s 控制面（master） SKIPPED   同上
+5|05 加入工作节点（worker）    SKIPPED   同上
+6|06 部署网络插件（network）   SUCCEEDED setup CLU-20261011-0001 06
+7|07 部署扩展组件（addons）    SUCCEEDED setup CLU-20261011-0001 07</code></pre>
+<h3 id="92-跳步func-45">9.2 跳步（FUNC-45）</h3>
+<p>某步确实不需要（例如插件已在别处装好），可在向导里跳步。<strong>慎用</strong>：跳过 03/06 这类基础步会让后续步骤在错误前提上运行。</p>
+<h3 id="93-破门径重派改完配置让已完成的步骤重跑">9.3 破门径重派（改完配置让已完成的步骤重跑）</h3>
+<p><strong>问题</strong>：INV-03 让"上次成功"的步骤不再重跑，但<strong>配置改了必须重跑</strong>（例如 8.3 改了 <code>certs.d</code> 模板、7.x 改了 values）。</p>
+<p><strong>口径</strong>（本次实际用过 5 次，全部成功）：</p>
+<ol><li>在 IGN 配置页确认覆写/模板已改好，<code>配置校验 dry-run</code> 通过；</li><li><strong>删掉在位的旧对象</strong>，让重跑的步骤有"可写"的落点：</li></ol>
+<p>``<code>bash # 例：改了 higress values 后，删在位 Deployment 让 07 步重建 kubectl -n higress-system delete deploy higress-gateway higress-console # 例：改了 node-exporter values 后 kubectl -n monitor delete ds prometheus-prometheus-node-exporter </code>``</p>
+<p>helm release 仍在位，所以 07 步会走 <code>upgrade</code>；删的是渲染产物，不是发布记录。</p>
+<ol><li>在 IGN 交付任务台对该步<strong>人工重派</strong>（本次 <code>ezctl.setup 03</code> 两次、<code>07</code> 三次，任务号 <code>TSK-20261012-0003 ~ 0007</code>，提交人 <code>admin</code>，全部 <code>COMPLETED</code>）；</li><li>回 CLC 配置页签点 <code>探活</code>，必要时连续 3 次让健康态翻转；</li><li>到 IGN 配置页确认 <code>未决偏差 0</code>。</li></ol>
+<p><strong>为什么界面上"应用追溯"还显示未应用</strong>：见 11.2（覆写无即时应用腿，属已知产品缺口，本次用"派生值前移"手工闭合）。</p>
+<h3 id="94-本次真实失败与修复对照新人最该看的一节">9.4 本次真实失败与修复对照（新人最该看的一节）</h3>
+<table>
+<thead><tr>
+<th>失败点</th>
+<th>现象</th>
+<th>根因</th>
+<th>修复</th>
+<th>复跑结果</th>
+</tr></thead>
+<tbody>
+<tr><td>04 步（首次）</td><td>控制面组件访问 apiserver <code>Forbidden</code></td><td>3.200 全局代理 <code>NO_PROXY</code> 不含 <code>*.opic-lab.ccoe.tech</code>，域名流量被代理劫持</td><td>访问侧显式 <code>NO_PROXY="<em>"</code> / <code>--noproxy '</em>'</code>；域名口径本身正确</td><td>04 步 71s 成功</td></tr>
+<tr><td>06 步（首次）</td><td>cilium 镜像取不到</td><td>离线仓库 catalog 缺 cilium 相关仓库</td><td>补齐 <code>cilium/{cilium,operator-generic}</code> 到镜像源</td><td>06 步 25s 成功</td></tr>
+<tr><td>07 步（首次）</td><td>gateway / node-exporter 起不来</td><td>共享主机 <code>80/443/9100</code> 被他人容器占用</td><td>7.1 / 7.3 两个定制点 + 9.3 破门径重派</td><td>07 步 47s 成功，后续 3 次重派均成功</td></tr>
+<tr><td>切 Harbor 后</td><td>节点仍从 <code>:5000</code> 取像</td><td><code>INSECURE_REG</code> 含 easzlab 时会回写并覆盖 <code>hosts.toml</code></td><td><code>INSECURE_REG</code> 只留 Harbor + 重跑 03/07</td><td>未缓存镜像实测由 Harbor 服务</td></tr>
+</tbody>
+</table>
+<hr/>
+<h2 id="10-日常运维-sop">10. 日常运维 SOP</h2>
+<table>
+<thead><tr>
+<th>频次</th>
+<th>动作</th>
+<th>界面入口</th>
+<th>判据</th>
+</tr></thead>
+<tbody>
+<tr><td>每日</td><td>集群探活</td><td>CLC → 集群台 → 配置 → <code>探活</code></td><td><code>apiserver_reachable=1</code>、<code>tls_handshake_ok=1</code>、<code>ready_nodes=total_nodes</code></td></tr>
+<tr><td>每日</td><td>看健康聚合</td><td>CLC → 运行观测（<code>GET /api/clc/health/aggregate</code>）</td><td>无 <code>DEGRADED</code>/<code>UNHEALTHY</code></td></tr>
+<tr><td>每日</td><td>看未决偏差</td><td>IGN → 集群交付台顶部徽标</td><td><code>未决偏差 0</code></td></tr>
+<tr><td>每周</td><td>节点/组件盘点</td><td>CLC → 节点页签（分组视图）+ <code>kubectl get pods -A</code></td><td>无 <code>ADDED</code> 之外的悬挂节点；无非 Running Pod</td></tr>
+<tr><td>变更</td><td>改配置 → 重派</td><td>IGN 配置页覆写 → 9.3 破门径重派</td><td>任务 <code>COMPLETED</code>、<code>dry-run</code> 通过</td></tr>
+<tr><td>变更</td><td>证书临期</td><td>生命周期台"证书轮换"动作（FUNC-46 派发）</td><td>平台参数 <code>cert_renew_days=14</code> 提前量</td></tr>
+<tr><td>备份</td><td>集群 etcd 快照</td><td>生命周期台"备份"动作</td><td>快照落 <code>/etc/kubeasz/clusters/&lt;no&gt;/backup</code></td></tr>
+<tr><td>收尾</td><td>销毁集群</td><td>生命周期台"销毁"（<strong>强制不免审批</strong>，R-09/R-10/R-30）</td><td>台账 <code>DESTROYED</code>；失败可重新申请销毁</td></tr>
+</tbody>
+</table>
+<p><strong>健康态语义</strong>（别误读）：<code>UNKNOWN</code> = 还没探够次数；<code>HEALTHY</code> = 连续 3 次通过；<code>DEGRADED</code> = 部分不可用（探活不会覆盖它，INV-06）；<code>UNHEALTHY</code> = 连续 3 次失败。</p>
+<p><strong>目前没有定时探活</strong>：FUNC-26 是<strong>人工探活</strong>入口，健康态不会自己刷新（见 11.3）。巡检时"探活时间"落后就要手动点一次。</p>
+<hr/>
+<h2 id="11-已知偏差与产品缺口诚实披露">11. 已知偏差与产品缺口（诚实披露）</h2>
+<table>
+<thead><tr>
+<th>#</th>
+<th>现象</th>
+<th>影响</th>
+<th>本次怎么绕过</th>
+<th>建议</th>
+</tr></thead>
+<tbody>
+<tr><td>11.1</td><td>CLC 集群台账 <code>registry_ref</code> / <code>registry_project_ref</code> / <code>version_ref</code> 留空，配置页"镜像仓库实例/项目"显示 <code>- / -</code></td><td>聚合视图看不到仓库归属</td><td>取像口径统一放在 IGN 参数面（<code>deploy_image_mirror</code>）+ 节点 <code>certs.d</code></td><td>填这三列需要<strong>镜像仓库中心的真实实例引用</strong>；宁缺不假——不要为了界面好看填一个主机名字符串</td></tr>
+<tr><td>11.2</td><td><code>deploy_image_mirror</code> 覆写行的 <code>applied_task_no</code> 为空 → 界面显示"当前落盘 = harbor 值"但"应用追溯 = 未应用"</td><td>看起来矛盾，容易误判配置没生效</td><td>磁盘值是在安装族受理<strong>之外</strong>前移落盘的（人工重派 03/07），故无追溯号</td><td>产品缺口：<strong>覆写缺"即时应用腿"</strong>。需要"改一次配置就重放到在跑集群"的能力</td></tr>
+<tr><td>11.3</td><td>无定时探活（只有人工探活）</td><td>健康态可能长期停留在旧值</td><td>每日巡检手动探活</td><td>建议加平台级定时探活任务</td></tr>
+<tr><td>11.4</td><td>node-problem-detector chart 的 <code>appVersion</code> 元数据写 <code>v1.35.1</code>，实际镜像 <code>v1.35.3</code></td><td>只看 helm 元数据会误判版本不符</td><td>以 <strong>Pod spec 镜像 tag</strong> 为验收依据</td><td>上游 chart 元数据陈旧，反馈即可</td></tr>
+<tr><td>11.5</td><td>交付版本 <code>VER-20261006-0001</code> 状态为 <code>DRAFT</code></td><td>若启用"版本须可用"强校验（REF-19）会拦住受理</td><td>本次装机在该状态下完成</td><td>正式环境请把版本置为可用态再交付</td></tr>
+<tr><td>11.6</td><td>kube-proxy 在 kubeasz 是 <strong>systemd 单元</strong>，不是 DaemonSet；k8s 1.36 节点 <code>kubeProxyVersion</code> 字段为空</td><td>用 <code>kubectl get ds -A</code> 找不到 kube-proxy 会以为没装</td><td>查 <code>systemctl status kube-proxy</code> 与 Prometheus <code>kube-proxy</code> target（本次 <code>up</code>）</td><td>写巡检脚本时别按 DaemonSet 假设</td></tr>
+</tbody>
+</table>
+<hr/>
+<h2 id="12-常见坑速查">12. 常见坑速查</h2>
+<h3 id="121-开发测试环境的全局代理会劫持域名">12.1 开发测试环境的全局代理会劫持域名</h3>
+<p>3.200 环境有海外出口代理：</p>
+<pre><code>https_proxy=http://10.26.8.196:3228
+NO_PROXY=localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,.opic-ai.ccoe.tech,.svc,.cluster.local</code></pre>
+<p><code>NO_PROXY</code> 里<strong>没有</strong> <code><em>.opic-lab.ccoe.tech</code>，于是 <code>curl https://api.opic-lab.ccoe.tech:6443</code> 得到 <code>CONNECT tunnel failed, response 403</code>、<code>kubectl</code> 得到 <code>Unable to connect to the server: Forbidden</code>。 <strong>这是环境事实，不是集群缺陷。</strong> 处置：<code>export NO_PROXY="</em>"</code>（或 <code>--noproxy '*'</code>、把域名加进 <code>NO_PROXY</code>）。</p>
+<h3 id="122-必须显式指定-kubeconfig">12.2 必须显式指定 kubeconfig</h3>
+<p><code>/etc/kubeasz/clusters/CLU-20261011-0001/kubectl.kubeconfig</code> <strong>只存在于 3.200</strong>。在 165 上用这个路径不会报错、会静默回落到别处上下文。多集群环境请始终 <code>export KUBECONFIG=&lt;完整路径&gt;</code>。</p>
+<h3 id="123-工具不在-path">12.3 工具不在 PATH</h3>
+<table>
+<thead><tr>
+<th>工具</th>
+<th>实际路径</th>
+<th>位置</th>
+</tr></thead>
+<tbody>
+<tr><td><code>etcdctl</code> / <code>etcd</code> / <code>kubelet</code> / <code>kubectl</code></td><td><code>/opt/kube/bin/</code></td><td>节点 165</td></tr>
+<tr><td><code>helm</code></td><td><code>/etc/kubeasz/bin/helm</code></td><td>执行位 3.200</td></tr>
+<tr><td><code>ezctl</code></td><td><code>/etc/kubeasz/ezctl</code></td><td>执行位 3.200</td></tr>
+</tbody>
+</table>
+<h3 id="124-containerd-版本要用真正在跑的那个二进制测">12.4 containerd 版本要用"真正在跑的那个二进制"测</h3>
+<pre><code>containerd --version                        → v2.3.6   ← PATH 上的发行版二进制，k8s 没用它
+systemctl show -p ExecStart --value containerd → /opt/kube/bin/containerd-bin/containerd
+/opt/kube/bin/containerd-bin/containerd --version → v2.3.3   ← 正确
+kubectl get node -o jsonpath='{...containerRuntimeVersion}' → containerd://2.3.3  ← 最权威</code></pre>
+<h3 id="125-etcd-健康检查别连-localhost">12.5 etcd 健康检查别连 localhost</h3>
+<p>etcd 的 <code>127.0.0.1:2379</code> 监听是<strong>明文</strong>，用 https 连会报 <code>unhealthy / context deadline exceeded</code>。正确：</p>
+<pre><code>/opt/kube/bin/etcdctl --endpoints=https://192.168.3.165:2379 \
+  --cacert=/etc/kubernetes/ssl/ca.pem --cert=/etc/kubernetes/ssl/etcd.pem --key=/etc/kubernetes/ssl/etcd-key.pem \
+  endpoint health          # → healthy: successfully committed proposal: took = 4.8ms</code></pre>
+<h3 id="126-节点重装后-ssh-主机指纹变了">12.6 节点重装后 SSH 主机指纹变了</h3>
+<p><code>REMOTE HOST IDENTIFICATION HAS CHANGED</code> → 内层 ssh 加 <code>-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null</code>（本次装机过程中 165 的主机密钥被重建）。</p>
+<h3 id="127-harbor-匿名-head-返回-401-是正常的">12.7 Harbor 匿名 HEAD 返回 401 是正常的</h3>
+<p>Harbor 的 token 认证会先回 <code>401 + WWW-Authenticate</code> 挑战。判断"能不能拉"要走完整 token 流程（<code>page.fetch</code> / <code>curl -K &lt;cfg&gt;</code>），别把 HEAD 401 当故障。</p>
+<h3 id="128-数据库排查连接方式与列名">12.8 数据库排查：连接方式与列名</h3>
+<ul><li>PG 在 3.200 <strong>宿主 :5433</strong> 监听（不是容器内 socket），连接参数从 <code>opic-clc-app</code> / <code>opic-ign-app</code> 容器 env 读；</li><li>必须 <strong>schema 限定</strong>表名（<code>clc.clc_cluster</code>、<code>ign.exec_task</code>），<code>search_path</code> 没设；</li><li>时间列多为 <code>text</code>（<code>to_char</code> 存），别再套 <code>to_char(col,'...')</code>；</li><li>关联列叫 <code>cluster_ref</code>（值形如 <code>CLU-20261011-0001</code> 或数字 id），不是 <code>cluster_no</code>；</li><li>口令只从 env 读、只用于连接，<strong>绝不打印</strong>（白名单脱敏要整键匹配，<code>PASS|SECRET</code> 挡不住 <code>DB_PASSWORD</code>）。</li></ul>
+<hr/>
+<h2 id="附录-a本次交付的台账数据快照">附录 A：本次交付的台账数据快照</h2>
+<h3 id="a1-集群中心schema-clc">A.1 集群中心（schema <code>clc</code>）</h3>
+<p><strong>集群</strong> <code>clc.clc_cluster</code>：</p>
+<pre><code>id=55 | cluster_no=CLU-20261011-0001 | name=LABK8S | status=RUNNING | health=HEALTHY
+master_endpoints=https://api.opic-lab.ccoe.tech:6443
+kubeconfig_ref=vault://opic/clc/CLU-20261011-0001/kubeconfig
+cluster_dns_domain=opic-lab.ccoe.tech | run_mode=MCC | install_step_index=NULL（已清空=装完）
+version_ref=(空) | registry_ref=(空) | registry_project_ref=(空)      ← 见 11.1
+created_at=2026-10-11 20:58:02 | last_probe_at=2026-10-12 02:32:50</code></pre>
+<p><strong>任务</strong> <code>clc.clc_task</code>（执行路径全部 <code>REMOTE_EXECUTOR</code>，<code>remote_task_ref</code> 指向 IGN 任务）：</p>
+<table>
+<thead><tr>
+<th>任务号</th>
+<th>类别</th>
+<th>状态</th>
+<th>失败原因</th>
+<th>失败步骤</th>
+<th>远端任务</th>
+<th>起止</th>
+</tr></thead>
+<tbody>
+<tr><td>TSK-20261011-0001</td><td>加节点</td><td>FAILED</td><td>STEP_FAILED</td><td>1</td><td>-</td><td>10-11 21:01:07</td></tr>
+<tr><td>TSK-20261011-0002</td><td>安装</td><td>FAILED</td><td>STEP_FAILED</td><td>4</td><td>TSK-20261011-0004</td><td>10-11 21:04:45 → 23:35:08</td></tr>
+<tr><td>TSK-20261011-0003</td><td>续跑安装</td><td>FAILED</td><td>STEP_FAILED</td><td>6</td><td>TSK-20261011-0007</td><td>10-11 23:47:14 → 23:52:06</td></tr>
+<tr><td>TSK-20261012-0001</td><td>续跑安装</td><td><strong>SUCCEEDED</strong></td><td>-</td><td>-</td><td>TSK-20261012-0002</td><td>10-12 00:26:00 → 00:29:28</td></tr>
+</tbody>
+</table>
+<p><strong>节点</strong> <code>clc.clc_cluster_node</code>：</p>
+<pre><code>NOD-20261011-0001 | MASTER | 192.168.3.165 | clu-20261011-0001-192-168-3-165 | ADDED | HEALTHY（2026-10-12 00:29:28）</code></pre>
+<p><strong>探活</strong> <code>clc.clc_probe</code>：</p>
+<pre><code>PRB-20261012-0001 | 02:31:54 | MANUAL | apiserver=1 tls=1 ready=1/1 | HEALTHY
+PRB-20261012-0002 | 02:32:50 | MANUAL | apiserver=1 tls=1 ready=1/1 | HEALTHY
+PRB-20261012-0003 | 02:32:50 | MANUAL | apiserver=1 tls=1 ready=1/1 | HEALTHY</code></pre>
+<p><strong>绑定</strong> <code>clc.clc_binding</code>：<code>BND-20261011-0001 | EXECUTOR | EXE-20261004-0001 | EXECUTOR_RUNTIME | IGNITION | MANUAL</code></p>
+<h3 id="a2-点火中心schema-ign">A.2 点火中心（schema <code>ign</code>）</h3>
+<p><strong>执行位</strong>：<code>EXE-20261004-0001 local-ignition | LOCAL 127.0.0.1:9709 | READY | 能力 DEPLOY,SKOPEO,BACKUP,PREFLIGHT,OFFLINE</code> <strong>交付版本</strong>：<code>VER-20261006-0001 kubeasz-3.7.0-k8s-1.36.3</code>（tool 3.7.0，包内默认 CNI 为 flannel，故 CNI 走覆写切 cilium）</p>
+<p><strong>执行任务台账</strong> <code>ign.exec_task</code>（本集群 14 条，动作均为 <code>ezctl.setup</code>，结论依据 <code>PLAY_RECAP</code>）：</p>
+<table>
+<thead><tr>
+<th>任务号</th>
+<th>步</th>
+<th>状态</th>
+<th>耗时</th>
+<th>提交人</th>
+<th>来源任务</th>
+</tr></thead>
+<tbody>
+<tr><td>TSK-20261011-0001</td><td>01</td><td>COMPLETED</td><td>58s</td><td>ignition-agent</td><td>TSK-20261011-0002</td></tr>
+<tr><td>TSK-20261011-0002</td><td>02</td><td>COMPLETED</td><td>13s</td><td>ignition-agent</td><td>同上</td></tr>
+<tr><td>TSK-20261011-0003</td><td>03</td><td>COMPLETED</td><td>19s</td><td>ignition-agent</td><td>同上</td></tr>
+<tr><td>TSK-20261011-0004</td><td>04</td><td><strong>FAILED</strong></td><td>17s</td><td>ignition-agent</td><td>同上</td></tr>
+<tr><td>TSK-20261011-0005</td><td>04</td><td>COMPLETED</td><td>71s</td><td>ignition-agent</td><td>TSK-20261011-0003</td></tr>
+<tr><td>TSK-20261011-0006</td><td>05</td><td>COMPLETED</td><td>4s</td><td>ignition-agent</td><td>TSK-20261011-0003</td></tr>
+<tr><td>TSK-20261011-0007</td><td>06</td><td><strong>FAILED</strong></td><td>7s</td><td>ignition-agent</td><td>TSK-20261011-0003</td></tr>
+<tr><td>TSK-20261012-0001</td><td>06</td><td>COMPLETED</td><td>25s</td><td>ignition-agent</td><td>TSK-20261012-0001</td></tr>
+<tr><td>TSK-20261012-0002</td><td>07</td><td>COMPLETED</td><td>47s</td><td>ignition-agent</td><td>TSK-20261012-0001</td></tr>
+<tr><td>TSK-20261012-0003</td><td>07</td><td>COMPLETED</td><td>7s</td><td><strong>admin（人工重派）</strong></td><td>-</td></tr>
+<tr><td>TSK-20261012-0004</td><td>07</td><td>COMPLETED</td><td>27s</td><td>admin</td><td>-</td></tr>
+<tr><td>TSK-20261012-0005</td><td>03</td><td>COMPLETED</td><td>11s</td><td>admin</td><td>-</td></tr>
+<tr><td>TSK-20261012-0006</td><td>03</td><td>COMPLETED</td><td>11s</td><td>admin</td><td>-</td></tr>
+<tr><td>TSK-20261012-0007</td><td>07</td><td>COMPLETED</td><td>11s</td><td>admin</td><td>-</td></tr>
+</tbody>
+</table>
+<p><strong>覆写台账</strong> <code>ign.ign_cluster_config_override</code>：5 行，<code>override_status=EFFECTIVE</code>；4 行 HOSTS 面已带 <code>applied_task_no=TSK-20261012-0002</code>，CONFIG 面 <code>deploy_image_mirror</code> 的 <code>applied_task_no</code> 为空（见 11.2）。</p>
+<hr/>
+<h2 id="附录-b完整时间线">附录 B：完整时间线</h2>
+<table>
+<thead><tr>
+<th>时间（本地）</th>
+<th>事件</th>
+</tr></thead>
+<tbody>
+<tr><td>10-11 20:58</td><td>CLC 创建 LABK8S 台账（<code>id=55</code>）</td></tr>
+<tr><td>10-11 21:01</td><td>加节点任务失败（步骤 1，前置不足）</td></tr>
+<tr><td>10-11 21:04</td><td>安装族首次受理，01/02/03 连跑成功</td></tr>
+<tr><td>10-11 23:34</td><td>04 步失败（代理劫持域名）</td></tr>
+<tr><td>10-11 23:47</td><td>04 步重试成功、05 成功</td></tr>
+<tr><td>10-11 23:51</td><td>06 步失败（cilium 镜像缺）</td></tr>
+<tr><td>10-12 00:26</td><td>续跑安装 <code>TSK-20261012-0001</code>：06/07 成功，<strong>集群交付完成</strong></td></tr>
+<tr><td>10-12 00:29</td><td>节点转 <code>ADDED</code>，台账 <code>RUNNING</code></td></tr>
+<tr><td>10-12 01:05~02:13</td><td>私有仓库切 Harbor：填 Harbor 24 仓库、改 <code>certs.d</code> 模板、<code>INSECURE_REG</code> 收敛</td></tr>
+<tr><td>10-12 01:52</td><td>Harbor <code>registry</code> 容器重启（stale mount 根因修复）</td></tr>
+<tr><td>10-12 01:55</td><td>复制 execution 24 成功装载 24 仓库</td></tr>
+<tr><td>10-12 01:24~02:18</td><td>人工重派 5 次（07×3、03×2），端口冲突定制点生效</td></tr>
+<tr><td>10-12 02:31~02:32</td><td>连续 3 次人工探活 → 健康态 <code>UNKNOWN → HEALTHY</code></td></tr>
+<tr><td>10-12 02:34~02:40</td><td>界面取证（9 张截图）+ 全量实测对账（16 Pod / 17 target）</td></tr>
+</tbody>
+</table>
+<hr/>
+<h2 id="附录-c术语速查">附录 C：术语速查</h2>
+<table>
+<thead><tr>
+<th>术语</th>
+<th>含义</th>
+</tr></thead>
+<tbody>
+<tr><td><strong>集群中心 CLC</strong></td><td>集群台账与生命周期管理；<code>https://clc.opic-ai.ccoe.tech</code>，API 前缀 <code>/api/clc/...</code></td></tr>
+<tr><td><strong>点火中心 IGN</strong></td><td>交付执行与配置权威；<code>https://ign.opic-ai.ccoe.tech</code>，API 前缀 <code>/api/v1/ign/...</code></td></tr>
+<tr><td><strong>用户工作台</strong></td><td>业务界面（本手册全部用它）；<code>管理控制台</code> 是 <code>/admin/*</code>，另一套东西</td></tr>
+<tr><td><strong>集群台 / 集群交付台</strong></td><td>两个中心各自的"单集群详情页"，页签组织</td></tr>
+<tr><td><strong>执行位 / 执行机</strong></td><td>真正跑 <code>ezctl</code> 的机器（本次 <code>EXE-20261004-0001</code>）</td></tr>
+<tr><td><strong>交付版本</strong></td><td>组件版本目录（<code>VER-*</code>），决定第 2 层派生值</td></tr>
+<tr><td><strong>文件面</strong></td><td>配置落点的分类：<code>主机清单（hosts）</code> / <code>集群配置（config.yaml）</code></td></tr>
+<tr><td><strong>四层取值 R-20</strong></td><td>平台缺省面 → 交付版本派生 → 参数面模板 → 集群覆写</td></tr>
+<tr><td><strong>下次将生效 R-21</strong></td><td>覆写只影响下一次派发，不自动重跑已完成步骤</td></tr>
+<tr><td><strong>INV-03</strong></td><td>续跑时上次成功的步骤跳过</td></tr>
+<tr><td><strong>破门径重派</strong></td><td>删在位渲染产物 + 人工重派该步，让改后的配置落到在跑集群（9.3）</td></tr>
+<tr><td><strong>探活（FUNC-26）</strong></td><td>人工触发的 apiserver/TLS/节点就绪检查；连续 3 次同向才翻转健康态</td></tr>
+<tr><td><strong>凭据存放标识 INV-07/INV-08</strong></td><td>台账只存 <code>vault://...</code> 这类标识，凭据内容不进数据库</td></tr>
+<tr><td><strong>OPIC 统一响应</strong></td><td><code>{"returnInfo":{"returnCode":"SUC0000","errorMsg":""},"data":...}</code></td></tr>
+</tbody>
+</table>
+<hr/>
+<h3 id="交付物清单">交付物清单</h3>
+<table>
+<thead><tr>
+<th>文件</th>
+<th>说明</th>
+</tr></thead>
+<tbody>
+<tr><td><code>docs/LABK8S交付用户手册-2026-10-12.md</code></td><td>本手册（Markdown 源）</td></tr>
+<tr><td><code>docs/LABK8S交付用户手册-2026-10-12.html</code></td><td>本手册（可直接浏览器打开/打印）</td></tr>
+<tr><td><code>docs/labk8s-shots/*.png</code></td><td>9 张真实界面截图（统一 1440px 宽）</td></tr>
+</tbody>
+</table>
+</main></body></html>
