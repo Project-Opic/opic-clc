@@ -45,9 +45,10 @@ var sqlOnlyWhitelist = []string{"clc_platform_param"}
 var clcRealTables = []string{"clc_cluster", "clc_cluster_node", "clc_binding", "clc_param", "clc_snapshot", "clc_task", "clc_probe"}
 
 // sqlForbidden 只读边界:出现即拒绝(架构文档 §9.11)。
-var sqlForbidden = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|VACUUM|CALL|DO|MERGE|REPLACE|EXECUTE|SET|VACUUM|REINDEX|CLUSTER|LOCK|LISTEN|NOTIFY)\b`)
+var sqlForbidden = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|VACUUM|CALL|DO|MERGE|REPLACE|EXECUTE|SET|VACUUM|REINDEX|CLUSTER|LOCK|LISTEN|NOTIFY|INTO)\b`)
 
-var sqlFromJoinRe = regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)`)
+// sqlLocking 行锁子句:只读工具不允许在任何表上取锁(FOR UPDATE/SHARE 系列)。
+var sqlLocking = regexp.MustCompile(`(?i)\bFOR\s+(?:NO\s+KEY\s+|KEY\s+)?(?:UPDATE|SHARE)\b`)
 
 // ReadOnlySQLLimit 只读查询强制上限。
 const ReadOnlySQLLimit = 200
@@ -93,26 +94,19 @@ func RunReadOnlySQL(uid int64, username, raw string) (*AIQueryTable, string, err
 	if m := sqlForbidden.FindString(sqlText); m != "" {
 		return nil, "", Fail(errcode.ErrParam, "只读 SQL 工具禁止写操作(命中关键字 %s):写数据请通过固定业务页面执行", strings.ToUpper(m))
 	}
-	// 3) 表白名单(本体注册表 M1 表 + 平台参数表,全部为 add schema 本域表)
-	whitelist := WhitelistedTables()
-	for _, m := range sqlFromJoinRe.FindAllStringSubmatch(sqlText, -1) {
-		tbl := strings.ToLower(m[1])
-		if i := strings.LastIndex(tbl, "."); i >= 0 {
-			tbl = tbl[i+1:]
-		}
-		if tbl == "" || tbl == "select" || tbl == "(" {
-			continue
-		}
-		if _, ok := whitelist[tbl]; !ok {
-			return nil, "", Fail(errcode.ErrParam, "表 %s 不在只读白名单内(允许:%s)", m[1], strings.Join(mapKeys(whitelist), ", "))
-		}
+	if m := sqlLocking.FindString(sqlText); m != "" {
+		return nil, "", Fail(errcode.ErrParam, "只读 SQL 工具禁止行锁子句(%s)", strings.ToUpper(m))
+	}
+	// 3) 表白名单(fail-closed):词法级解析 FROM/JOIN 关系项并逐一比对(assistant_sqlguard.go)
+	if err := validateSQLTableRefs(sqlText, WhitelistedTables()); err != nil {
+		return nil, "", err
 	}
 	// 4) 强制 LIMIT
 	if !regexp.MustCompile(`(?i)\blimit\s+\d+\s*$`).MatchString(sqlText) {
 		sqlText += fmt.Sprintf(" LIMIT %d", ReadOnlySQLLimit)
 	}
-	// 5) 执行(只读)并审计
-	rows, err := qList(sqlText)
+	// 5) 执行(只读事务)并审计:即便词法过滤未来出现缺口,写语句也会被数据库拒绝
+	rows, err := qListReadOnly(sqlText)
 	WriteAudit(nil, uid, username, "AI_SQL_READONLY", fmt.Sprintf("只读 SQL 工具执行:%s(返回 %d 行)", sqlText, len(rows)))
 	if err != nil {
 		return nil, sqlText, Fail(errcode.ErrDB, "SQL 执行失败:%v", err)
@@ -521,4 +515,3 @@ func AssistantModelOptions() []AssistantModel {
 	}
 	return out
 }
-

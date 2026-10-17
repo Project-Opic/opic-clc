@@ -51,6 +51,11 @@ func SetupRoutes(r *gin.Engine) {
 		perm := func(code string, handler gin.HandlerFunc) []gin.HandlerFunc {
 			return []gin.HandlerFunc{middleware.RequirePermission(code), handler}
 		}
+		// audited 同 perm,并追加操作审计(用户/角色/权限/资源及其绑定等授予面写操作;
+		// 与 /api/admin 组的 OperationAudit 同源,失败请求不落审计)
+		audited := func(code string, handler gin.HandlerFunc) []gin.HandlerFunc {
+			return []gin.HandlerFunc{middleware.RequirePermission(code), middleware.OperationAudit(), handler}
+		}
 
 		// ---- 集群域业务(/api/clc/*;写操作按 m5 行为级权限挂载) ----
 		// 集群(AGG-CLC-01)
@@ -185,28 +190,28 @@ func SetupRoutes(r *gin.Engine) {
 		authed.GET("/resources/tree", system.ResourceTree)
 
 		// 用户管理
-		authed.POST("/users", perm("system:user:add", system.UserCreate)...)
-		authed.PUT("/users/:id", perm("system:user:edit", system.UserUpdate)...)
-		authed.DELETE("/users/:id", perm("system:user:delete", system.UserDelete)...)
-		authed.PUT("/users/:id/roles", perm("system:user:assign-role", system.UserAssignRoles)...)
-		authed.PUT("/users/:id/reset-pwd", perm("system:user:reset-pwd", system.UserResetPwd)...)
+		authed.POST("/users", audited("system:user:add", system.UserCreate)...)
+		authed.PUT("/users/:id", audited("system:user:edit", system.UserUpdate)...)
+		authed.DELETE("/users/:id", audited("system:user:delete", system.UserDelete)...)
+		authed.PUT("/users/:id/roles", audited("system:user:assign-role", system.UserAssignRoles)...)
+		authed.PUT("/users/:id/reset-pwd", audited("system:user:reset-pwd", system.UserResetPwd)...)
 
 		// 角色管理
-		authed.POST("/roles", perm("system:role:add", system.RoleCreate)...)
-		authed.PUT("/roles/:id", perm("system:role:edit", system.RoleUpdate)...)
-		authed.DELETE("/roles/:id", perm("system:role:delete", system.RoleDelete)...)
-		authed.PUT("/roles/:id/permissions", perm("system:role:assign", system.RoleAssignPermissions)...)
-		authed.PUT("/roles/:id/resources", perm("system:role:assign", system.RoleAssignResources)...)
+		authed.POST("/roles", audited("system:role:add", system.RoleCreate)...)
+		authed.PUT("/roles/:id", audited("system:role:edit", system.RoleUpdate)...)
+		authed.DELETE("/roles/:id", audited("system:role:delete", system.RoleDelete)...)
+		authed.PUT("/roles/:id/permissions", audited("system:role:assign", system.RoleAssignPermissions)...)
+		authed.PUT("/roles/:id/resources", audited("system:role:assign", system.RoleAssignResources)...)
 
 		// 权限管理
-		authed.POST("/permissions", perm("system:permission:add", system.PermissionCreate)...)
-		authed.PUT("/permissions/:id", perm("system:permission:edit", system.PermissionUpdate)...)
-		authed.DELETE("/permissions/:id", perm("system:permission:delete", system.PermissionDelete)...)
+		authed.POST("/permissions", audited("system:permission:add", system.PermissionCreate)...)
+		authed.PUT("/permissions/:id", audited("system:permission:edit", system.PermissionUpdate)...)
+		authed.DELETE("/permissions/:id", audited("system:permission:delete", system.PermissionDelete)...)
 
 		// 资源管理
-		authed.POST("/resources", perm("system:resource:add", system.ResourceCreate)...)
-		authed.PUT("/resources/:id", perm("system:resource:edit", system.ResourceUpdate)...)
-		authed.DELETE("/resources/:id", perm("system:resource:delete", system.ResourceDelete)...)
+		authed.POST("/resources", audited("system:resource:add", system.ResourceCreate)...)
+		authed.PUT("/resources/:id", audited("system:resource:edit", system.ResourceUpdate)...)
+		authed.DELETE("/resources/:id", audited("system:resource:delete", system.ResourceDelete)...)
 
 		// 流程管理写操作
 		authed.POST("/flow/definitions", perm("flow:definition:add", flow.DefinitionCreate)...)

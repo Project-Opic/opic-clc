@@ -54,6 +54,20 @@ func AsBizErr(err error) *BizErr {
 func qList(sql string, args ...any) ([]map[string]any, error) {
 	return store.List(store.DB, sql, args...)
 }
+
+// qListReadOnly 在只读事务内执行查询(只读 SQL 工具专用):SELECT INTO 等写形态由数据库兜底拒绝。
+func qListReadOnly(sql string, args ...any) ([]map[string]any, error) {
+	tx := store.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer tx.Rollback()
+	if err := tx.Exec("SET TRANSACTION READ ONLY").Error; err != nil {
+		return nil, err
+	}
+	return store.List(tx, sql, args...)
+}
+
 func qOne(sql string, args ...any) (map[string]any, error) {
 	return store.One(store.DB, sql, args...)
 }

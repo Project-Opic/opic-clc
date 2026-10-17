@@ -82,6 +82,21 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	// 来源地址可信性:限速与验证码来源绑定依赖 ClientIP;未显式声明可信代理时
+	// 只信任回环,直接暴露时忽略可伪造的 X-Forwarded-For。
+	trustedProxies := []string{"127.0.0.1", "::1"}
+	if v := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); v != "" {
+		trustedProxies = nil
+		for _, part := range strings.Split(v, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				trustedProxies = append(trustedProxies, p)
+			}
+		}
+	}
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		logger.Warnf("set trusted proxies failed, source headers ignored: %v", err)
+		_ = r.SetTrustedProxies(nil) // 配置非法时退化为不信任任何来源头(fail-closed)
+	}
 	r.Use(gin.Recovery())
 	r.Use(metrics.Middleware()) // HTTP 指标采集(请求计数/延迟直方图;须先于路由注册)
 	api.SetupRoutes(r)
@@ -91,7 +106,9 @@ func main() {
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "live"}) })
 	r.GET("/health/ready", func(c *gin.Context) {
 		if err := pingDB(); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not-ready", "error": err.Error()})
+			// 详情只进服务端日志,不回显给匿名调用方(避免泄露驱动/连接内部信息)
+			logger.Warnf("[health] db ping 失败: %v", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not-ready"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
@@ -99,7 +116,10 @@ func main() {
 	r.GET("/health/check", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "time": time.Now().Format(time.RFC3339)})
 	})
-	r.GET("/metrics", metrics.Handler())
+	// 指标面:关闭即不注册路由;开启时要求登录且具备管理权限,不对匿名调用方暴露运行时量与路由清单
+	if metrics.Enabled() {
+		r.GET("/metrics", middleware.LoginRequired(), middleware.RequirePermission("system:manage"), metrics.Handler())
+	}
 
 	addr := ":" + config.Config.App.Port
 	logger.Infof("%s(v3, center=%s) listening %s", config.Config.App.Name, config.Config.CenterCode, addr)

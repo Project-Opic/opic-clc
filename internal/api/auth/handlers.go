@@ -14,14 +14,23 @@ import (
 	"gitcode.com/opic-ontology/opic-techbase/pkg/token"
 )
 
-// Login 本地账号登录(local 模式)。须先通过图形验证码(安控加强)。
+// Login 本地账号登录(local 模式)。须先通过图形验证码(安控加强);
+// 失败按来源 IP 与账号双维计数,超限进入冷却期(见 login_guard.go)。
 func Login(c *gin.Context) {
 	body := common.BindJSON(c)
-	if !VerifyCaptcha(common.Trim(body["captcha_id"]), common.Trim(body["captcha_code"])) {
+	ip := c.ClientIP()
+	username := common.Trim(body["username"])
+	if loginGuarded(ip, username) {
+		service.WriteAudit(nil, 0, username, "LOGIN_FAIL", "失败次数过多,临时锁定;client_ip="+ip)
+		c.JSON(200, errcode.New(errcode.ErrLogin, "失败次数过多，请稍后再试", nil))
+		return
+	}
+	if !VerifyCaptcha(common.Trim(body["captcha_id"]), common.Trim(body["captcha_code"]), ip) {
+		loginFail(ip, username, false)
+		service.WriteAudit(nil, 0, username, "LOGIN_FAIL", "验证码错误或已过期;client_ip="+ip)
 		c.JSON(200, errcode.New(errcode.ErrLogin, "验证码错误或已过期", nil))
 		return
 	}
-	username := common.Trim(body["username"])
 	password := common.Trim(body["password"])
 	if username == "" || password == "" {
 		c.JSON(200, errcode.New(errcode.ErrLogin, "请输入用户名和密码", nil))
@@ -29,10 +38,13 @@ func Login(c *gin.Context) {
 	}
 	user, errMsg := service.Login(username, password)
 	if errMsg != "" {
+		loginFail(ip, username, true)
+		service.WriteAudit(nil, 0, username, "LOGIN_FAIL", "凭据校验失败;client_ip="+ip)
 		c.JSON(200, errcode.New(errcode.ErrLogin, errMsg, nil))
 		return
 	}
-	tk, err := auth.IssueLocalToken(service.Int(user["id"]), service.Str(user["username"]))
+	loginOK(username)
+	tk, err := auth.IssueLocalToken(service.Int(user["id"]), service.Str(user["username"]), service.Int(user["session_epoch"]))
 	if err != nil {
 		common.FailJSON(c, err)
 		return
