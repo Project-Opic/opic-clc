@@ -1,145 +1,270 @@
-# cluster-center-mcc —— OPIC 集群能力中心（O-CLC / CLC）
+# opic-clc
 
-OPIC 开放智能算力平台 **集群域能力中心**：基于 opic-techbase 脚手架（gopherforge 工程模式）与
-七模型本体（M1 对象 / M2 行为 / M3 规则 / M5 主体 / M6 流程 / M7 报表 / MU 界面，见 `models/`）
-全量落地的可运行 MCC（独立能力中心）。
+> 简体中文: [README-zh.md](README-zh.md)
 
-- **中心域码**：`clc`（隔离三件套：opicdb schema=clc、NATS 流=clc + 主题 `opic.clc.>`、Temporal 任务队列=clc）
-- **业务范围**：集群台账（四步向导创建 / 信息维护 / 显式恢复）、节点管理（添加 / 移除 / 重绑定、资产占用拦截）、
-  交付编排（安装 / 续跑 / 升级 / 备份 / 恢复 / 启停 / 销毁审批）、引用与参数（中心引用双写、参数派生与覆写保护、待同步确认）、
-  快照与回滚（序号单调、现存性校验、放弃引用回滚）、健康探活（双源口径、降级显式恢复）、运行观测与平台参数
-- **审批流**：集群销毁单级审批（`FLOW-PROC-APP-01`，CLC-ROLE-02 平台运维管理员审批，R-10 强制不免审批）
+[![License](https://img.shields.io/badge/License-MulanPSL--2.0-2E7D32)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](frontend/package.json)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](migrations)
 
-## 1. 技术选型
+[Documentation](#documentation) | [Architecture](#architecture) | [Usage](#usage) | [Deployment](#deployment) | [Roadmap](#roadmap) | [License](#license)
 
-| 层 | 选型 | 说明 |
+**opic-clc is the Cluster Capability Center (O-CLC / CLC) of the OPIC open intelligent compute platform**: a runnable capability center for the cluster domain, built on the [opic-techbase](https://github.com/Project-Opic/opic-techbase) scaffold (gopherforge engineering pattern) and the seven-model ontology. It manages the full cluster lifecycle — ledgers, nodes, delivery orchestration, references and parameters, snapshots and rollback, health probing, and operations observation.
+
+The center answers a recurring operations question: how do you keep a fleet of clusters truthful? Every state change carries its rule evidence (INV / R), every reference is dual-written, every snapshot sequence is monotonic and existence-checked, and every destroy passes a mandatory single-level approval. Delivery actions are handed to the ignition center (O-IGN) step by step through its facade.
+
+This repository contains the backend service (Gin), the console frontend (React + Ant Design), business migrations, ontology models (YAML), deployment manifests, and developer documentation.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [Onboarding](docs/ONBOARDING.md) | Background, architecture, environment, first run, development workflow |
+| [Build & Deployment](docs/DEPLOYMENT.md) | Build, production rollout, migration rollback, fork checklist |
+| [Operations](docs/OPERATIONS.md) | Health checks, monitoring and alerting, logging, backup, credentials, troubleshooting |
+| [FAQ](docs/FAQ.md) | Field notes on SSO, SQL, deployment, frontend, and AI |
+| [LABK8S Delivery Manual](docs/LABK8S交付用户手册-2026-10-12.md) | LABK8S delivery user manual (2026-10-12) |
+
+## Architecture
+
+opic-clc runs as two units that share a single `internal/service` business layer:
+
+- **`cluster-center-mcc`** — the primary backend. Gin serves the `/api/clc/*` REST surface (47 endpoints) plus `/health` and `/metrics` probes. On startup it runs goose migrations, imports M5 seeds (five roles / 32 permissions / menus / accounts) and the M6 approval flow, all idempotently.
+- **`frontend`** — a React SPA served by nginx, covering eight business screens, three workbench pages, and the right-hand persistent AI workspace.
+
+Request paths:
+
+- Browser → Traefik (`clc.<domain>`) → `/api`, `/health`, `/metrics` to `cluster-center-mcc`; everything else to `frontend`.
+- Cluster lifecycle actions → delivery facade of the ignition center (`IGNITION_BASE_URL`, Bearer `IGNITION_TOKEN`) → `POST /api/v1/ign/delivery/*`.
+
+Data plane: PostgreSQL 16 (business database, center schema `clc`; platform tables `sys_*` / `flow_*` / `audit_logs` / `sys_notice` / `temporalflow_*` / `ai_*` plus seven aggregate main tables and the platform-parameter table), Redis (token revocation blacklist, optional), NATS JetStream (stream `clc`, subject domain `opic.clc.>`, optional), and Temporal (task queue `clc`, optional).
+
+Every business response uses a uniform envelope — `{"returnInfo":{"returnCode","errorMsg"},"data":...}` with `SUC0000` on success, rule violations reported as `SYS1009` (ErrRule) with a Chinese reason, and permission denials as `SYS9103`.
+
+### Core Capabilities
+
+| Capability | What it does |
+|---|---|
+| **Cluster ledger** | Four-step wizard creation, information maintenance, and explicit recovery (AGG-CLC-01, FUNC-01/02/05/16/19/20/28/29; destroy approval linked) |
+| **Node management** | Add / remove / rebind nodes with asset-occupancy interception (AGG-CLC-02, FUNC-06/07/08/21, R-02) |
+| **Delivery orchestration** | Install / resume / upgrade / backup / restore / start-stop / destroy-approval tasks with failure write-back and success landing (AGG-CLC-06, FUNC-03/04/09~12/25, R-09/R-13) |
+| **References and parameters** | Center-reference dual-write, parameter derivation with overwrite protection, and pending-sync confirmation (AGG-CLC-03/04, FUNC-13/14/15/22/23, R-01/R-04) |
+| **Snapshots and rollback** | Monotonic sequence numbers, existence validation, and rollback that abandons references (AGG-CLC-05, FUNC-17/18/24, R-06) |
+| **Health probing** | Dual-source probing with threshold-based `UNREACHABLE` and explicit recovery from `DEGRADED` only (AGG-CLC-07, FUNC-26/27, R-08/R-11) |
+| **Operations observation** | Runtime statistics and platform parameters (FUNC-30, REF-01~12 configuration) |
+| **Destroy approval** | Cluster destroy single-level approval (`FLOW-PROC-APP-01`, CLC-ROLE-02 platform ops administrator, R-10 mandatory — no exemption) |
+| **AI workspace** | Ontology-registry injection plus a read-only SQL tool (SELECT/WITH only, whitelist, forced `LIMIT`, audited per query) |
+
+## How opic-clc Relates to Other Tools
+
+opic-clc is a **capability center**, not a replacement for a database, an identity provider, or a workflow engine. It inherits the opic-techbase engineering baseline and layers the cluster domain on top.
+
+| Layer | Tools | Relationship |
 |---|---|---|
-| 后端框架 | **Gin** | 组合根 `cmd/techbase/main.go`；中间件链 metrics → recovery → 路由 |
-| 数据库 | **PostgreSQL 16**（Pigsty 集群 haproxy :5433） | 库 `opicdb`，中心专属 schema `clc`；GORM 仅承担连接池与事务，数据访问为原生 SQL + map 行 |
-| 迁移 | **goose** | `migrations/000NNN_*.sql`；000004_business_clc.sql 为本域业务 DDL（七聚合主表 + 平台参数表），启动自动 Up |
-| 缓存/吊销 | **Redis 8**（可选） | 登出令牌 jti 黑名单；未启用时静默降级 |
-| 认证 | **ZITADEL** OIDC + 本地回退 | `mode=local` 图形验证码登录；自动 provisioning 兜底角色 CLC-ROLE-04 |
-| 授权 | Casbin RBAC 优先 → 拒则查 ZITADEL | 行为级权限 `PERM-FUNC-01..32`（m5 权限矩阵） |
-| 错误码 | OPIC O-ARC 统一错误码 | `SUC0000` 成功；规则违反统一 `SYS1009`（ErrRule）+ 中文原因；权限拒绝 `SYS9103` |
-| 事件总线 | NATS JetStream（inproc 降级） | 业务事件旁路发布 `opic.clc.business.*`；存量流幂等（取回并 UpdateStream） |
-| 工作流 | Temporal（local 降级） | 任务队列 `clc`；flowGuardian SLA 看护 |
-| 前端 | React 19 + Ant Design 6 + Redux Toolkit + Vite | 八业务屏 + 工作台三页 + 右侧常驻 AI 工作区 |
+| Engineering baseline | [opic-techbase](https://github.com/Project-Opic/opic-techbase) | Platform-level fork; the baseline carries the technology layer only, while business semantics belong to this center — the center evolves independently and security fixes flow back one-way |
+| Engineering model and visual system | [gopherforge](https://github.com/SuperiorChuo/gopherforge) (MIT) | Technology selection and repository layout baseline (inherited via the baseline fork); the console's glass theme is ported from its frontend with source headers preserved |
+| Identity and authentication | ZITADEL | OIDC provider (Authorization Code + PKCE, JWKS RS256 verification, role-claim mapping and auto-provisioning); `AUTH_MODE=local` keeps a local fallback with graphical captcha |
+| Authorization | Casbin RBAC first, then ZITADEL | Behavior-level permission codes `PERM-FUNC-01..32` (M5 permission matrix) |
+| Workflow runtime | Temporal | Task queue `clc`; the destroy approval runs on the inherited approval engine; `flowGuardian` SLA watchdog applies |
+| Event bus | NATS JetStream | Business events (`opic.clc.business.*`) published side-channel with idempotent stream handling; failures never block the main path |
+| Data and cache | PostgreSQL (provisioned by Pigsty), Redis | PostgreSQL holds business data in the center schema `clc`; Redis is used only for token revocation and degrades silently when disabled |
+| Upstream delivery | O-IGN (ignition center) | Cluster lifecycle actions are delivered step-by-step through the ignition facade (`IGNITION_BASE_URL` / `IGNITION_TOKEN`); the local delivery chain (`DELIVERY_TOOL_*`) is the fallback execution plane |
 
-## 2. 目录结构（业务增量）
+## Repository Map
 
-```
-cluster-center-mcc/
-├── cmd/techbase/main.go            # 组合根(与底座一致)
-├── configs/config.yml              # center_code=clc / schema=clc / NATS 流=clc / Temporal 队列=clc
-├── internal/api/business/clc.go    # 集群域控制器(47 端点,/api/clc/*,写接口挂 PERM-FUNC-XX)
-├── internal/api/routes.go          # 路由注册(客户示例已移除,assistant/sql 新增)
-├── internal/service/
-│   ├── clc_common.go               # 编号生成(CLU/NOD/BND/SNP/TSK/PRB 三位前缀+四位流水,事务级咨询锁)/事件发布
-│   ├── clc_rules.go                # M3 规则等价实现(REF/INV/R 全量,违反给中文提示)
-│   ├── clc_cluster.go              # AGG-CLC-01 集群(FUNC-01/02/05/16/19/20/28/29;销毁审批联动)
-│   ├── clc_node.go                 # AGG-CLC-02 节点(FUNC-06/07/08/21;R-02 占用拦截)
-│   ├── clc_binding.go              # AGG-CLC-03/04 引用与参数(FUNC-13/14/15/22/23;R-01 双写/R-04 派生)
-│   ├── clc_snapshot.go             # AGG-CLC-05 快照(FUNC-17/18/24;R-06 现存性校验)
-│   ├── clc_task.go                 # AGG-CLC-06 任务(FUNC-03/04/09~12/25;R-09 失败写回/R-13 成功落点)
-│   ├── clc_probe.go                # AGG-CLC-07 探活(FUNC-26/27;R-08 双源写回)
-│   ├── clc_params.go               # 平台参数(FUNC-30;REF-01~12 配置)
-│   ├── assistant.go                # AI 助理(本体注册表注入 + 只读 SQL 工具)
-│   ├── seed.go                     # M5 种子(五角色/32 权限/菜单/账号)+ M6 流程导入(node_graph)
-│   └── workbench.go / flow.go      # 审批中心(销毁审批联动 SyncClusterDestroyFromFlow)
-├── migrations/000004_business_clc.sql
-├── models/                         # 七模型 YAML(阶段二产物,m3/m7 新增)
-└── frontend/src/pages/clc/         # 八屏(ClusterManage/NodeManage/OrchManage/RefManage/SnapManage/HealthManage/OpsManage/ParamsManage)
-```
+| Component | Path | Description |
+|---|---|---|
+| **Backend service** | [`cmd/techbase/`](cmd/techbase) | Composition root inherited from the baseline: config → logging → PostgreSQL (goose) → seeds → Redis → Gin → graceful shutdown |
+| **HTTP layer** | [`internal/api/`](internal/api) | `routes.go` route table, `business/clc.go` center controller (47 endpoints under `/api/clc/*`, writes gated by `PERM-FUNC-xx`), plus `assistant` / `sql` route groups |
+| **Business layer** | [`internal/service/`](internal/service) | `clc_common.go` numbering and events, `clc_rules.go` M3 rule equivalents, one file per aggregate (`clc_cluster` / `clc_node` / `clc_binding` / `clc_snapshot` / `clc_task` / `clc_probe` / `clc_params`), `assistant.go` AI workspace, `seed.go` M5 seeds, workbench and flow adapters |
+| **Shared libraries** | [`pkg/`](pkg) | Error codes, logging, Redis, tokens, metrics, health checks, graceful shutdown, event bus, workflow wrappers (inherited from the baseline) |
+| **Migrations** | [`migrations/`](migrations) | Sequential goose migrations; `000004_business_clc.sql` carries the domain DDL (seven aggregate main tables plus the platform-parameter table) |
+| **Ontology models** | [`models/`](models) | Seven-model YAML (M1/M2/M3/M5/M6/M7/MU) |
+| **Frontend** | [`frontend/`](frontend) | React 19 + Ant Design 6 + Redux Toolkit + Vite; eight screens under `src/pages/clc/` plus three workbench pages and the AI workspace |
+| **Deployment** | [`docker-compose.yml`](docker-compose.yml), [`docker-compose.infra.yml`](docker-compose.infra.yml), [`Dockerfile`](Dockerfile) | Separate application stack and data stack, with `BASE_DOMAIN` subdomain routing |
+| **Documentation** | [`docs/`](docs) | Onboarding, deployment, operations, FAQ, LABK8S delivery manual |
 
-## 3. 快速开始
+## Base Software
 
-前置：Go 1.27+、Node ≥ 20.12（推荐 nvm 20.19.5）、可达的 PostgreSQL 16（生产 192.168.3.200:5433）。
+Versions are pinned in `go.mod`, `frontend/package.json`, and the Dockerfiles. Infrastructure versions are those used by the production deployment.
+
+### Runtime and infrastructure
+
+| Component | Version | Upstream repository |
+|---|---|---|
+| Go | 1.27 | <https://github.com/golang/go> |
+| PostgreSQL | 16 | <https://github.com/postgres/postgres> |
+| Redis | 8 (optional) | <https://github.com/redis/redis> |
+| NATS Server | 2.14 (optional) | <https://github.com/nats-io/nats-server> |
+| Temporal | 1.29 (optional) | <https://github.com/temporalio/temporal> |
+| Traefik | v3 | <https://github.com/traefik/traefik> |
+| nginx | (frontend serving) | <https://github.com/nginx/nginx> |
+| Node.js | 20+ (build stage) | <https://github.com/nodejs/node> |
+
+### Backend (Go modules)
+
+| Module | Version | Upstream repository |
+|---|---|---|
+| `github.com/gin-gonic/gin` | v1.12.0 | <https://github.com/gin-gonic/gin> |
+| `gorm.io/gorm` | v1.31.0 | <https://github.com/go-gorm/gorm> |
+| `gorm.io/driver/postgres` | v1.6.0 | <https://github.com/go-gorm/postgres> |
+| `github.com/pressly/goose/v3` | v3.27.3 | <https://github.com/pressly/goose> |
+| `github.com/golang-jwt/jwt/v5` | v5.3.0 | <https://github.com/golang-jwt/jwt> |
+| `github.com/redis/go-redis/v9` | v9.22.0 | <https://github.com/redis/go-redis> |
+| `github.com/nats-io/nats.go` | v1.54.0 | <https://github.com/nats-io/nats.go> |
+| `go.temporal.io/sdk` | v1.49.0 | <https://github.com/temporalio/sdk-go> |
+| `go.uber.org/zap` | v1.28.0 | <https://github.com/uber-go/zap> |
+| `gopkg.in/natefinch/lumberjack.v2` | v2.2.1 | <https://github.com/natefinch/lumberjack> |
+| `golang.org/x/crypto` | v0.57.0 | <https://github.com/golang/crypto> |
+| `gopkg.in/yaml.v3` | v3.0.1 | <https://github.com/go-yaml/yaml> |
+
+### Frontend (npm)
+
+| Package | Version | Upstream repository |
+|---|---|---|
+| `react` / `react-dom` | 19 | <https://github.com/facebook/react> |
+| `antd` | 6 | <https://github.com/ant-design/ant-design> |
+| `@ant-design/icons` | 6 | <https://github.com/ant-design/ant-design-icons> |
+| `@reduxjs/toolkit` | 2.5 | <https://github.com/reduxjs/redux-toolkit> |
+| `react-router-dom` | 7.2 | <https://github.com/remix-run/react-router> |
+| `axios` | 1.8 | <https://github.com/axios/axios> |
+| `@xyflow/react` | 12.3 | <https://github.com/xyflow/xyflow> |
+| `vite` | 8 | <https://github.com/vitejs/vite> |
+| `typescript` | 5.8 | <https://github.com/microsoft/TypeScript> |
+
+All third-party components above ship under permissive licenses (MIT / Apache-2.0 / BSD). Refer to each upstream repository for the exact terms.
+
+## Usage
+
+### Local Development Environment
+
+Prerequisites: Go 1.27+, Node 20.12+ (nvm 20.19.5 recommended), and a reachable PostgreSQL 16 instance (production Pigsty HAProxy at `192.168.3.200:5433`).
 
 ```bash
-# 1) 建中心 schema（首次执行；应用启动也会跑 goose 迁移）
-#    psql: CREATE SCHEMA IF NOT EXISTS clc AUTHORIZATION postgres;
+# 1) Create the center schema (the application also runs goose migrations on startup)
+psql -c "CREATE SCHEMA IF NOT EXISTS clc AUTHORIZATION postgres;"   # database opicdb
 
-# 2) 配置（config.yml 默认指生产 192.168.3.200；口令走环境变量,不入库）
+# 2) Configure (passwords are injected via environment variables only, never in the repo)
 export CENTER_CODE=clc DB_SCHEMA=clc
-export DB_HOST=192.168.3.200 DB_PORT=5433 DB_USER=postgres DB_PASSWORD=<口令> DB_NAME=opicdb
-export REDIS_ENABLED=false                      # 可选,禁用则令牌吊销降级内存
-export EVENTBUS_DRIVER=nats EVENTBUS_URL="nats://192.168.3.200:14222" \
-       EVENTBUS_USERNAME=opic EVENTBUS_PASSWORD=<口令>
-export WORKFLOW_DRIVER=local                    # 或 temporal(队列 clc)
+export DB_HOST=192.168.3.200 DB_PORT=5433 DB_USER=postgres DB_NAME=opicdb
+export REDIS_ENABLED=false
+export EVENTBUS_DRIVER=nats EVENTBUS_URL="nats://192.168.3.200:14222"
+export WORKFLOW_DRIVER=local                    # or temporal (queue clc)
 export METRICS_ENABLED=true APP_PORT=9710
 
-# 3) 启动(自动 goose 迁移 + M5 种子 + M6 流程导入,幂等)
-make dev          # 或 go run ./cmd/techbase → http://localhost:9710
+# 3) Start (goose migrations + M5 seeds + M6 flow import, idempotent)
+make dev          # or go run ./cmd/techbase → http://localhost:9710
 
-# 4) 前端(开发模式)
-make frontend-install && make dev-frontend   # http://localhost:5173,proxy → 9710
+# 4) Frontend (development mode)
+make frontend-install && make dev-frontend   # http://localhost:5173, proxy → 9710
 ```
 
-默认账号（local 模式，验证码登录）：
+Default accounts (`AUTH_MODE=local`, captcha login, password `admin123`):
 
-| 账号 | 口令 | 角色 | 权限口径 |
+| Account | Password | Role | Permission summary |
 |---|---|---|---|
-| `admin` | admin123 | 系统管理员 | 超管位（代码层注入） |
-| `clcadmin` | admin123 | CLC-ROLE-01 集群管理员 | FUNC-01~18 全量维护 + 查询 |
-| `opsadmin` | admin123 | CLC-ROLE-02 平台运维管理员 | 查询 + 平台参数 + 销毁审批（FUNC-31/32） |
-| `auditor` | admin123 | CLC-ROLE-03 集群审计员 | 只读台账 |
-| `viewuser` | admin123 | CLC-ROLE-04 集群只读用户 | 集群/详情/节点/探活/统计 |
+| `admin` | admin123 | System administrator | Super-admin position (injected at code level) |
+| `clcadmin` | admin123 | CLC-ROLE-01 Cluster administrator | FUNC-01~18 full maintenance plus queries |
+| `opsadmin` | admin123 | CLC-ROLE-02 Platform ops administrator | Queries, platform parameters, and destroy approval (FUNC-31/32) |
+| `auditor` | admin123 | CLC-ROLE-03 Cluster auditor | Read-only ledger |
+| `viewuser` | admin123 | CLC-ROLE-04 Cluster read-only user | Clusters / details / nodes / probes / statistics |
 
-（CLC-ROLE-05 下游能力中心为服务身份，仅跨中心集群查询 PERM-FUNC-28，不建账号。）
+CLC-ROLE-05 is a downstream-capability-center service identity (cross-center cluster query `PERM-FUNC-28` only) and has no interactive account.
 
-### 一键全栈（compose）
+One-command full stack (compose):
 
 ```bash
-cp .env.example .env      # 按需修改
-make compose-up           # 数据栈(--wait) → 应用栈:clc.opic-ai.ccoe.tech
+cp .env.example .env
+make compose-up           # data stack (--wait) → app stack: clc.opic-ai.ccoe.tech
 make compose-down
 ```
 
-## 4. 冒烟自测（2026-10-05 实测，schema=clc）
+### Smoke Path
 
 ```bash
-# 基础设施探针(pg/redis/nats/temporal;口令经环境变量注入)
-CENTER_CODE=clc DB_SCHEMA=clc go run ./cmd/smoke
+CENTER_CODE=clc DB_SCHEMA=clc go run ./cmd/smoke   # infrastructure probes (pg/redis/nats/temporal)
 ```
 
-实测记录（app=9710）：
+Verified path (schema `clc`, 2026-10-05): create a cluster through the wizard (FUNC-01, transaction creates the cluster plus four reference rows and the first snapshot) → rule blocks (duplicate name, LEGACY with references, unpaired references, in-cluster IP duplication, asset occupancy) return `SYS1009` with Chinese reasons → the delivery chain lands `RUNNING` with the control-plane entry and credential markers, or writes back `INSTALL_FAILED` with the step index → health probing degrades to `UNREACHABLE` after three consecutive failures and recovers only through explicit recovery → the destroy approval runs `clcadmin` submit → `opsadmin` approve → the task plus cascaded reference cleanup, ending in the retained `DESTROYED` row.
 
-| 项 | 结果 |
+### Building Individual Components
+
+```bash
+make build                 # backend binary → bin/cluster-center-mcc
+make frontend-build        # frontend assets → frontend/dist
+
+make test                  # unit tests
+make lint                  # go vet
+make migrate-status        # migration status
+```
+
+## Deployment
+
+Production deployment runs through `make deploy-prod`: it rsyncs the source to the target host, builds the images there, copies compose and config files, then runs `docker compose up -d`. Migrations, seeds, and the M6 flow import execute automatically when the container starts.
+
+```bash
+make deploy-prod           # build, deploy, start
+make deploy-prod-down      # stop the application stack
+```
+
+Key environment variables (see the [Deployment Guide](docs/DEPLOYMENT.md) for the full list):
+
+| Variable | Description |
 |---|---|
-| `/health`、`/health/ready` | 200 / ready；goose 迁移至版本 4；eventbus(nats) 流 clc 就绪 |
-| 登录 | admin/admin123 验证码（SVG text 拼接）登录通过；viewuser/opsadmin 各角色登录通过 |
-| 创建集群（FUNC-01） | 事务内 集群 + 引用台账×4 + 首快照；CLU-20261005-xxxx 编号 |
-| 规则阻断×5 | INV-01 重名 / INV-04 LEGACY+引用 / INV-05 引用不成对 / INV-10 集群内 IP 重复 / R-02 资产占用 → `SYS1009` 中文提示 |
-| 交付链路 | 安装成功 → RUNNING + 主控入口/凭据标识登记（R-13）；注入失败 → INSTALL_FAILED + 步骤索引写回（R-09/INV-30）；续跑 → 从失败步骤继续（INV-03） |
-| 健康双源（R-08） | 连续失败 3 次达阈值 → UNREACHABLE；不覆盖 DEGRADED；显式恢复（R-11 仅 DEGRADED 可调用）→ HEALTHY |
-| 引用与参数 | 引用调整 → 双写（R-01）+ 镜像源参数派生 4 项待同步（R-04）→ FUNC-15 确认清除 + 快照 |
-| 销毁审批全链路 | clcadmin 提交（影响面强制展示 + 保存草稿/提交双按钮）→ opsadmin 待办通过 → DESTROY 任务 + 引用台账级联清理 + 参数上下文清理 → DESTROYED 终态保留行 |
-| 权限矩阵 | viewuser 创建集群 → `SYS9103 无权限执行该操作`；查询接口 200 |
-| AI 只读 SQL | 合法 SELECT 表格返回；`sys_user` 白名单外拒绝；DELETE 拒绝；无 LIMIT 自动追加 200 |
-| 编译 | `go build ./...` + `go vet ./...` 通过；前端 `tsc --noEmit` + `npm run build` 通过 |
+| `CENTER_CODE` / `DB_SCHEMA` | Center domain code and schema (isolation root) |
+| `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/DB_SSLMODE` | PostgreSQL connection (Pigsty HAProxy) |
+| `APP_PORT` | HTTP port |
+| `EVENTBUS_DRIVER/URL/USERNAME/PASSWORD/NATS_STREAM/NATS_SUBJECT_PREFIX` | Event bus (default `inproc`, derived stream `clc` and prefix) |
+| `WORKFLOW_DRIVER/ADDRESS/NAMESPACE/TASK_QUEUE` | Workflow runtime (`local` / queue `clc`) |
+| `REDIS_ENABLED/REDIS_HOST/REDIS_PORT/REDIS_PASSWORD` | Redis (logout revocation blacklist) |
+| `METRICS_ENABLED` / `JWT_SECRET` / `AUTH_MODE` | Observability / session secret / auth mode |
+| `DELIVERY_TOOL_BIN` / `DELIVERY_TOOL_DIR` / `DELIVERY_KUBECONFIG_ENV` / `DELIVERY_KUBECONFIG_PATH_PATTERN` | Local delivery chain: delivery tool binary, working directory, and execution-plane credential injection (unset ⇒ `LOCAL` cannot be registered, REF-16) |
+| `IGNITION_BASE_URL` / `IGNITION_TOKEN` | Remote delivery chain: ignition-center facade address and service token (unset ⇒ `REMOTE_EXECUTOR` cannot be registered, INV-46) |
 
-## 5. 配置（环境变量 > config.yml）
+### Distribution Channels
 
-| 环境变量 | 说明 | 默认 |
-|---|---|---|
-| `CENTER_CODE` | 中心域码（隔离三件套根） | clc |
-| `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME/DB_SCHEMA/DB_SSLMODE` | 数据面（Pigsty haproxy） | config.yml |
-| `APP_PORT` | HTTP 端口 | 9680 |
-| `EVENTBUS_DRIVER/URL/USERNAME/PASSWORD/NATS_STREAM/NATS_SUBJECT_PREFIX` | 事件总线 | inproc / 派生 |
-| `WORKFLOW_DRIVER/ADDRESS/NAMESPACE/TASK_QUEUE` | 工作流 | local / clc |
-| `REDIS_ENABLED/REDIS_HOST/REDIS_PORT/REDIS_PASSWORD` | Redis（登出吊销黑名单） | disabled |
-| `METRICS_ENABLED` / `JWT_SECRET` / `AUTH_MODE` | 可观测 / 会话密钥 / 认证模式 | true / 见生产 .env / local |
-| `DELIVERY_TOOL_BIN` / `DELIVERY_TOOL_DIR` / `DELIVERY_KUBECONFIG_ENV` / `DELIVERY_KUBECONFIG_PATH_PATTERN` | 本地交付链路：交付工具可执行文件、工作目录与执行面凭据注入方式（未配置 ⇒ `LOCAL` 不可登记，REF-16） | config.yml |
-| `IGNITION_BASE_URL` / `IGNITION_TOKEN` | 远程交付链路：点火中心交付门面地址与服务令牌（对端 `delivery.facade_token`；未配置 ⇒ `REMOTE_EXECUTOR` 不可登记，INV-46） | 空 |
+Images are pushed to the internal Harbor registry: backend `192.168.3.200:18700/opic/clc`, frontend `192.168.3.200:18700/opic/clc-frontend` (`make harbor-push`). The production subdomain is `clc.opic-ai.ccoe.tech`.
 
-平台表保留口径：`sys_*`、`flow_*`、`audit_logs`、`sys_notice`、`temporalflow_*`、`ai_*`（000001~000003）；
-底座客户申请示例表（customer_application）与页面已移除。
+## Contributing
 
-## 6. 文档导航
+Before opening a pull request, please confirm:
 
-| 文档 | 内容 |
-|---|---|
-| [新人培训入门](docs/ONBOARDING.md) | 背景/架构/环境/首次启动/开发流程 |
-| [编译与部署指南](docs/DEPLOYMENT.md) | 构建、生产部署、迁移回滚、fork checklist |
-| [运维手册](docs/OPERATIONS.md) | 健康检查/监控告警/日志/备份/凭据/故障速查 |
-| [FAQ](docs/FAQ.md) | 实战踩坑速查（SSO/SQL/部署/前端/AI） |
+1. `go build ./...`, `go vet ./...`, and `cd frontend && npm run build` all pass.
+2. Any added or changed endpoint keeps the `returnInfo` envelope and OPIC O-ARC error codes intact.
+3. Schema changes ship as a new goose migration (never `AutoMigrate`), with a working `Down`.
+4. Rule violations (`INV-*` / `R-*`) keep their Chinese explanations in the service layer; numbering uses the domain prefixes with transaction-level advisory locks against duplicates.
+
+Branch names and commit messages follow `feat|fix|docs|chore(scope): summary`.
+
+By submitting a contribution, you agree to license it under the [Mulan PSL v2](LICENSE).
+
+## Roadmap
+
+This repository does not maintain a long-range feature roadmap. Planned work and progress are tracked in the open:
+
+- **Recently completed**: the seven-model landing with all rules (REF / INV / R) implemented in the service layer, the seven aggregates with their 47 endpoints and 32 permission codes, the LABK8S delivery user manual, and the smoke-verified full destroy-approval chain.
+- **Known gaps**: the O-IGN remote delivery facade is wired for lifecycle actions; remaining upstream channels (asset existence checks, certificate issue/revocation) follow the ignition center's own landing.
+- **Limitations**: the local delivery chain and the remote ignition facade are two registration kinds (`LOCAL` / `REMOTE_EXECUTOR`) with disjoint prerequisites; snapshot rollback abandons references by design and never deletes history rows.
+
+## Community
+
+- **Issues and suggestions**: open a repository issue with reproduction steps and environment details (version, migration number, deployment mode).
+- **Internal channels**: the OPIC platform team; production incidents go through the on-call channel.
+
+## Security & Support
+
+- **Reporting a vulnerability**: please do not open a public issue; contact the platform team directly. The security baseline includes Casbin RBAC with ZITADEL fallback, `SYS9103` permission denials on writes, a read-only SQL whitelist with forced `LIMIT`, and audit logs for every administrative write.
+- **Support scope**: the current main branch and the deployed production version.
+
+## License
+
+Copyright © 2026 wjluo
+
+This project is licensed under the **Mulan Permissive Software License, Version 2 (Mulan PSL v2)**. The full text is in [`LICENSE`](LICENSE) and is also available at <http://license.coscl.org.cn/MulanPSL2>.
+
+Subject to the terms of the license, you may copy, use, modify, and distribute this software, including for commercial purposes; copyright and license notices must be retained when redistributing. Section 3 grants no trademark license, and Section 5 provides the software on an "AS IS" basis without warranties of any kind.
+
+### Third-Party and Ported Code
+
+- **opic-techbase** (Mulan PSL v2): this repository is a platform-level fork; the technology layer inherits the baseline, and the baseline's license continues to apply to that portion.
+- **gopherforge** (MIT): the engineering pattern and technology selection baseline, and the admin console's visual system (glass theme, login page, dashboard styling) is ported from its frontend, with source headers preserved in the ported files. Its MIT notice continues to apply to that portion.
